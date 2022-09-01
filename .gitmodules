@@ -1,0 +1,3 @@
+[submodule "qemu-tcti"]
+	path = qemu-tcti
+	url = https://github.com/ktemkin/qemu
