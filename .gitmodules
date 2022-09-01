@@ -1,3 +1,6 @@
 [submodule "qemu-tcti"]
 	path = qemu-tcti
 	url = https://github.com/ktemkin/qemu
+[submodule "ish"]
+	path = ish
+	url = git@github.com:ktemkin/ish.git

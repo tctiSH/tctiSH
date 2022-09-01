@@ -15,6 +15,8 @@ fi
 
 # If we don't have a TCTI install, create one.
 if [ ! -f ../qemu-tcti/build/qemu-system-${TCTI_ARCH} ]; then
+	brew install libslirp
+
 	pushd ../qemu-tcti
 		# Set things up to build TCTI...
 		./configure \
