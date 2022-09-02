@@ -14,7 +14,6 @@ import SwiftTerm
 
 class ViewController: UIViewController {
     var tv: TerminalView!
-    var transparent: Bool = false
     var launcher: QEMULauncher?
     
     var useAutoLayout: Bool {
@@ -77,41 +76,24 @@ class ViewController: UIViewController {
     }
     
     override func viewDidLoad() {
+        
+        // To minimize startup time, start our kernel before anything else.
+        launcher = QEMULauncher()
+        launcher?.startQemuThread()
+        
         super.viewDidLoad()
         
-        // Create our terminal view.
+        // Start up our terminal emulator, which will be used for SSH.
         tv = SshTerminalView(frame: makeFrame (keyboardDelta: 0))
-        launcher = QEMULauncher()
-        
-        if transparent {
-            let x = UIImage (contentsOfFile: "/tmp/Lucia.png")!.cgImage
-            //let x = UIImage (systemName: "star")!.cgImage
-            let layer = CALayer()
-            tv.isOpaque = false
-            tv.backgroundColor = UIColor.clear
-            tv.nativeBackgroundColor = UIColor.clear
-            layer.contents = x
-            layer.frame = tv.bounds
-            view.layer.addSublayer(layer)
-        }
-        
         view.addSubview(tv)
         setupKeyboardMonitor()
         tv.becomeFirstResponder()
-        
-        // Start the QEMU-TCTI instance that will provide our backend.
-        self.tv.feed(text: "Launching tctiSH...\r\n")
-        launcher?.startQemuThread()
-        self.tv.feed(text: "Spawning terminal...\r\n")
     }
     
     override func viewWillLayoutSubviews() {
         if useAutoLayout, #available(iOS 15.0, *) {
         } else {
             tv.frame = makeFrame (keyboardDelta: keyboardDelta)
-        }
-        if transparent {
-            tv.backgroundColor = UIColor.clear
         }
     }
 }

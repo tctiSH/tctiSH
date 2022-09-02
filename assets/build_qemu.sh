@@ -2,9 +2,14 @@
 
 brew install libslirp
 
-pushd ../qemu-tcti
-	# Set things up to build TCTI...
-	./configure \
+export CFLAGS=""
+export LDFLAGS=""
+
+mkdir -p ../qemu-tcti/build_mac
+pushd ../qemu-tcti/build_mac
+
+	# Set things up to build QEMU...
+	../configure \
 		--disable-linux-user \
 		--disable-bsd-user \
 		--disable-guest-agent \
@@ -14,12 +19,8 @@ pushd ../qemu-tcti
 		--disable-sdl \
 		--disable-gtk \
 		--smbd=/opt/homebrew/sbin/samba-dot-org-smbd \
-		--target-list=x86_64-softmmu \
-		--enable-tcg-tcti \
-		--enable-shared-lib \
+		--target-list=x86_64-softmmu
 
-	# Build our support packages; TCTI itself will be automatically built below.
-	pushd build
-		ninja qemu-img
-	popd
+	# ... and build QEMU.
+	ninja qemu-img qemu-system-x86_64
 popd

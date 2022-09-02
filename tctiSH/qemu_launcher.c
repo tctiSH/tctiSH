@@ -1,9 +1,9 @@
 //
-//  qemu_launcher.c
-//  tctiSH
+// Low-level QEMU launcher.
+// Creates a thread that implements lightweight virtualization atop TCTI.
 //
 //  Created by Kate Temkin on 9/1/22.
-//  Copyright © 2022 Kate Temkin. All rights reserved.
+//  Copyright (c) 2022 Kate Temkin.
 //
 
 #include <stdio.h>
@@ -44,15 +44,20 @@ static void* qemu_thread(void *raw_args) {
 }
 
 /// Spawns a backgroudn thread that runs QEMU.
-void run_background_qemu(const char* kernel_path, const char* initrd_path, const char* bios_path) {
+void run_background_qemu(
+                         const char* kernel_path,
+                         const char* initrd_path,
+                         const char* bios_path,
+                         const char* memstate_path)
+{
     
-    //char disk_argument[2048];
+    // FIXME: clean this whole thing up
     
-    // Create our disk argument.
-    /*
-    snprintf(disk_argument, sizeof(disk_argument), "media=disk,id=drive1,if=none,file=%s,discard=unmap,detect-zeroes=unmap",
-             disk_path);
-     */
+    static char memstate_args[2048];
+    
+    // Create our disk arguments
+    snprintf(memstate_args, sizeof(memstate_args), "media=disk,id=memstate,if=none,file=%s",
+             memstate_path);
     
     pthread_t thread;
     pthread_attr_t qosAttribute;
@@ -78,10 +83,12 @@ void run_background_qemu(const char* kernel_path, const char* initrd_path, const
         "-display", "none",
         "-kernel", kernel_filename,
         "-initrd", initrd_filename,
-        "-m", "4G",
+        "-m", "1G",
         "-device", "virtio-net-pci,id=net1,netdev=net0",
-        "-netdev", "user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100,hostfwd=tcp::10022-:22,hostfwd=tcp::10023-:23",
+        "-netdev", "user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100,hostfwd=tcp::10022-:22",
         "-device", "virtio-rng-pci",
+        "-drive", memstate_args,
+        "-loadvm", "nodisk",
         //"-device", "virtio-blk-pci,id=disk1,drive=drive1",
         //"-drive", disk_argument,
         //"-append", "tcti_disk=file",

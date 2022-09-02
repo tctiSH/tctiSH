@@ -1,9 +1,9 @@
 //
-//  UIKitSshTerminalView.swift
-//  iOS
+// Terminal view for tctiSH.
+// Provides an internal SSH connection to our lightweight VM.
 //
-//  Created by Miguel de Icaza on 4/22/20.
-//  Copyright © 2020 Miguel de Icaza. All rights reserved.
+//  Copyright © 2022 Kate Temkin <k@ktemkin.com>.
+//  Copyright © 2020 Miguel de Icaza.
 //
 
 import Foundation
@@ -11,8 +11,6 @@ import UIKit
 import SwiftTerm
 import SwiftSH
 import Combine
-
-
 
 
 public class SshTerminalView: TerminalView, TerminalViewDelegate {
@@ -27,12 +25,14 @@ public class SshTerminalView: TerminalView, TerminalViewDelegate {
     
     public override init (frame: CGRect)
     {
-        super.init (frame: frame, font: UIFont(name: "Menlo-Regular", size: 18))
+        super.init (frame: frame, font: UIFont(name: "Menlo-Regular", size: 16))
         terminalDelegate = self
+        
+        layer.borderWidth = 5
         
         // FIXME: This is just a workaround until we have vm image save/loading.
         // Set up a timer to periodically poll our connection.
-        timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+        timer = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
         subscription = timer?.sink(receiveValue: { _ in
             if self.connected {
                 self.timer?.upstream.connect().cancel()
@@ -40,19 +40,58 @@ public class SshTerminalView: TerminalView, TerminalViewDelegate {
                 self.connect()
             }
         })
-        
+       
+        // Create the SSH provider we'll use to connect to our instance.
+        //
+        // Using this over e.g. serial mode ensures we have an out-of-band
+        // connection for e.g. terminal resizes to travel over, so SIGWINCH
+        // works correctly.
         shell = try? SSHShell(sshLibrary: Libssh2.self,
                                   host: "localhost",
                                   port: 10022,
                                   terminal: "xterm-256color")
-        shell?.log.enabled = true
+        shell?.log.enabled = false
     }
+    
+    /// Sets up use of the user's theme.
+    public func setUpTheming() {
+        // FIXME: have this be user-specifiable
+        let theme = DefaultThemes.solzariedDark
+        self.installColors(theme.ansi)
+        
+        let t = getTerminal()
+        
+        t.installPalette(colors: theme.ansi)
+        t.foregroundColor = theme.foreground
+        t.backgroundColor = theme.background
+        t.updateFullScreen()
+        
+        self.nativeBackgroundColor = makeUIColor(theme.background)
+        self.nativeForegroundColor = makeUIColor(theme.foreground)
+        self.layer.backgroundColor = makeUIColor(theme.background).cgColor
+        self.layer.borderColor     = self.layer.backgroundColor
+        self.layer.shadowColor     = self.layer.backgroundColor
+        self.backgroundColor       = self.nativeBackgroundColor
+        
+        self.selectedTextBackgroundColor = makeUIColor (theme.selectionColor)
+        self.caretColor = makeUIColor (theme.cursor)
+    }
+    
+    
+    private func makeUIColor(_ color: SwiftTerm.Color) -> UIColor
+    {
+        UIColor (red: CGFloat (color.red) / 65535.0,
+                 green: CGFloat (color.green) / 65535.0,
+                 blue: CGFloat (color.blue) / 65535.0,
+                 alpha: 1.0)
+    }
+    
   
-    
-    
     func connect()
     {
         if let s = shell {
+            setUpTheming()
+            
             s.withCallback { [unowned self] (data: Data?, error: Data?) in
                 if let d = data {
                     let sliced = Array(d) [0...]
@@ -70,9 +109,7 @@ public class SshTerminalView: TerminalView, TerminalViewDelegate {
                         let end = min (next+blocksize, last)
                         let chunk = sliced [next..<end]
 
-                        //DispatchQueue.main.sync {
-                            self.feed(byteArray: chunk)
-                        //}
+                        self.feed(byteArray: chunk)
                         next = end
                     }
                 }
