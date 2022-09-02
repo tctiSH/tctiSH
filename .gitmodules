@@ -4,3 +4,6 @@
 [submodule "ish"]
 	path = ish
 	url = git@github.com:ktemkin/ish.git
+[submodule "third-party/SwiftTerm"]
+	path = third-party/SwiftTerm
+	url = https://github.com/migueldeicaza/SwiftTerm.git

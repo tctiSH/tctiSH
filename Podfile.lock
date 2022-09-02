@@ -1,0 +1,26 @@
+PODS:
+  - SwiftSH (0.1.2):
+    - SwiftSH/Libssh2 (= 0.1.2)
+  - SwiftSH/Core (0.1.2)
+  - SwiftSH/Libssh2 (0.1.2):
+    - SwiftSH/Core
+
+DEPENDENCIES:
+  - SwiftSH (from `https://github.com/Frugghi/SwiftSH.git`, branch `master`)
+
+EXTERNAL SOURCES:
+  SwiftSH:
+    :branch: master
+    :git: https://github.com/Frugghi/SwiftSH.git
+
+CHECKOUT OPTIONS:
+  SwiftSH:
+    :commit: 67776928e8fa8b5817c17ecb502aaa53ad9abfdc
+    :git: https://github.com/Frugghi/SwiftSH.git
+
+SPEC CHECKSUMS:
+  SwiftSH: af82ce3d917de027cd8d9fdb2cea652137dace0d
+
+PODFILE CHECKSUM: d0d2834d2c41c33cd4052956412a7d041992d6e9
+
+COCOAPODS: 1.11.3

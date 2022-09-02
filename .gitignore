@@ -1,2 +1,9 @@
+.DS_Store
+
+# Linux assets.
 *.qcow*
 ramdisk
+
+# Dependency build folders.
+sysroot-iOS-arm64/
+build-iOS-arm64/

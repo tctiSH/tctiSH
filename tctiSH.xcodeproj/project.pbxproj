@@ -1,0 +1,622 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 52;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		4936D22124512AF2005CEE27 /* UIKitSshTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4936D22024512AF2005CEE27 /* UIKitSshTerminalView.swift */; };
+		49BD1A5E224207B5005A2252 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49BD1A5D224207B5005A2252 /* AppDelegate.swift */; };
+		49BD1A60224207B5005A2252 /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49BD1A5F224207B5005A2252 /* ViewController.swift */; };
+		49BD1A63224207B5005A2252 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 49BD1A61224207B5005A2252 /* Main.storyboard */; };
+		49BD1A65224207B7005A2252 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 49BD1A64224207B7005A2252 /* Assets.xcassets */; };
+		49BD1A68224207B7005A2252 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 49BD1A66224207B7005A2252 /* LaunchScreen.storyboard */; };
+		8DA7A63728C19A4900FDBD78 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 4959FFDA2447F971001F42C0 /* SwiftTerm */; };
+		8DE8208628C167070035686B /* QEMULauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DE8208528C167070035686B /* QEMULauncher.swift */; };
+		8DE8208E28C176310035686B /* qemu_launcher.c in Sources */ = {isa = PBXBuildFile; fileRef = 8DE8208D28C176310035686B /* qemu_launcher.c */; };
+		8DE8209028C180770035686B /* initrd.img in Resources */ = {isa = PBXBuildFile; fileRef = 8DE8208F28C180770035686B /* initrd.img */; };
+		8DE8209228C1808F0035686B /* bzImage in Resources */ = {isa = PBXBuildFile; fileRef = 8DE8209128C1808F0035686B /* bzImage */; };
+		8DF5F02928C1BCC800FB1F1C /* qemu-x86_64-softmmu.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F02828C1BCC800FB1F1C /* qemu-x86_64-softmmu.framework */; };
+		8DF5F02A28C1BCC900FB1F1C /* qemu-x86_64-softmmu.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F02828C1BCC800FB1F1C /* qemu-x86_64-softmmu.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		8DF5F02C28C1BCE900FB1F1C /* qemu-x86_64-softmmu.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F02828C1BCC800FB1F1C /* qemu-x86_64-softmmu.framework */; };
+		8DF5F03728C1BCEB00FB1F1C /* gmodule-2.0.0.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F02D28C1BCEA00FB1F1C /* gmodule-2.0.0.framework */; };
+		8DF5F03828C1BCEC00FB1F1C /* gmodule-2.0.0.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F02D28C1BCEA00FB1F1C /* gmodule-2.0.0.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		8DF5F03928C1BCEC00FB1F1C /* glib-2.0.0.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F02E28C1BCEA00FB1F1C /* glib-2.0.0.framework */; };
+		8DF5F03A28C1BCEC00FB1F1C /* glib-2.0.0.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F02E28C1BCEA00FB1F1C /* glib-2.0.0.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		8DF5F03B28C1BCEC00FB1F1C /* gthread-2.0.0.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F02F28C1BCEA00FB1F1C /* gthread-2.0.0.framework */; };
+		8DF5F03C28C1BCEC00FB1F1C /* gthread-2.0.0.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F02F28C1BCEA00FB1F1C /* gthread-2.0.0.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		8DF5F03D28C1BCEC00FB1F1C /* iconv.2.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03028C1BCEA00FB1F1C /* iconv.2.framework */; };
+		8DF5F03E28C1BCED00FB1F1C /* iconv.2.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03028C1BCEA00FB1F1C /* iconv.2.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		8DF5F03F28C1BCED00FB1F1C /* intl.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03128C1BCEA00FB1F1C /* intl.framework */; };
+		8DF5F04028C1BCED00FB1F1C /* intl.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03128C1BCEA00FB1F1C /* intl.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		8DF5F04128C1BCED00FB1F1C /* pixman-1.0.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03228C1BCEB00FB1F1C /* pixman-1.0.framework */; };
+		8DF5F04228C1BCEE00FB1F1C /* pixman-1.0.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03228C1BCEB00FB1F1C /* pixman-1.0.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		8DF5F04328C1BCEE00FB1F1C /* ffi.7.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03328C1BCEB00FB1F1C /* ffi.7.framework */; };
+		8DF5F04428C1BCEE00FB1F1C /* ffi.7.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03328C1BCEB00FB1F1C /* ffi.7.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		8DF5F04528C1BCEF00FB1F1C /* charset.1.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03428C1BCEB00FB1F1C /* charset.1.framework */; };
+		8DF5F04628C1BCEF00FB1F1C /* charset.1.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03428C1BCEB00FB1F1C /* charset.1.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		8DF5F04728C1BCF000FB1F1C /* gobject-2.0.0.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03528C1BCEB00FB1F1C /* gobject-2.0.0.framework */; };
+		8DF5F04828C1BCF000FB1F1C /* gobject-2.0.0.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03528C1BCEB00FB1F1C /* gobject-2.0.0.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		8DF5F04928C1BCF000FB1F1C /* gio-2.0.0.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03628C1BCEB00FB1F1C /* gio-2.0.0.framework */; };
+		8DF5F04A28C1BCF100FB1F1C /* gio-2.0.0.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03628C1BCEB00FB1F1C /* gio-2.0.0.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		8DF5F04C28C1C07D00FB1F1C /* bios-256k.bin in Resources */ = {isa = PBXBuildFile; fileRef = 8DF5F04B28C1C07D00FB1F1C /* bios-256k.bin */; };
+		8DF5F05028C1C16000FB1F1C /* linuxboot_dma.bin in Resources */ = {isa = PBXBuildFile; fileRef = 8DF5F04D28C1C16000FB1F1C /* linuxboot_dma.bin */; };
+		8DF5F05128C1C16000FB1F1C /* kvmvapic.bin in Resources */ = {isa = PBXBuildFile; fileRef = 8DF5F04E28C1C16000FB1F1C /* kvmvapic.bin */; };
+		8DF5F05228C1C16000FB1F1C /* vgabios-stdvga.bin in Resources */ = {isa = PBXBuildFile; fileRef = 8DF5F04F28C1C16000FB1F1C /* vgabios-stdvga.bin */; };
+		8DF5F05428C1C18200FB1F1C /* efi-virtio.rom in Resources */ = {isa = PBXBuildFile; fileRef = 8DF5F05328C1C18200FB1F1C /* efi-virtio.rom */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		8DF5F02B28C1BCC900FB1F1C /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				8DF5F02A28C1BCC900FB1F1C /* qemu-x86_64-softmmu.framework in Embed Frameworks */,
+				8DF5F03C28C1BCEC00FB1F1C /* gthread-2.0.0.framework in Embed Frameworks */,
+				8DF5F04828C1BCF000FB1F1C /* gobject-2.0.0.framework in Embed Frameworks */,
+				8DF5F03A28C1BCEC00FB1F1C /* glib-2.0.0.framework in Embed Frameworks */,
+				8DF5F03828C1BCEC00FB1F1C /* gmodule-2.0.0.framework in Embed Frameworks */,
+				8DF5F03E28C1BCED00FB1F1C /* iconv.2.framework in Embed Frameworks */,
+				8DF5F04428C1BCEE00FB1F1C /* ffi.7.framework in Embed Frameworks */,
+				8DF5F04228C1BCEE00FB1F1C /* pixman-1.0.framework in Embed Frameworks */,
+				8DF5F04028C1BCED00FB1F1C /* intl.framework in Embed Frameworks */,
+				8DF5F04628C1BCEF00FB1F1C /* charset.1.framework in Embed Frameworks */,
+				8DF5F04A28C1BCF100FB1F1C /* gio-2.0.0.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		4936D22024512AF2005CEE27 /* UIKitSshTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIKitSshTerminalView.swift; sourceTree = "<group>"; };
+		49BD1A5A224207B5005A2252 /* tctiSH.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = tctiSH.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		49BD1A5D224207B5005A2252 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		49BD1A5F224207B5005A2252 /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewController.swift; sourceTree = "<group>"; };
+		49BD1A62224207B5005A2252 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
+		49BD1A64224207B7005A2252 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		49BD1A67224207B7005A2252 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
+		49BD1A69224207B7005A2252 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		8DE8208528C167070035686B /* QEMULauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QEMULauncher.swift; sourceTree = "<group>"; };
+		8DE8208728C16AA70035686B /* libqemu-x86_64-softmmu.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libqemu-x86_64-softmmu.dylib"; path = "qemu-tcti/build/libqemu-x86_64-softmmu.dylib"; sourceTree = "<group>"; };
+		8DE8208B28C176310035686B /* tctiSH-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "tctiSH-Bridging-Header.h"; sourceTree = "<group>"; };
+		8DE8208C28C176310035686B /* qemu_launcher.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = qemu_launcher.h; sourceTree = "<group>"; };
+		8DE8208D28C176310035686B /* qemu_launcher.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = qemu_launcher.c; sourceTree = "<group>"; };
+		8DE8208F28C180770035686B /* initrd.img */ = {isa = PBXFileReference; lastKnownFileType = file; name = initrd.img; path = assets/initrd.img; sourceTree = "<group>"; };
+		8DE8209128C1808F0035686B /* bzImage */ = {isa = PBXFileReference; lastKnownFileType = file; name = bzImage; path = assets/bzImage; sourceTree = "<group>"; };
+		8DE8209328C199290035686B /* lib */ = {isa = PBXFileReference; lastKnownFileType = folder; name = lib; path = "assets/sysroot-iOS-arm64/lib"; sourceTree = "<group>"; };
+		8DE8209628C19A280035686B /* libqemu-x86_64-softmmu.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libqemu-x86_64-softmmu.dylib"; path = "assets/sysroot-iOS-arm64/lib/libqemu-x86_64-softmmu.dylib"; sourceTree = "<group>"; };
+		8DEC8CE828C139B60017AC30 /* third-party */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "third-party"; sourceTree = "<group>"; };
+		8DEC8CE928C139C10017AC30 /* SwiftTerm */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = SwiftTerm; path = "third-party/SwiftTerm"; sourceTree = "<group>"; };
+		8DF5F01B28C1A31B00FB1F1C /* libpixman-1.0.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libpixman-1.0.dylib"; path = "assets/sysroot-iOS-arm64/lib/libpixman-1.0.dylib"; sourceTree = "<group>"; };
+		8DF5F01E28C1A34F00FB1F1C /* libpng16.16.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libpng16.16.dylib; path = "assets/sysroot-iOS-arm64/lib/libpng16.16.dylib"; sourceTree = "<group>"; };
+		8DF5F02128C1A37100FB1F1C /* libjpeg.62.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libjpeg.62.dylib; path = "assets/sysroot-iOS-arm64/lib/libjpeg.62.dylib"; sourceTree = "<group>"; };
+		8DF5F02428C1AB1200FB1F1C /* libzstd.1.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libzstd.1.dylib; path = "assets/sysroot-iOS-arm64/lib/libzstd.1.dylib"; sourceTree = "<group>"; };
+		8DF5F02828C1BCC800FB1F1C /* qemu-x86_64-softmmu.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "qemu-x86_64-softmmu.framework"; path = "sysroot-iOS-arm64/Frameworks/qemu-x86_64-softmmu.framework"; sourceTree = "<group>"; };
+		8DF5F02D28C1BCEA00FB1F1C /* gmodule-2.0.0.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "gmodule-2.0.0.framework"; path = "sysroot-iOS-arm64/Frameworks/gmodule-2.0.0.framework"; sourceTree = "<group>"; };
+		8DF5F02E28C1BCEA00FB1F1C /* glib-2.0.0.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "glib-2.0.0.framework"; path = "sysroot-iOS-arm64/Frameworks/glib-2.0.0.framework"; sourceTree = "<group>"; };
+		8DF5F02F28C1BCEA00FB1F1C /* gthread-2.0.0.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "gthread-2.0.0.framework"; path = "sysroot-iOS-arm64/Frameworks/gthread-2.0.0.framework"; sourceTree = "<group>"; };
+		8DF5F03028C1BCEA00FB1F1C /* iconv.2.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = iconv.2.framework; path = "sysroot-iOS-arm64/Frameworks/iconv.2.framework"; sourceTree = "<group>"; };
+		8DF5F03128C1BCEA00FB1F1C /* intl.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = intl.framework; path = "sysroot-iOS-arm64/Frameworks/intl.framework"; sourceTree = "<group>"; };
+		8DF5F03228C1BCEB00FB1F1C /* pixman-1.0.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "pixman-1.0.framework"; path = "sysroot-iOS-arm64/Frameworks/pixman-1.0.framework"; sourceTree = "<group>"; };
+		8DF5F03328C1BCEB00FB1F1C /* ffi.7.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ffi.7.framework; path = "sysroot-iOS-arm64/Frameworks/ffi.7.framework"; sourceTree = "<group>"; };
+		8DF5F03428C1BCEB00FB1F1C /* charset.1.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = charset.1.framework; path = "sysroot-iOS-arm64/Frameworks/charset.1.framework"; sourceTree = "<group>"; };
+		8DF5F03528C1BCEB00FB1F1C /* gobject-2.0.0.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "gobject-2.0.0.framework"; path = "sysroot-iOS-arm64/Frameworks/gobject-2.0.0.framework"; sourceTree = "<group>"; };
+		8DF5F03628C1BCEB00FB1F1C /* gio-2.0.0.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "gio-2.0.0.framework"; path = "sysroot-iOS-arm64/Frameworks/gio-2.0.0.framework"; sourceTree = "<group>"; };
+		8DF5F04B28C1C07D00FB1F1C /* bios-256k.bin */ = {isa = PBXFileReference; lastKnownFileType = archive.macbinary; name = "bios-256k.bin"; path = "sysroot-iOS-arm64/share/qemu/bios-256k.bin"; sourceTree = "<group>"; };
+		8DF5F04D28C1C16000FB1F1C /* linuxboot_dma.bin */ = {isa = PBXFileReference; lastKnownFileType = archive.macbinary; name = linuxboot_dma.bin; path = "sysroot-iOS-arm64/share/qemu/linuxboot_dma.bin"; sourceTree = "<group>"; };
+		8DF5F04E28C1C16000FB1F1C /* kvmvapic.bin */ = {isa = PBXFileReference; lastKnownFileType = archive.macbinary; name = kvmvapic.bin; path = "sysroot-iOS-arm64/share/qemu/kvmvapic.bin"; sourceTree = "<group>"; };
+		8DF5F04F28C1C16000FB1F1C /* vgabios-stdvga.bin */ = {isa = PBXFileReference; lastKnownFileType = archive.macbinary; name = "vgabios-stdvga.bin"; path = "sysroot-iOS-arm64/share/qemu/vgabios-stdvga.bin"; sourceTree = "<group>"; };
+		8DF5F05328C1C18200FB1F1C /* efi-virtio.rom */ = {isa = PBXFileReference; lastKnownFileType = file; name = "efi-virtio.rom"; path = "sysroot-iOS-arm64/share/qemu/efi-virtio.rom"; sourceTree = "<group>"; };
+		9A05E33B868D09494792FFFD /* Pods-tctiSH.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-tctiSH.debug.xcconfig"; path = "Target Support Files/Pods-tctiSH/Pods-tctiSH.debug.xcconfig"; sourceTree = "<group>"; };
+		B59ED421CAD9966D0A97855E /* Pods-tctiSH.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-tctiSH.release.xcconfig"; path = "Target Support Files/Pods-tctiSH/Pods-tctiSH.release.xcconfig"; sourceTree = "<group>"; };
+		C9FFBC130DA1A3B7A450025B /* Pods_tctiSH.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_tctiSH.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		8DE8209528C199FB0035686B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8DF5F03D28C1BCEC00FB1F1C /* iconv.2.framework in Frameworks */,
+				8DF5F04328C1BCEE00FB1F1C /* ffi.7.framework in Frameworks */,
+				8DF5F03F28C1BCED00FB1F1C /* intl.framework in Frameworks */,
+				8DF5F04928C1BCF000FB1F1C /* gio-2.0.0.framework in Frameworks */,
+				8DA7A63728C19A4900FDBD78 /* SwiftTerm in Frameworks */,
+				8DF5F02C28C1BCE900FB1F1C /* qemu-x86_64-softmmu.framework in Frameworks */,
+				8DF5F02928C1BCC800FB1F1C /* qemu-x86_64-softmmu.framework in Frameworks */,
+				8DF5F03728C1BCEB00FB1F1C /* gmodule-2.0.0.framework in Frameworks */,
+				8DF5F03928C1BCEC00FB1F1C /* glib-2.0.0.framework in Frameworks */,
+				8DF5F04728C1BCF000FB1F1C /* gobject-2.0.0.framework in Frameworks */,
+				8DF5F03B28C1BCEC00FB1F1C /* gthread-2.0.0.framework in Frameworks */,
+				8DF5F04528C1BCEF00FB1F1C /* charset.1.framework in Frameworks */,
+				8DF5F04128C1BCED00FB1F1C /* pixman-1.0.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		49AE019F2410AB0A0051E902 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				8DF5F03428C1BCEB00FB1F1C /* charset.1.framework */,
+				8DF5F03328C1BCEB00FB1F1C /* ffi.7.framework */,
+				8DF5F03628C1BCEB00FB1F1C /* gio-2.0.0.framework */,
+				8DF5F02E28C1BCEA00FB1F1C /* glib-2.0.0.framework */,
+				8DF5F02D28C1BCEA00FB1F1C /* gmodule-2.0.0.framework */,
+				8DF5F03528C1BCEB00FB1F1C /* gobject-2.0.0.framework */,
+				8DF5F02F28C1BCEA00FB1F1C /* gthread-2.0.0.framework */,
+				8DF5F03028C1BCEA00FB1F1C /* iconv.2.framework */,
+				8DF5F03128C1BCEA00FB1F1C /* intl.framework */,
+				8DF5F03228C1BCEB00FB1F1C /* pixman-1.0.framework */,
+				8DF5F02828C1BCC800FB1F1C /* qemu-x86_64-softmmu.framework */,
+				8DF5F02428C1AB1200FB1F1C /* libzstd.1.dylib */,
+				8DF5F02128C1A37100FB1F1C /* libjpeg.62.dylib */,
+				8DF5F01E28C1A34F00FB1F1C /* libpng16.16.dylib */,
+				8DF5F01B28C1A31B00FB1F1C /* libpixman-1.0.dylib */,
+				8DE8208728C16AA70035686B /* libqemu-x86_64-softmmu.dylib */,
+				8DE8209628C19A280035686B /* libqemu-x86_64-softmmu.dylib */,
+				C9FFBC130DA1A3B7A450025B /* Pods_tctiSH.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		49BD1A51224207B4005A2252 = {
+			isa = PBXGroup;
+			children = (
+				8DF5F05328C1C18200FB1F1C /* efi-virtio.rom */,
+				8DF5F04E28C1C16000FB1F1C /* kvmvapic.bin */,
+				8DF5F04D28C1C16000FB1F1C /* linuxboot_dma.bin */,
+				8DF5F04F28C1C16000FB1F1C /* vgabios-stdvga.bin */,
+				8DF5F04B28C1C07D00FB1F1C /* bios-256k.bin */,
+				8DE8209328C199290035686B /* lib */,
+				8DE8209128C1808F0035686B /* bzImage */,
+				8DE8208F28C180770035686B /* initrd.img */,
+				8DEC8CE728C139B50017AC30 /* Packages */,
+				49BD1A5C224207B5005A2252 /* tctiSH */,
+				49BD1A5B224207B5005A2252 /* Products */,
+				49AE019F2410AB0A0051E902 /* Frameworks */,
+				8DEEF6D2645E52F7349738A7 /* Pods */,
+			);
+			indentWidth = 4;
+			sourceTree = "<group>";
+			tabWidth = 4;
+		};
+		49BD1A5B224207B5005A2252 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				49BD1A5A224207B5005A2252 /* tctiSH.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		49BD1A5C224207B5005A2252 /* tctiSH */ = {
+			isa = PBXGroup;
+			children = (
+				49BD1A5D224207B5005A2252 /* AppDelegate.swift */,
+				49BD1A5F224207B5005A2252 /* ViewController.swift */,
+				49BD1A61224207B5005A2252 /* Main.storyboard */,
+				49BD1A64224207B7005A2252 /* Assets.xcassets */,
+				49BD1A66224207B7005A2252 /* LaunchScreen.storyboard */,
+				49BD1A69224207B7005A2252 /* Info.plist */,
+				4936D22024512AF2005CEE27 /* UIKitSshTerminalView.swift */,
+				8DE8208528C167070035686B /* QEMULauncher.swift */,
+				8DE8208C28C176310035686B /* qemu_launcher.h */,
+				8DE8208D28C176310035686B /* qemu_launcher.c */,
+				8DE8208B28C176310035686B /* tctiSH-Bridging-Header.h */,
+			);
+			path = tctiSH;
+			sourceTree = "<group>";
+		};
+		8DEC8CE728C139B50017AC30 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				8DEC8CE828C139B60017AC30 /* third-party */,
+				8DEC8CE928C139C10017AC30 /* SwiftTerm */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		8DEEF6D2645E52F7349738A7 /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				9A05E33B868D09494792FFFD /* Pods-tctiSH.debug.xcconfig */,
+				B59ED421CAD9966D0A97855E /* Pods-tctiSH.release.xcconfig */,
+			);
+			path = Pods;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		49BD1A59224207B5005A2252 /* tctiSH */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 49BD1A77224207B7005A2252 /* Build configuration list for PBXNativeTarget "tctiSH" */;
+			buildPhases = (
+				55899EBA7CE230C419DDBE7A /* [CP] Check Pods Manifest.lock */,
+				49BD1A56224207B5005A2252 /* Sources */,
+				8DE8209528C199FB0035686B /* Frameworks */,
+				49BD1A58224207B5005A2252 /* Resources */,
+				67CB01EBDF83BB584F06E42D /* [CP] Embed Pods Frameworks */,
+				8DF5F02B28C1BCC900FB1F1C /* Embed Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = tctiSH;
+			packageProductDependencies = (
+				4959FFDA2447F971001F42C0 /* SwiftTerm */,
+			);
+			productName = SwiftTerm;
+			productReference = 49BD1A5A224207B5005A2252 /* tctiSH.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		49BD1A52224207B4005A2252 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastSwiftUpdateCheck = 1130;
+				LastUpgradeCheck = 1010;
+				ORGANIZATIONNAME = "Kate Temkin";
+				TargetAttributes = {
+					49BD1A59224207B5005A2252 = {
+						CreatedOnToolsVersion = 10.1;
+						LastSwiftMigration = 1400;
+					};
+				};
+			};
+			buildConfigurationList = 49BD1A55224207B4005A2252 /* Build configuration list for PBXProject "tctiSH" */;
+			compatibilityVersion = "Xcode 9.3";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 49BD1A51224207B4005A2252;
+			packageReferences = (
+				498667032575F1FD006BFFA0 /* XCRemoteSwiftPackageReference "SwiftSH" */,
+			);
+			productRefGroup = 49BD1A5B224207B5005A2252 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				49BD1A59224207B5005A2252 /* tctiSH */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		49BD1A58224207B5005A2252 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8DF5F05428C1C18200FB1F1C /* efi-virtio.rom in Resources */,
+				8DF5F05028C1C16000FB1F1C /* linuxboot_dma.bin in Resources */,
+				8DF5F05128C1C16000FB1F1C /* kvmvapic.bin in Resources */,
+				8DF5F05228C1C16000FB1F1C /* vgabios-stdvga.bin in Resources */,
+				8DF5F04C28C1C07D00FB1F1C /* bios-256k.bin in Resources */,
+				8DE8209228C1808F0035686B /* bzImage in Resources */,
+				8DE8209028C180770035686B /* initrd.img in Resources */,
+				49BD1A68224207B7005A2252 /* LaunchScreen.storyboard in Resources */,
+				49BD1A65224207B7005A2252 /* Assets.xcassets in Resources */,
+				49BD1A63224207B5005A2252 /* Main.storyboard in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		55899EBA7CE230C419DDBE7A /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-tctiSH-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		67CB01EBDF83BB584F06E42D /* [CP] Embed Pods Frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-tctiSH/Pods-tctiSH-frameworks-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			name = "[CP] Embed Pods Frameworks";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-tctiSH/Pods-tctiSH-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-tctiSH/Pods-tctiSH-frameworks.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		49BD1A56224207B5005A2252 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8DE8208E28C176310035686B /* qemu_launcher.c in Sources */,
+				4936D22124512AF2005CEE27 /* UIKitSshTerminalView.swift in Sources */,
+				49BD1A60224207B5005A2252 /* ViewController.swift in Sources */,
+				49BD1A5E224207B5005A2252 /* AppDelegate.swift in Sources */,
+				8DE8208628C167070035686B /* QEMULauncher.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXVariantGroup section */
+		49BD1A61224207B5005A2252 /* Main.storyboard */ = {
+			isa = PBXVariantGroup;
+			children = (
+				49BD1A62224207B5005A2252 /* Base */,
+			);
+			name = Main.storyboard;
+			sourceTree = "<group>";
+		};
+		49BD1A66224207B7005A2252 /* LaunchScreen.storyboard */ = {
+			isa = PBXVariantGroup;
+			children = (
+				49BD1A67224207B7005A2252 /* Base */,
+			);
+			name = LaunchScreen.storyboard;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
+/* Begin XCBuildConfiguration section */
+		49BD1A75224207B7005A2252 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		49BD1A76224207B7005A2252 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		49BD1A78224207B7005A2252 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 9A05E33B868D09494792FFFD /* Pods-tctiSH.debug.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 3G3GCZ6DA6;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/sysroot-iOS-arm64/Frameworks",
+				);
+				INFOPLIST_FILE = "$(PRODUCT_NAME)/Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 13.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/qemu-tcti/build",
+					"$(PROJECT_DIR)/assets/sysroot-iOS-arm64/lib",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ktemkin.tctiSH.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_OBJC_BRIDGING_HEADER = "tctiSH/tctiSH-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		49BD1A79224207B7005A2252 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = B59ED421CAD9966D0A97855E /* Pods-tctiSH.release.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 3G3GCZ6DA6;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/sysroot-iOS-arm64/Frameworks",
+				);
+				INFOPLIST_FILE = "$(PRODUCT_NAME)/Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 13.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/qemu-tcti/build",
+					"$(PROJECT_DIR)/assets/sysroot-iOS-arm64/lib",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ktemkin.tctiSH.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_OBJC_BRIDGING_HEADER = "tctiSH/tctiSH-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		49BD1A55224207B4005A2252 /* Build configuration list for PBXProject "tctiSH" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				49BD1A75224207B7005A2252 /* Debug */,
+				49BD1A76224207B7005A2252 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		49BD1A77224207B7005A2252 /* Build configuration list for PBXNativeTarget "tctiSH" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				49BD1A78224207B7005A2252 /* Debug */,
+				49BD1A79224207B7005A2252 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		498667032575F1FD006BFFA0 /* XCRemoteSwiftPackageReference "SwiftSH" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/migueldeicaza/SwiftSH.binaries";
+			requirement = {
+				branch = master;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		4959FFDA2447F971001F42C0 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SwiftTerm;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 49BD1A52224207B4005A2252 /* Project object */;
+}
