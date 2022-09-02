@@ -52,6 +52,7 @@
 		8DF5F05428C1C18200FB1F1C /* efi-virtio.rom in Resources */ = {isa = PBXBuildFile; fileRef = 8DF5F05328C1C18200FB1F1C /* efi-virtio.rom */; };
 		8DF5F05B28C2815100FB1F1C /* Theming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DF5F05A28C2815100FB1F1C /* Theming.swift */; };
 		8DF5F05D28C281D100FB1F1C /* ColorLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DF5F05C28C281D100FB1F1C /* ColorLoader.swift */; };
+		CE27C18A08027FE10E64C6DF /* Pods_tctiSH.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C9FFBC130DA1A3B7A450025B /* Pods_tctiSH.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -123,8 +124,8 @@
 		8DF5F04F28C1C16000FB1F1C /* vgabios-stdvga.bin */ = {isa = PBXFileReference; lastKnownFileType = archive.macbinary; name = "vgabios-stdvga.bin"; path = "sysroot-iOS-arm64/share/qemu/vgabios-stdvga.bin"; sourceTree = "<group>"; };
 		8DF5F05328C1C18200FB1F1C /* efi-virtio.rom */ = {isa = PBXFileReference; lastKnownFileType = file; name = "efi-virtio.rom"; path = "sysroot-iOS-arm64/share/qemu/efi-virtio.rom"; sourceTree = "<group>"; };
 		8DF5F05528C1D96100FB1F1C /* tctiSH.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = tctiSH.entitlements; sourceTree = "<group>"; };
-		8DF5F05628C2758700FB1F1C /* memory_state.qcow */ = {isa = PBXFileReference; lastKnownFileType = file; name = memory_state.qcow; path = assets/memory_state.qcow; sourceTree = "<group>"; };
-		8DF5F05828C2777C00FB1F1C /* memory_state.qcow */ = {isa = PBXFileReference; lastKnownFileType = file; name = memory_state.qcow; path = assets/memory_state.qcow; sourceTree = "<group>"; };
+		8DF5F05628C2758700FB1F1C /* memory_state.qcow */ = {isa = PBXFileReference; lastKnownFileType = text; name = memory_state.qcow; path = assets/memory_state.qcow; sourceTree = "<group>"; };
+		8DF5F05828C2777C00FB1F1C /* memory_state.qcow */ = {isa = PBXFileReference; lastKnownFileType = text; name = memory_state.qcow; path = assets/memory_state.qcow; sourceTree = "<group>"; };
 		8DF5F05A28C2815100FB1F1C /* Theming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theming.swift; sourceTree = "<group>"; };
 		8DF5F05C28C281D100FB1F1C /* ColorLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorLoader.swift; sourceTree = "<group>"; };
 		9A05E33B868D09494792FFFD /* Pods-tctiSH.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-tctiSH.debug.xcconfig"; path = "Target Support Files/Pods-tctiSH/Pods-tctiSH.debug.xcconfig"; sourceTree = "<group>"; };
@@ -551,7 +552,8 @@
 				CODE_SIGN_ENTITLEMENTS = tctiSH/tctiSH.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = 3G3GCZ6DA6;
+				DEVELOPMENT_TEAM = SU8B32Z5KR;
+				ENABLE_BITCODE = NO;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/sysroot-iOS-arm64/Frameworks",
@@ -567,7 +569,7 @@
 					"$(PROJECT_DIR)/qemu-tcti/build",
 					"$(PROJECT_DIR)/assets/sysroot-iOS-arm64/lib",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.ktemkin.tctiSH.ios;
+				PRODUCT_BUNDLE_IDENTIFIER = com.iamrecursion.tctiSH;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_OBJC_BRIDGING_HEADER = "tctiSH/tctiSH-Bridging-Header.h";
@@ -586,7 +588,8 @@
 				CODE_SIGN_ENTITLEMENTS = tctiSH/tctiSH.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = 3G3GCZ6DA6;
+				DEVELOPMENT_TEAM = SU8B32Z5KR;
+				ENABLE_BITCODE = NO;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/sysroot-iOS-arm64/Frameworks",
@@ -602,7 +605,7 @@
 					"$(PROJECT_DIR)/qemu-tcti/build",
 					"$(PROJECT_DIR)/assets/sysroot-iOS-arm64/lib",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.ktemkin.tctiSH.ios;
+				PRODUCT_BUNDLE_IDENTIFIER = com.iamrecursion.tctiSH;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_OBJC_BRIDGING_HEADER = "tctiSH/tctiSH-Bridging-Header.h";
