@@ -80,12 +80,11 @@ void run_background_qemu(const char* kernel_path, const char* initrd_path, const
         "-initrd", initrd_filename,
         "-m", "4G",
         "-device", "virtio-net-pci,id=net1,netdev=net0",
-        "-netdev", "user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100,hostfwd=tcp::10022-:22",
+        "-netdev", "user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100,hostfwd=tcp::10022-:22,hostfwd=tcp::10023-:23",
+        "-device", "virtio-rng-pci",
         //"-device", "virtio-blk-pci,id=disk1,drive=drive1",
         //"-drive", disk_argument,
-        "-device", "virtio-rng-pci",
-        "-append", "tcti_disk=file",
-        "-serial", "stdio"
+        //"-append", "tcti_disk=file",
     };
     
     args.argc = ARRAY_SIZE(argv);

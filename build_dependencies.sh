@@ -350,7 +350,6 @@ build () {
     cd "$DIR"
     if [ -z "$REBUILD" ]; then
         echo "${GREEN}Configuring ${NAME}...${NC}"
-        echo ./configure --prefix="$PREFIX" --host="$CHOST" $@
         ./configure --prefix="$PREFIX" --host="$CHOST" $@
     fi
     echo "${GREEN}Building ${NAME}...${NC}"
@@ -363,20 +362,32 @@ build () {
 
 build_qemu () {
 	NAME="QEMU_TCTI"
-    DIR="$BASEDIR/qemu-tcti"
-    pwd="$(pwd)"
+    QEMU_DIR="$BASEDIR/qemu-tcti"
 
-    cd "$DIR"
-    if [ -z "$REBUILD" ]; then
-        echo "${GREEN}Configuring ${NAME}...${NC}"
-        echo ./configure --prefix="$PREFIX" --host="$CHOST" $@
-        ./configure --prefix="$PREFIX" --host="$CHOST" $@
-    fi
-    echo "${GREEN}Building ${NAME}...${NC}"
-    make -j$NCPU
-    echo "${GREEN}Installing ${NAME}...${NC}"
-    make install
+    QEMU_CFLAGS="$CFLAGS"
+    QEMU_CXXFLAGS="$CXXFLAGS"
+    QEMU_LDFLAGS="$LDFLAGS"
+    export QEMU_CFLAGS
+    export QEMU_CXXFLAGS
+    export QEMU_LDFLAGS
+    CFLAGS=
+    CXXFLAGS=
+    LDFLAGS=
+
+    pwd="$(pwd)"
+    cd "$QEMU_DIR"
+    echo "${GREEN}Configuring QEMU...${NC}"
+    ./configure --prefix="$PREFIX" --host="$CHOST" --cross-prefix="" --with-coroutine=libucontext $@
+	cd "build"
+    echo "${GREEN}Building QEMU...${NC}"
+    ninja
+    echo "${GREEN}Installing QEMU...${NC}"
+    ninja install
     cd "$pwd"
+
+    CFLAGS="$QEMU_CFLAGS"
+    CXXFLAGS="$QEMU_CXXFLAGS"
+    LDFLAGS="$QEMU_LDFLAGS"
 }
 
 meson_build () {
@@ -575,12 +586,12 @@ PLATFORM_FAMILY_NAME="$PLATFORM_FAMILY_PREFIX"
 
 # QEMU build flags. Looong.
 QEMU_PLATFORM_BUILD_FLAGS="--disable-debug-info --enable-shared-lib --disable-hvf --disable-cocoa"
-QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-coreaudio --disable-slirp-smbd --disable-curl" 
-QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-gnutls --enable-ucontext --disable-vnc"
+QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-slirp-smbd --disable-curl" 
+QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-gnutls --disable-vnc --disable-gcrypt"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-nettle --disable-virglrenderer --disable-libusb"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-libssh --disable-zstd --enable-slirp=git"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --with-coroutine=libucontext"
-QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --enable-tcg-threaded-interpreter --target-list=x86_64-softmmu"
+QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --enable-tcg-tcti --target-list=x86_64-softmmu"
 
 # Setup directories
 BASEDIR="$(dirname "$(realpath $0)")"
@@ -675,7 +686,7 @@ rm -f "$BUILD_DIR/meson.cross"
 copy_private_headers
 build_pkg_config
 build_qemu_dependencies
-build $QEMU_SRC --cross-prefix="" $QEMU_PLATFORM_BUILD_FLAGS
+build_qemu $QEMU_PLATFORM_BUILD_FLAGS
 fixup_all
 echo "${GREEN}All done!${NC}"
 touch "$BUILD_DIR/BUILD_SUCCESS"

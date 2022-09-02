@@ -10,6 +10,7 @@ import Foundation
 import UIKit
 import SwiftTerm
 import SwiftSH
+import Combine
 
 
 
@@ -18,20 +19,37 @@ public class SshTerminalView: TerminalView, TerminalViewDelegate {
     var shell: SSHShell?
     var authenticationChallenge: AuthenticationChallenge?
     
+    var connected : Bool = false
+    
+    
+    private var timer: Publishers.Autoconnect<Timer.TimerPublisher>? = nil
+    private var subscription: AnyCancellable? = nil
+    
     public override init (frame: CGRect)
     {
-        super.init (frame: frame, font: UIFont(name: "Menlo-Regular", size: 30))
-        
-        
+        super.init (frame: frame, font: UIFont(name: "Menlo-Regular", size: 18))
         terminalDelegate = self
-            shell = try? SSHShell(sshLibrary: Libssh2.self,
+        
+        // FIXME: This is just a workaround until we have vm image save/loading.
+        // Set up a timer to periodically poll our connection.
+        timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+        subscription = timer?.sink(receiveValue: { _ in
+            if self.connected {
+                self.timer?.upstream.connect().cancel()
+            } else {
+                self.connect()
+            }
+        })
+        
+        shell = try? SSHShell(sshLibrary: Libssh2.self,
                                   host: "localhost",
-                                  port: 10023,
+                                  port: 10022,
                                   terminal: "xterm-256color")
-            shell?.log.enabled = false
-            self.connect()
+        shell?.log.enabled = true
     }
   
+    
+    
     func connect()
     {
         if let s = shell {
@@ -63,8 +81,10 @@ public class SshTerminalView: TerminalView, TerminalViewDelegate {
             .authenticate(.byPassword(username: "root", password: "toor"))
             .open { [unowned self] (error) in
                 if let error = error {
-                    self.feed(text: "[ERROR] \(error)\n")
+                    //self.feed(text: "[ERROR?] \(error)\n")
                 } else {
+                    self.connected = true
+                    
                     let t = self.getTerminal()
                     s.setTerminalSize(width: UInt (t.cols), height: UInt (t.rows))
                 }
