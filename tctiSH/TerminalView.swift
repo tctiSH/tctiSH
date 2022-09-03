@@ -67,7 +67,9 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         if new_size == 0 {
             new_size = self.font.pointSize
         }
-        self.font = UIFont(name: self.font.fontName, size: new_size) ?? self.font
+        if new_size != self.font.pointSize {
+            self.font = UIFont(name: self.font.fontName, size: new_size) ?? self.font
+        }
         
         // TODO: apply themes, here
         

@@ -4,14 +4,14 @@
 TCTI_ARCH="x86_64"
 
 USE_SSH=0
-USE_DISK_STANDIN=0
+USE_DISK_STANDIN=1
 INSTANT_STARTUP=0
 
 # The (initial) ram size of the disk.
 INITIAL_RAM_SIZE="1G"
 
 # The size of the image used to emulate iOS storage.
-STANDIN_IMAGE_SIZE="10G"
+STANDIN_IMAGE_SIZE="100G"
 
 # If we have a ramdisk directory, use it to create a ramdisk for TCTI.
 if [ -d ramdisk ]; then
@@ -38,12 +38,12 @@ popd
 if [ $USE_DISK_STANDIN != 0 ]; then
 	echo "Note: using disk as a standin for PV comms."
 	CONSOLE_QEMU_OPTIONS="$CONSOLE_QEMU_OPTIONS -device virtio-blk-pci,id=disk1,drive=drive1"
-	CONSOLE_QEMU_OPTIONS="$CONSOLE_QEMU_OPTIONS -drive media=disk,id=drive1,if=none,file=user_union_standin.qcow,discard=unmap,detect-zeroes=unmap"
+	CONSOLE_QEMU_OPTIONS="$CONSOLE_QEMU_OPTIONS -drive media=disk,id=drive1,if=none,file=empty.qcow,discard=unmap,detect-zeroes=unmap"
 	CONSOLE_KERNEL_OPTIONS="$CONSOLE_KERNEL_OPTIONS tcti_disk=file"
 
 	# If we don't have a stand-in for our iOS user storage, create one.
-	if [ ! -f user_union_standin.qcow ]; then
-		../qemu-tcti/build_mac/qemu-img create -f qcow2 user_union_standin.qcow ${STANDIN_IMAGE_SIZE}
+	if [ ! -f empty.qcow ]; then
+		../qemu-tcti/build_mac/qemu-img create -f qcow2 empty.qcow ${STANDIN_IMAGE_SIZE}
 
 		# The first time this runs, it's going to take a while. Enable console.
 		CONSOLE_KERNEL_OPTIONS="$CONSOLE_KERNEL_OPTIONS console=ttyS0"
@@ -75,12 +75,13 @@ fi
 	-kernel bzImage \
 	-initrd initrd.img \
 	-m $INITIAL_RAM_SIZE \
-	-drive media=disk,id=memstate,if=none,file=memory_state.qcow \
 	-device virtio-net-pci,id=net1,netdev=net0 \
 	-netdev user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100,hostfwd=tcp::10022-:22,hostfwd=tcp::10023-:23 \
 	-device virtio-rng-pci \
 	$CONSOLE_QEMU_OPTIONS \
 	-append "$CONSOLE_KERNEL_OPTIONS" $BACKGROUND
+
+	#-drive media=disk,id=memstate,if=none,file=memory_state.qcow \
 QEMU_PID=$!
 
 # If we're not using SSH, forground QEMU and just use that.

@@ -31,9 +31,8 @@ struct qemu_args {
     char *bios_dir;
     char *kernel_filename;
     char *initrd_filename;
-    char *memstate_args;
+    char *disk_args;
 };
-
 
 /// Core thread that runs our background QEMU.
 static void* qemu_thread(void *raw_args) {
@@ -51,15 +50,13 @@ static void* qemu_thread(void *raw_args) {
         "-device", "virtio-net-pci,id=net1,netdev=net0",
         "-netdev", "user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100,hostfwd=tcp::10022-:22",
         "-device", "virtio-rng-pci",
-        args->memstate_args ? "-drive" : "",
-        args->memstate_args ? args->memstate_args : "",
-        args->memstate_args ? "-loadvm" : "",
-        args->memstate_args ? "nodisk" : "",
-        //"-device", "virtio-blk-pci,id=disk1,drive=drive1",
-        //"-drive", disk_argument,
-        //"-append", "tcti_disk=file",
+        "-device", "virtio-blk-pci,id=disk1,drive=drive1",
+        "-drive", args->disk_args,
+        "-append", "tcti_disk=file",
+        "-loadvm", "withdisk"
     };
-
+    
+    
     // ... and run QEMU, in this thread.
     qemu_init(ARRAY_SIZE(argv), (const char **)argv, (const char **)envp);
     qemu_main_loop();
@@ -69,20 +66,17 @@ static void* qemu_thread(void *raw_args) {
     free(args->bios_dir);
     free(args->kernel_filename);
     free(args->initrd_filename);
-    if (args->memstate_args) {
-        free(args->memstate_args);
-    }
+    free(args->disk_args);
     free(args);
     
     return NULL;
 }
 
 /// Spawns a backgroudn thread that runs QEMU.
-void run_background_qemu(
-                         const char* kernel_path,
+void run_background_qemu(const char* kernel_path,
                          const char* initrd_path,
                          const char* bios_path,
-                         const char* memstate_path)
+                         const char* disk_path)
 {
     pthread_t thread;
     pthread_attr_t qosAttribute;
@@ -93,14 +87,10 @@ void run_background_qemu(
     args->initrd_filename  = calloc(PATH_MAX, sizeof(char));
     args->bios_dir         = calloc(PATH_MAX, sizeof(char));
     
-    // Create our "instant-boot" argument.
-    if (memstate_path) {
-        args->memstate_args = calloc(ARGUMENT_MAX, sizeof(char));
-        snprintf(args->memstate_args, ARGUMENT_MAX, "media=disk,id=memstate,if=none,file=%s",
-                 memstate_path);
-    } else {
-        args->memstate_args = NULL;
-    }
+    // Create our disk argument.
+    args->disk_args         = calloc(ARGUMENT_MAX, sizeof(char));
+    snprintf(args->disk_args, ARGUMENT_MAX, "media=disk,id=drive1,if=none,file=%s,discard=unmap,detect-zeroes=unmap",
+             disk_path);
     
     // Copy in each of our filenames.
     strncpy(args->kernel_filename, kernel_path, PATH_MAX - 1);

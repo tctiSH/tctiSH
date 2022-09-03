@@ -19,33 +19,35 @@ public class QEMULauncher {
         let kernelPath = bundlePrefix + "/" + "bzImage"
         let initrdPath = bundlePrefix + "/" + "initrd.img"
         
-        // ... create a temporary copy of our starting memory state...
-        let memstatePath = createTemporaryCopy(ofResource: "memory_state", withExtension: "qcow").path
-        
-        // ... and spawn our TCTI execution layer.
-        run_background_qemu(kernelPath, initrdPath, bundlePrefix, memstatePath)
+        // ... get a disk to run with ...
+        let diskPath = getPersistentStore().path
+            
+        // ... and run QEMU.
+        run_background_qemu(kernelPath, initrdPath, bundlePrefix, diskPath)
         
     }
     
-    private func createTemporaryCopy(ofResource: String, withExtension: String) -> URL
-    {
-        // Find the file we're looking for...
-        let sourceURL = Bundle.main.url(forResource: ofResource, withExtension: withExtension)
-            
-        // ... figure out were to put a tempoorary copy...
-        var targetURL = URL(fileURLWithPath: NSTemporaryDirectory(),
-                                            isDirectory: true)
-        targetURL.appendPathComponent(ofResource)
-        targetURL.appendPathExtension(withExtension)
-        
-        NSLog(targetURL.absoluteString)
 
-        // ... and copy our file into it.
-        if FileManager.default.fileExists(atPath: targetURL.path) {
-            try? FileManager.default.removeItem(at: targetURL)
-        }
+    /// Returns the URL to a qcow image that will acts as our persistent store.
+    /// TODO: figure out if we want to use qcow2, or if we should implement a different file backend?
+    private func getPersistentStore() -> URL
+    {
+        // Figure out where our persistent store would be located.
+        var targetURL = try! FileManager.default.url(
+            for: .documentDirectory,
+            in: .userDomainMask,
+            appropriateFor: URL(fileURLWithPath: "disk.qcow"),
+            create: false)
         
-        try! FileManager.default.copyItem(at: sourceURL!, to: targetURL)
+        // Scult our filename so it ends in "disk.qcow".
+        targetURL.appendPathComponent("disk")
+        targetURL.appendPathExtension("qcow")
+
+        // If it doesn't exist, create a new copy based on our empty disk.
+        if !FileManager.default.fileExists(atPath: targetURL.path) {
+            let emptyDiskURL = Bundle.main.url(forResource: "empty", withExtension: "qcow")
+            try! FileManager.default.copyItem(at: emptyDiskURL!, to: targetURL)
+        }
     
         return targetURL
     }

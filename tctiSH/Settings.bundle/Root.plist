@@ -20,11 +20,11 @@
 			<key>DefaultValue</key>
 			<true/>
 			<key>Key</key>
-			<string>instant_boot</string>
+			<string>no_instant_boot</string>
 			<key>TrueValue</key>
-			<true/>
-			<key>FalseValue</key>
 			<false/>
+			<key>FalseValue</key>
+			<true/>
 		</dict>
 		<dict>
 			<key>Type</key>

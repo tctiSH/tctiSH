@@ -14,6 +14,7 @@
 		49BD1A65224207B7005A2252 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 49BD1A64224207B7005A2252 /* Assets.xcassets */; };
 		49BD1A68224207B7005A2252 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 49BD1A66224207B7005A2252 /* LaunchScreen.storyboard */; };
 		8D4939E228C3245D00F57421 /* Settings.bundle in Resources */ = {isa = PBXBuildFile; fileRef = 8D4939E128C3245D00F57421 /* Settings.bundle */; };
+		8D4939E428C33B0300F57421 /* empty.qcow in Resources */ = {isa = PBXBuildFile; fileRef = 8D4939E328C33B0300F57421 /* empty.qcow */; };
 		8DA7A63728C19A4900FDBD78 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 4959FFDA2447F971001F42C0 /* SwiftTerm */; };
 		8DE8208628C167070035686B /* QEMULauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DE8208528C167070035686B /* QEMULauncher.swift */; };
 		8DE8208E28C176310035686B /* qemu_launcher.c in Sources */ = {isa = PBXBuildFile; fileRef = 8DE8208D28C176310035686B /* qemu_launcher.c */; };
@@ -46,7 +47,6 @@
 		8DF5F05128C1C16000FB1F1C /* kvmvapic.bin in Resources */ = {isa = PBXBuildFile; fileRef = 8DF5F04E28C1C16000FB1F1C /* kvmvapic.bin */; };
 		8DF5F05228C1C16000FB1F1C /* vgabios-stdvga.bin in Resources */ = {isa = PBXBuildFile; fileRef = 8DF5F04F28C1C16000FB1F1C /* vgabios-stdvga.bin */; };
 		8DF5F05428C1C18200FB1F1C /* efi-virtio.rom in Resources */ = {isa = PBXBuildFile; fileRef = 8DF5F05328C1C18200FB1F1C /* efi-virtio.rom */; };
-		8DF5F05928C2777C00FB1F1C /* memory_state.qcow in Resources */ = {isa = PBXBuildFile; fileRef = 8DF5F05828C2777C00FB1F1C /* memory_state.qcow */; };
 		8DF5F05B28C2815100FB1F1C /* Theming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DF5F05A28C2815100FB1F1C /* Theming.swift */; };
 		8DF5F05D28C281D100FB1F1C /* ColorLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DF5F05C28C281D100FB1F1C /* ColorLoader.swift */; };
 /* End PBXBuildFile section */
@@ -85,6 +85,7 @@
 		49BD1A67224207B7005A2252 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		49BD1A69224207B7005A2252 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		8D4939E128C3245D00F57421 /* Settings.bundle */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.plug-in"; path = Settings.bundle; sourceTree = "<group>"; };
+		8D4939E328C33B0300F57421 /* empty.qcow */ = {isa = PBXFileReference; lastKnownFileType = file; name = empty.qcow; path = assets/empty.qcow; sourceTree = "<group>"; };
 		8DE8208528C167070035686B /* QEMULauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QEMULauncher.swift; sourceTree = "<group>"; };
 		8DE8208728C16AA70035686B /* libqemu-x86_64-softmmu.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libqemu-x86_64-softmmu.dylib"; path = "qemu-tcti/build/libqemu-x86_64-softmmu.dylib"; sourceTree = "<group>"; };
 		8DE8208B28C176310035686B /* tctiSH-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "tctiSH-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -176,6 +177,7 @@
 		49BD1A51224207B4005A2252 = {
 			isa = PBXGroup;
 			children = (
+				8D4939E328C33B0300F57421 /* empty.qcow */,
 				8DF5F05628C2758700FB1F1C /* memory_state.qcow */,
 				8DF5F05828C2777C00FB1F1C /* memory_state.qcow */,
 				8DF5F05328C1C18200FB1F1C /* efi-virtio.rom */,
@@ -311,7 +313,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				8DF5F05928C2777C00FB1F1C /* memory_state.qcow in Resources */,
+				8D4939E428C33B0300F57421 /* empty.qcow in Resources */,
 				8DF5F05428C1C18200FB1F1C /* efi-virtio.rom in Resources */,
 				8DF5F05028C1C16000FB1F1C /* linuxboot_dma.bin in Resources */,
 				8DF5F05128C1C16000FB1F1C /* kvmvapic.bin in Resources */,
