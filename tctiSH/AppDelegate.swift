@@ -1,21 +1,23 @@
 //
 //  AppDelegate.swift
-//  SwiftTerm
+//  Primary application OS-event handlers.
 //
-//  Created by Miguel de Icaza on 3/19/19.
-//  Copyright © 2019 Miguel de Icaza. All rights reserved.
+//  Copyright (c) 2022 Katherine Temkin <k@ktemkin.com>
 //
 
 import UIKit
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
-
     var window: UIWindow?
-
+    
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        
+        // To minimize startup time, start our kernel before anything else.
+        let launcher = QEMULauncher()
+        launcher.startQemuThread()
+        
         return true
     }
 
@@ -40,7 +42,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func applicationWillTerminate(_ application: UIApplication) {
         // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
     }
-
+    
+    
 
 }
 

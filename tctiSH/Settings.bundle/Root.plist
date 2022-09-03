@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>StringsTable</key>
+	<string>Root</string>
+	<key>PreferenceSpecifiers</key>
+	<array>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>Kernel Settings</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Title</key>
+			<string>Instant Boot</string>
+			<key>DefaultValue</key>
+			<true/>
+			<key>Key</key>
+			<string>instant_boot</string>
+			<key>TrueValue</key>
+			<true/>
+			<key>FalseValue</key>
+			<false/>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>Appearance</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Title</key>
+			<string>Font Size</string>
+			<key>Key</key>
+			<string>font_size</string>
+			<key>DefaultValue</key>
+			<string>14</string>
+			<key>Titles</key>
+			<array>
+				<string>8</string>
+				<string>10</string>
+				<string>12</string>
+				<string>14</string>
+				<string>16</string>
+				<string>18</string>
+				<string>20</string>
+				<string>22</string>
+				<string>24</string>
+				<string>28</string>
+				<string>30</string>
+			</array>
+			<key>Values</key>
+			<array>
+				<integer>8</integer>
+				<integer>10</integer>
+				<integer>12</integer>
+				<integer>14</integer>
+				<integer>16</integer>
+				<integer>18</integer>
+				<integer>20</integer>
+				<integer>22</integer>
+				<integer>24</integer>
+				<integer>28</integer>
+				<integer>30</integer>
+			</array>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Title</key>
+			<string>Theme</string>
+			<key>Key</key>
+			<string>theme</string>
+			<key>DefaultValue</key>
+			<string>Solarized Dark</string>
+			<key>Titles</key>
+			<array>
+				<string>Solarized Dark</string>
+			</array>
+			<key>Values</key>
+			<array>
+				<string>solarizedDark</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

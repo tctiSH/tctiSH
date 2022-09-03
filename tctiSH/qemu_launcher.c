@@ -14,6 +14,9 @@
 
 #include "qemu_launcher.h"
 
+#define ARGUMENT_MAX (2048)
+#define PATH_MAX     (1024)
+
 // Helpers.
 #define ARRAY_SIZE(array) \
     (sizeof(array) / sizeof(array[0]))
@@ -23,22 +26,53 @@ int qemu_init(int argc, const char *argv[], const char *envp[]);
 void qemu_main_loop(void);
 void qemu_cleanup(void);
 
-
-// Structure for passing arguments to QEMU.
+// Structure for passing arguments to our QEMU thread.
 struct qemu_args {
-    int argc;
-    const char **argv;
-    const char **envp;
+    char *bios_dir;
+    char *kernel_filename;
+    char *initrd_filename;
+    char *memstate_args;
 };
 
 
 /// Core thread that runs our background QEMU.
 static void* qemu_thread(void *raw_args) {
     struct qemu_args *args = raw_args;
+    
+    // Provide our QEMU command line and environment...
+    char *envp[] = { NULL };
+    char *argv[] = {
+        "qemu-system",
+        "-L", args->bios_dir,
+        "-display", "none",
+        "-kernel", args->kernel_filename,
+        "-initrd", args->initrd_filename,
+        "-m", "1G",
+        "-device", "virtio-net-pci,id=net1,netdev=net0",
+        "-netdev", "user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100,hostfwd=tcp::10022-:22",
+        "-device", "virtio-rng-pci",
+        args->memstate_args ? "-drive" : "",
+        args->memstate_args ? args->memstate_args : "",
+        args->memstate_args ? "-loadvm" : "",
+        args->memstate_args ? "nodisk" : "",
+        //"-device", "virtio-blk-pci,id=disk1,drive=drive1",
+        //"-drive", disk_argument,
+        //"-append", "tcti_disk=file",
+    };
 
-    qemu_init(args->argc, args->argv, args->envp);
+    // ... and run QEMU, in this thread.
+    qemu_init(ARRAY_SIZE(argv), (const char **)argv, (const char **)envp);
     qemu_main_loop();
     qemu_cleanup();
+    
+    // Clean up the memory allcoated for this process.
+    free(args->bios_dir);
+    free(args->kernel_filename);
+    free(args->initrd_filename);
+    if (args->memstate_args) {
+        free(args->memstate_args);
+    }
+    free(args);
     
     return NULL;
 }
@@ -50,57 +84,33 @@ void run_background_qemu(
                          const char* bios_path,
                          const char* memstate_path)
 {
-    
-    // FIXME: clean this whole thing up
-    
-    static char memstate_args[2048];
-    
-    // Create our disk arguments
-    snprintf(memstate_args, sizeof(memstate_args), "media=disk,id=memstate,if=none,file=%s",
-             memstate_path);
-    
     pthread_t thread;
     pthread_attr_t qosAttribute;
     
-    static struct qemu_args args;
+    struct qemu_args *args = calloc(1, sizeof(struct qemu_args));
     
-    static char kernel_filename[1024];
-    static char initrd_filename[1024];
-    static char bios_dir[1024];
+    args->kernel_filename  = calloc(PATH_MAX, sizeof(char));
+    args->initrd_filename  = calloc(PATH_MAX, sizeof(char));
+    args->bios_dir         = calloc(PATH_MAX, sizeof(char));
     
-    strncpy(kernel_filename, kernel_path, sizeof(kernel_filename));
-    strncpy(initrd_filename, initrd_path, sizeof(initrd_filename));
-    strncpy(bios_dir, bios_path, sizeof(bios_dir));
-    kernel_filename[1023] = '\0';
-    initrd_filename[1023] = '\0';
-    bios_dir[1023] = '\0';
+    // Create our "instant-boot" argument.
+    if (memstate_path) {
+        args->memstate_args = calloc(ARGUMENT_MAX, sizeof(char));
+        snprintf(args->memstate_args, ARGUMENT_MAX, "media=disk,id=memstate,if=none,file=%s",
+                 memstate_path);
+    } else {
+        args->memstate_args = NULL;
+    }
     
-    // Provide our QEMU command line and environment.
-    static char *envp[] = { NULL };
-    static char *argv[] = {
-        "qemu-system",
-        "-L", bios_dir,
-        "-display", "none",
-        "-kernel", kernel_filename,
-        "-initrd", initrd_filename,
-        "-m", "1G",
-        "-device", "virtio-net-pci,id=net1,netdev=net0",
-        "-netdev", "user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100,hostfwd=tcp::10022-:22",
-        "-device", "virtio-rng-pci",
-        "-drive", memstate_args,
-        "-loadvm", "nodisk",
-        //"-device", "virtio-blk-pci,id=disk1,drive=drive1",
-        //"-drive", disk_argument,
-        //"-append", "tcti_disk=file",
-    };
+    // Copy in each of our filenames.
+    strncpy(args->kernel_filename, kernel_path, PATH_MAX - 1);
+    strncpy(args->initrd_filename, initrd_path, PATH_MAX - 1);
+    strncpy(args->bios_dir, bios_path, PATH_MAX - 1);
     
-    args.argc = ARRAY_SIZE(argv);
-    args.argv = (const char**) argv;
-    args.envp = (const char**) envp;
-    
+    // Finally, spawn our thread.
     pthread_attr_init(&qosAttribute);
     pthread_attr_set_qos_class_np(&qosAttribute, QOS_CLASS_USER_INTERACTIVE, 0);
 
-    pthread_create(&thread, &qosAttribute, qemu_thread, &args);
+    pthread_create(&thread, &qosAttribute, qemu_thread, args);
     pthread_detach(thread);
 }

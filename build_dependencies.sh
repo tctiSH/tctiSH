@@ -590,7 +590,7 @@ QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-slirp-smbd --dis
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-gnutls --disable-vnc --disable-gcrypt"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-nettle --disable-virglrenderer --disable-libusb"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-libssh --disable-zstd --enable-slirp=git"
-QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --with-coroutine=libucontext"
+QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-sdl --with-coroutine=libucontext"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --enable-tcg-tcti --target-list=x86_64-softmmu"
 
 # Setup directories

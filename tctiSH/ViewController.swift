@@ -1,12 +1,12 @@
 //
-//  ViewController.swift
-//  SwiftTerm
+//  tctiSH primary view controller.
+//  Currently, primarily hosts our terminal.
 //
 //  Created by Miguel de Icaza on 3/19/19.
 //  Modified for tctiSH by @ktemkin.
 //
-//  Copyright © 2019 Miguel de Icaza. All rights reserved.
 //  Copyright © 2022 Kate Temkin. All rights reserved.
+//  Copyright © 2019 Miguel de Icaza. All rights reserved.
 //
 
 import UIKit
@@ -16,18 +16,21 @@ class ViewController: UIViewController {
     var tv: TerminalView!
     var launcher: QEMULauncher?
     
+    let padding: CGFloat = 7
+    
     var useAutoLayout: Bool {
-        get { true }
+        get { false }
     }
+    
     func makeFrame (keyboardDelta: CGFloat, _ fn: String = #function, _ ln: Int = #line) -> CGRect
     {
         if useAutoLayout {
             return CGRect.zero
         } else {
-            return CGRect (x: view.safeAreaInsets.left,
-                           y: view.safeAreaInsets.top,
-                           width: view.frame.width - view.safeAreaInsets.left - view.safeAreaInsets.right,
-                           height: view.frame.height - view.safeAreaInsets.top - keyboardDelta)
+            return CGRect (x: view.safeAreaInsets.left + padding,
+                           y: view.safeAreaInsets.top + padding,
+                           width: view.frame.width - view.safeAreaInsets.left - view.safeAreaInsets.right - (padding * 2),
+                           height: view.frame.height - view.safeAreaInsets.top - keyboardDelta - (padding * 2))
         }
     }
     
@@ -76,18 +79,15 @@ class ViewController: UIViewController {
     }
     
     override func viewDidLoad() {
-        
-        // To minimize startup time, start our kernel before anything else.
-        launcher = QEMULauncher()
-        launcher?.startQemuThread()
-        
         super.viewDidLoad()
         
-        // Start up our terminal emulator, which will be used for SSH.
-        tv = SshTerminalView(frame: makeFrame (keyboardDelta: 0))
+        // Start up our terminal emulator, which will display our actual terminal.
+        tv = TctiTermView(frame: makeFrame (keyboardDelta: 0))
         view.addSubview(tv)
+        
         setupKeyboardMonitor()
         tv.becomeFirstResponder()
+        
     }
     
     override func viewWillLayoutSubviews() {

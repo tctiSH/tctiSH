@@ -13,12 +13,12 @@
 		49BD1A63224207B5005A2252 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 49BD1A61224207B5005A2252 /* Main.storyboard */; };
 		49BD1A65224207B7005A2252 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 49BD1A64224207B7005A2252 /* Assets.xcassets */; };
 		49BD1A68224207B7005A2252 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 49BD1A66224207B7005A2252 /* LaunchScreen.storyboard */; };
+		8D4939E228C3245D00F57421 /* Settings.bundle in Resources */ = {isa = PBXBuildFile; fileRef = 8D4939E128C3245D00F57421 /* Settings.bundle */; };
 		8DA7A63728C19A4900FDBD78 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 4959FFDA2447F971001F42C0 /* SwiftTerm */; };
 		8DE8208628C167070035686B /* QEMULauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DE8208528C167070035686B /* QEMULauncher.swift */; };
 		8DE8208E28C176310035686B /* qemu_launcher.c in Sources */ = {isa = PBXBuildFile; fileRef = 8DE8208D28C176310035686B /* qemu_launcher.c */; };
 		8DE8209028C180770035686B /* initrd.img in Resources */ = {isa = PBXBuildFile; fileRef = 8DE8208F28C180770035686B /* initrd.img */; };
 		8DE8209228C1808F0035686B /* bzImage in Resources */ = {isa = PBXBuildFile; fileRef = 8DE8209128C1808F0035686B /* bzImage */; };
-		8DF5F02928C1BCC800FB1F1C /* qemu-x86_64-softmmu.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F02828C1BCC800FB1F1C /* qemu-x86_64-softmmu.framework */; };
 		8DF5F02A28C1BCC900FB1F1C /* qemu-x86_64-softmmu.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F02828C1BCC800FB1F1C /* qemu-x86_64-softmmu.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		8DF5F02C28C1BCE900FB1F1C /* qemu-x86_64-softmmu.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F02828C1BCC800FB1F1C /* qemu-x86_64-softmmu.framework */; };
 		8DF5F03728C1BCEB00FB1F1C /* gmodule-2.0.0.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F02D28C1BCEA00FB1F1C /* gmodule-2.0.0.framework */; };
@@ -84,6 +84,7 @@
 		49BD1A64224207B7005A2252 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		49BD1A67224207B7005A2252 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		49BD1A69224207B7005A2252 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		8D4939E128C3245D00F57421 /* Settings.bundle */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.plug-in"; path = Settings.bundle; sourceTree = "<group>"; };
 		8DE8208528C167070035686B /* QEMULauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QEMULauncher.swift; sourceTree = "<group>"; };
 		8DE8208728C16AA70035686B /* libqemu-x86_64-softmmu.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libqemu-x86_64-softmmu.dylib"; path = "qemu-tcti/build/libqemu-x86_64-softmmu.dylib"; sourceTree = "<group>"; };
 		8DE8208B28C176310035686B /* tctiSH-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "tctiSH-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -135,7 +136,6 @@
 				8DF5F04928C1BCF000FB1F1C /* gio-2.0.0.framework in Frameworks */,
 				8DA7A63728C19A4900FDBD78 /* SwiftTerm in Frameworks */,
 				8DF5F02C28C1BCE900FB1F1C /* qemu-x86_64-softmmu.framework in Frameworks */,
-				8DF5F02928C1BCC800FB1F1C /* qemu-x86_64-softmmu.framework in Frameworks */,
 				8DF5F03728C1BCEB00FB1F1C /* gmodule-2.0.0.framework in Frameworks */,
 				8DF5F03928C1BCEC00FB1F1C /* glib-2.0.0.framework in Frameworks */,
 				8DF5F04728C1BCF000FB1F1C /* gobject-2.0.0.framework in Frameworks */,
@@ -220,6 +220,7 @@
 				8DE8208B28C176310035686B /* tctiSH-Bridging-Header.h */,
 				8DF5F05A28C2815100FB1F1C /* Theming.swift */,
 				8DF5F05C28C281D100FB1F1C /* ColorLoader.swift */,
+				8D4939E128C3245D00F57421 /* Settings.bundle */,
 			);
 			path = tctiSH;
 			sourceTree = "<group>";
@@ -275,7 +276,7 @@
 			isa = PBXProject;
 			attributes = {
 				LastSwiftUpdateCheck = 1130;
-				LastUpgradeCheck = 1010;
+				LastUpgradeCheck = 1400;
 				ORGANIZATIONNAME = "Kate Temkin";
 				TargetAttributes = {
 					49BD1A59224207B5005A2252 = {
@@ -314,6 +315,7 @@
 				8DF5F05428C1C18200FB1F1C /* efi-virtio.rom in Resources */,
 				8DF5F05028C1C16000FB1F1C /* linuxboot_dma.bin in Resources */,
 				8DF5F05128C1C16000FB1F1C /* kvmvapic.bin in Resources */,
+				8D4939E228C3245D00F57421 /* Settings.bundle in Resources */,
 				8DF5F05228C1C16000FB1F1C /* vgabios-stdvga.bin in Resources */,
 				8DF5F04C28C1C07D00FB1F1C /* bios-256k.bin in Resources */,
 				8DE8209228C1808F0035686B /* bzImage in Resources */,
@@ -431,6 +433,7 @@
 				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
 				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
 				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
 				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
 				CLANG_WARN_STRICT_PROTOTYPES = YES;
 				CLANG_WARN_SUSPICIOUS_MOVE = YES;
@@ -493,6 +496,7 @@
 				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
 				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
 				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
 				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
 				CLANG_WARN_STRICT_PROTOTYPES = YES;
 				CLANG_WARN_SUSPICIOUS_MOVE = YES;

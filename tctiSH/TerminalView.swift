@@ -13,7 +13,8 @@ import SwiftSH
 import Combine
 
 
-public class SshTerminalView: TerminalView, TerminalViewDelegate {
+/// Termainal view that behaves like an Xterm into our linux environment.
+public class TctiTermView: TerminalView, TerminalViewDelegate {
     var shell: SSHShell?
     var authenticationChallenge: AuthenticationChallenge?
     
@@ -25,13 +26,10 @@ public class SshTerminalView: TerminalView, TerminalViewDelegate {
     
     public override init (frame: CGRect)
     {
-        super.init (frame: frame, font: UIFont(name: "Menlo-Regular", size: 16))
-        terminalDelegate = self
+        super.init (frame: frame, font: UIFont(name: "Menlo-Regular", size: 14))
+        self.terminalDelegate = self
         
-        layer.borderWidth = 5
-        
-        // FIXME: This is just a workaround until we have vm image save/loading.
-        // Set up a timer to periodically poll our connection.
+        // Set up a timer to periodically poll our VM until it's ready for connection.
         timer = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
         subscription = timer?.sink(receiveValue: { _ in
             if self.connected {
@@ -40,6 +38,10 @@ public class SshTerminalView: TerminalView, TerminalViewDelegate {
                 self.connect()
             }
         })
+        
+        // Handle settings changes.
+        NotificationCenter.default.addObserver(self, selector: #selector(TctiTermView.applySettings), name: UserDefaults.didChangeNotification, object: nil)
+        applySettings()
        
         // Create the SSH provider we'll use to connect to our instance.
         //
@@ -51,11 +53,30 @@ public class SshTerminalView: TerminalView, TerminalViewDelegate {
                                   port: 10022,
                                   terminal: "xterm-256color")
         shell?.log.enabled = false
+        
+        self.bounces = false
     }
     
+    /// Callback notified each time a setting is changed.
+    @objc
+    func applySettings() {
+        let std = UserDefaults.standard
+        
+        // Font size.
+        var new_size = CGFloat(std.integer(forKey:"font_size"))
+        if new_size == 0 {
+            new_size = self.font.pointSize
+        }
+        self.font = UIFont(name: self.font.fontName, size: new_size) ?? self.font
+        
+        // TODO: apply themes, here
+        
+    }
+    
+    
     /// Sets up use of the user's theme.
-    public func setUpTheming() {
-        // FIXME: have this be user-specifiable
+    func setUpTheming() {
+       // FIXME: have this be user-specifiable
         let theme = DefaultThemes.solzariedDark
         self.installColors(theme.ansi)
         
@@ -64,7 +85,6 @@ public class SshTerminalView: TerminalView, TerminalViewDelegate {
         t.installPalette(colors: theme.ansi)
         t.foregroundColor = theme.foreground
         t.backgroundColor = theme.background
-        t.updateFullScreen()
         
         self.nativeBackgroundColor = makeUIColor(theme.background)
         self.nativeForegroundColor = makeUIColor(theme.foreground)
@@ -78,6 +98,7 @@ public class SshTerminalView: TerminalView, TerminalViewDelegate {
     }
     
     
+    // Helper that converts a SwiftTerm color into a UI color.
     private func makeUIColor(_ color: SwiftTerm.Color) -> UIColor
     {
         UIColor (red: CGFloat (color.red) / 65535.0,
@@ -86,14 +107,8 @@ public class SshTerminalView: TerminalView, TerminalViewDelegate {
                  alpha: 1.0)
     }
     
-  
-    func connect()
-    {
-        if let s = shell {
-            setUpTheming()
-            
-            s.withCallback { [unowned self] (data: Data?, error: Data?) in
-                if let d = data {
+    func sshEventCallback(data: Data?, error: Data?) {
+        if let d = data {
                     let sliced = Array(d) [0...]
                     
                     // We chunk the processing of data, as the SSH library might have
@@ -113,6 +128,17 @@ public class SshTerminalView: TerminalView, TerminalViewDelegate {
                         next = end
                     }
                 }
+
+        
+    }
+  
+    func connect()
+    {
+        if let s = shell {
+            setUpTheming()
+            
+            s.withCallback { [unowned self] (data: Data?, error: Data?) in
+                sshEventCallback(data: data, error: error)
             }
             .connect()
             .authenticate(.byPassword(username: "root", password: "toor"))
@@ -141,6 +167,7 @@ public class SshTerminalView: TerminalView, TerminalViewDelegate {
     public func setTerminalTitle(source: TerminalView, title: String) {
         //
     }
+    
     
     public func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
         if let s = shell {

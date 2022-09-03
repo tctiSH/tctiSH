@@ -22,8 +22,6 @@ public class QEMULauncher {
         // ... create a temporary copy of our starting memory state...
         let memstatePath = createTemporaryCopy(ofResource: "memory_state", withExtension: "qcow").path
         
-        NSLog(memstatePath)
-        
         // ... and spawn our TCTI execution layer.
         run_background_qemu(kernelPath, initrdPath, bundlePrefix, memstatePath)
         
