@@ -1,2 +1,3 @@
 ${PODS_ROOT}/Target Support Files/Pods-tctiSH/Pods-tctiSH-frameworks.sh
+${BUILT_PRODUCTS_DIR}/BlueSocket/Socket.framework
 ${BUILT_PRODUCTS_DIR}/SwiftSH/SwiftSH.framework

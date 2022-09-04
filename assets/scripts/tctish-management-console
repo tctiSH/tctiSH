@@ -1,0 +1,17 @@
+#!/bin/bash
+
+# Print usage if not provided
+if [ $# -ne 0 ]; then
+	echo "usage: $0"
+	exit 0
+fi
+
+# Select a different path to our host depending if this is run inside.
+if [[ $(uname -r) == *"tctish"* ]]; then
+	QMP_TARGET="192.168.100.2 10045"
+else
+	QMP_TARGET="127.0.0.1 10045"
+fi
+
+# Perform the command.
+nc -c $QMP_TARGET

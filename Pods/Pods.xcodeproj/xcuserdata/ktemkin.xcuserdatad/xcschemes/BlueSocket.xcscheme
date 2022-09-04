@@ -14,9 +14,9 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "8B0653184D96E956F6D875182E75AE5A"
-               BuildableName = "SwiftSH.framework"
-               BlueprintName = "SwiftSH"
+               BlueprintIdentifier = "9717BE7FCECEF299173A5D71C18B19F5"
+               BuildableName = "Socket.framework"
+               BlueprintName = "BlueSocket"
                ReferencedContainer = "container:Pods.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>

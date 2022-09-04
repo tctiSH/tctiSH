@@ -6,5 +6,6 @@ target 'tctiSH' do
 
   # Pods for tctiSH
   pod 'SwiftSH', :git => 'https://github.com/Frugghi/SwiftSH.git', :branch => 'master'
+  pod 'BlueSocket'
 
 end

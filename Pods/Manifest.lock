@@ -1,4 +1,5 @@
 PODS:
+  - BlueSocket (2.0.3)
   - SwiftSH (0.1.2):
     - SwiftSH/Libssh2 (= 0.1.2)
   - SwiftSH/Core (0.1.2)
@@ -6,7 +7,12 @@ PODS:
     - SwiftSH/Core
 
 DEPENDENCIES:
+  - BlueSocket
   - SwiftSH (from `https://github.com/Frugghi/SwiftSH.git`, branch `master`)
+
+SPEC REPOS:
+  trunk:
+    - BlueSocket
 
 EXTERNAL SOURCES:
   SwiftSH:
@@ -19,8 +25,9 @@ CHECKOUT OPTIONS:
     :git: https://github.com/Frugghi/SwiftSH.git
 
 SPEC CHECKSUMS:
+  BlueSocket: e06b19d90362672ece8d298cd6bb724e9937fa0b
   SwiftSH: af82ce3d917de027cd8d9fdb2cea652137dace0d
 
-PODFILE CHECKSUM: d0d2834d2c41c33cd4052956412a7d041992d6e9
+PODFILE CHECKSUM: cd29b5daee1f95cc25b65cf4b1e44ad7ddf48646
 
 COCOAPODS: 1.11.3

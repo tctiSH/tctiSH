@@ -13,10 +13,11 @@
 		49BD1A63224207B5005A2252 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 49BD1A61224207B5005A2252 /* Main.storyboard */; };
 		49BD1A65224207B7005A2252 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 49BD1A64224207B7005A2252 /* Assets.xcassets */; };
 		49BD1A68224207B7005A2252 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 49BD1A66224207B7005A2252 /* LaunchScreen.storyboard */; };
+		81B605AD3C0955DC2C31EBCC /* Pods_tctiSH.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C9FFBC130DA1A3B7A450025B /* Pods_tctiSH.framework */; };
 		8D4939E228C3245D00F57421 /* Settings.bundle in Resources */ = {isa = PBXBuildFile; fileRef = 8D4939E128C3245D00F57421 /* Settings.bundle */; };
 		8D4939E428C33B0300F57421 /* empty.qcow in Resources */ = {isa = PBXBuildFile; fileRef = 8D4939E328C33B0300F57421 /* empty.qcow */; };
 		8DA7A63728C19A4900FDBD78 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 4959FFDA2447F971001F42C0 /* SwiftTerm */; };
-		8DE8208628C167070035686B /* QEMULauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DE8208528C167070035686B /* QEMULauncher.swift */; };
+		8DE8208628C167070035686B /* QEMU.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DE8208528C167070035686B /* QEMU.swift */; };
 		8DE8208E28C176310035686B /* qemu_launcher.c in Sources */ = {isa = PBXBuildFile; fileRef = 8DE8208D28C176310035686B /* qemu_launcher.c */; };
 		8DE8209028C180770035686B /* initrd.img in Resources */ = {isa = PBXBuildFile; fileRef = 8DE8208F28C180770035686B /* initrd.img */; };
 		8DE8209228C1808F0035686B /* bzImage in Resources */ = {isa = PBXBuildFile; fileRef = 8DE8209128C1808F0035686B /* bzImage */; };
@@ -86,7 +87,7 @@
 		49BD1A69224207B7005A2252 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		8D4939E128C3245D00F57421 /* Settings.bundle */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.plug-in"; path = Settings.bundle; sourceTree = "<group>"; };
 		8D4939E328C33B0300F57421 /* empty.qcow */ = {isa = PBXFileReference; lastKnownFileType = file; name = empty.qcow; path = assets/empty.qcow; sourceTree = "<group>"; };
-		8DE8208528C167070035686B /* QEMULauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QEMULauncher.swift; sourceTree = "<group>"; };
+		8DE8208528C167070035686B /* QEMU.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QEMU.swift; sourceTree = "<group>"; };
 		8DE8208728C16AA70035686B /* libqemu-x86_64-softmmu.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libqemu-x86_64-softmmu.dylib"; path = "qemu-tcti/build/libqemu-x86_64-softmmu.dylib"; sourceTree = "<group>"; };
 		8DE8208B28C176310035686B /* tctiSH-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "tctiSH-Bridging-Header.h"; sourceTree = "<group>"; };
 		8DE8208C28C176310035686B /* qemu_launcher.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = qemu_launcher.h; sourceTree = "<group>"; };
@@ -143,6 +144,7 @@
 				8DF5F03B28C1BCEC00FB1F1C /* gthread-2.0.0.framework in Frameworks */,
 				8DF5F04528C1BCEF00FB1F1C /* charset.1.framework in Frameworks */,
 				8DF5F04128C1BCED00FB1F1C /* pixman-1.0.framework in Frameworks */,
+				81B605AD3C0955DC2C31EBCC /* Pods_tctiSH.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -216,7 +218,7 @@
 				49BD1A66224207B7005A2252 /* LaunchScreen.storyboard */,
 				49BD1A69224207B7005A2252 /* Info.plist */,
 				4936D22024512AF2005CEE27 /* TerminalView.swift */,
-				8DE8208528C167070035686B /* QEMULauncher.swift */,
+				8DE8208528C167070035686B /* QEMU.swift */,
 				8DE8208C28C176310035686B /* qemu_launcher.h */,
 				8DE8208D28C176310035686B /* qemu_launcher.c */,
 				8DE8208B28C176310035686B /* tctiSH-Bridging-Header.h */,
@@ -383,7 +385,7 @@
 				49BD1A60224207B5005A2252 /* ViewController.swift in Sources */,
 				8DF5F05D28C281D100FB1F1C /* ColorLoader.swift in Sources */,
 				49BD1A5E224207B5005A2252 /* AppDelegate.swift in Sources */,
-				8DE8208628C167070035686B /* QEMULauncher.swift in Sources */,
+				8DE8208628C167070035686B /* QEMU.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -14,7 +14,6 @@ import SwiftTerm
 
 class ViewController: UIViewController {
     var tv: TerminalView!
-    var launcher: QEMULauncher?
     
     let padding: CGFloat = 7
     

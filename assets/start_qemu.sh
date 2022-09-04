@@ -11,7 +11,7 @@ INSTANT_STARTUP=0
 INITIAL_RAM_SIZE="1G"
 
 # The size of the image used to emulate iOS storage.
-STANDIN_IMAGE_SIZE="100G"
+STANDIN_IMAGE_SIZE="200G"
 
 # If we have a ramdisk directory, use it to create a ramdisk for TCTI.
 if [ -d ramdisk ]; then
@@ -57,7 +57,7 @@ fi
 # If we're using instant startup, instantly load our saved state.
 if [ $INSTANT_STARTUP != 0 ]; then
 	echo "Using instant startup."
-	CONSOLE_QEMU_OPTIONS="$CONSOLE_QEMU_OPTIONS -loadvm nodisk"
+	CONSOLE_QEMU_OPTIONS="$CONSOLE_QEMU_OPTIONS -loadvm instantboot"
 fi
 
 # If we're not using SSH, switch our mode to nograpnic.
@@ -66,12 +66,12 @@ if [ $USE_SSH == 0 ]; then
 	CONSOLE_QEMU_OPTIONS="$CONSOLE_QEMU_OPTIONS -nographic"
 	BACKGROUND=""
 else 
+	CONSOLE_QEMU_OPTIONS="$CONSOLE_QEMU_OPTIONS -display none"
 	BACKGROUND="&"
 fi
 
 # Run TCTI.
 ../qemu-tcti/build_mac/qemu-system-${TCTI_ARCH} \
-	-display none \
 	-kernel bzImage \
 	-initrd initrd.img \
 	-m $INITIAL_RAM_SIZE \
@@ -79,9 +79,9 @@ fi
 	-netdev user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100,hostfwd=tcp::10022-:22,hostfwd=tcp::10023-:23 \
 	-device virtio-rng-pci \
 	$CONSOLE_QEMU_OPTIONS \
-	-append "$CONSOLE_KERNEL_OPTIONS" $BACKGROUND
-
-	#-drive media=disk,id=memstate,if=none,file=memory_state.qcow \
+	-append "$CONSOLE_KERNEL_OPTIONS" \
+	-monitor tcp:localhost:10044,server,wait=off \
+	-monitor tcp:localhost:10045,server,wait=off $BACKGROUND
 QEMU_PID=$!
 
 # If we're not using SSH, forground QEMU and just use that.
