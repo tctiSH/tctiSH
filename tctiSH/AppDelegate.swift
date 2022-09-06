@@ -27,12 +27,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             "disk_name": "disk",
             "font_size": 14,
             "theme": "solzarizedDark",
-            "attempting_boot": false
+            "attempting_boot": false,
+            "jit_mode": "jit_when_possible"
         ])
 
-#if !targetEnvironment(macCatalyst)
-        // If possible, attempt to enable JIT for this process.
-        AppDelegate.usingJitHacks = set_up_jit()
+        let settingsAllowJit = UserDefaults.standard.string(forKey: "jit_mode") == "jit_when_possible"
+
+#if targetEnvironment(macCatalyst)
+        AppDelegate.usingJitHacks = settingsAllowJit
+#else
+        if settingsAllowJit {
+            // If possible, attempt to enable JIT for this process.
+            AppDelegate.usingJitHacks = set_up_jit()
+        }
 #endif
 
         // If we attempted a boot, but did not finish one, something went wrong last time.
