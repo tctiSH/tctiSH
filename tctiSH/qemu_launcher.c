@@ -28,23 +28,18 @@ void qemu_init(int argc, const char *argv[], const char *envp[]);
 void qemu_main_loop(void);
 void qemu_cleanup(void);
 
-int bdrv_all_has_snapshot(const char *name, bool has_devices, char **devices, void **errp);
-
 // Structure for passing arguments to our QEMU thread.
 struct qemu_args {
     char *bios_dir;
     char *kernel_filename;
     char *initrd_filename;
     char *disk_args;
-    bool preferABootImage;
+    char *snapshot_name;
 };
 
 /// Core thread that runs our background QEMU.
 static void* qemu_thread(void *raw_args) {
     struct qemu_args *args = raw_args;
-    
-    // By default, use the preferred A/B instant-boot image.
-    char *bootImage = args->preferABootImage ? "instantbootA" : "instantbootB";
     
     // Provide our QEMU command line and environment...
     char *envp[] = { NULL };
@@ -86,12 +81,20 @@ static void* qemu_thread(void *raw_args) {
         "-monitor", "tcp:localhost:10045,server,wait=off",
         
         // Resume from our instant boot cache, if possible.
-        "-loadvm", bootImage,
+        "-loadvm", args->snapshot_name,
     };
     
+    // Compute the number of arguments.
+    int argc = ARRAY_SIZE(argv);
+    
+    // If we don't have a snapshot, remove those arguments.
+    // (This is a "recovery boot").
+    if (!args->snapshot_name) {
+        argc -= 2;
+    }
     
     // Finally, run the lightweight VM.
-    qemu_init(ARRAY_SIZE(argv), (const char **)argv, (const char **)envp);
+    qemu_init(argc, (const char **)argv, (const char **)envp);
     qemu_main_loop();
     qemu_cleanup();
     
@@ -110,7 +113,7 @@ void run_background_qemu(const char* kernel_path,
                          const char* initrd_path,
                          const char* bios_path,
                          const char* disk_path,
-                         bool preferABootImage)
+                         const char* snapshot_name)
 {
     pthread_t thread;
     pthread_attr_t qosAttribute;
@@ -120,7 +123,11 @@ void run_background_qemu(const char* kernel_path,
     args->kernel_filename  = calloc(PATH_MAX, sizeof(char));
     args->initrd_filename  = calloc(PATH_MAX, sizeof(char));
     args->bios_dir         = calloc(PATH_MAX, sizeof(char));
-    args->preferABootImage = preferABootImage;
+    if (snapshot_name) {
+        args->snapshot_name = calloc(PATH_MAX, sizeof(char));
+    } else {
+        args->snapshot_name = NULL;
+    }
     
     // Create our disk argument.
     args->disk_args         = calloc(ARGUMENT_MAX, sizeof(char));
@@ -131,6 +138,9 @@ void run_background_qemu(const char* kernel_path,
     strncpy(args->kernel_filename, kernel_path, PATH_MAX - 1);
     strncpy(args->initrd_filename, initrd_path, PATH_MAX - 1);
     strncpy(args->bios_dir, bios_path, PATH_MAX - 1);
+    if (args->snapshot_name) {
+        strncpy(args->snapshot_name, snapshot_name, PATH_MAX - 1);
+    }
     
     // Finally, spawn our thread.
     pthread_attr_init(&qosAttribute);

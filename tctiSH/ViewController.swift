@@ -84,6 +84,12 @@ class ViewController: UIViewController {
         tv = TctiTermView(frame: makeFrame (keyboardDelta: 0))
         view.addSubview(tv)
         
+        // If we're doing a recovery boot, provide a message letting the user know
+        // that this will take a hot moment.
+        if UserDefaults.standard.string(forKey: "resume_behavior") == "recovery_boot" {
+            tv.feed(text: "(Recovery booting; startup will take a bit.)\r\n\r\n")
+        }
+        
         setupKeyboardMonitor()
         tv.becomeFirstResponder()
         

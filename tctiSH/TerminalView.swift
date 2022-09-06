@@ -17,10 +17,9 @@ import Combine
 public class TctiTermView: TerminalView, TerminalViewDelegate {
     var shell: SSHShell?
     var authenticationChallenge: AuthenticationChallenge?
-    
     var connected : Bool = false
     
-    
+    /// Timer that is used to poll for connections if our connection drops.
     private var timer: Publishers.Autoconnect<Timer.TimerPublisher>? = nil
     private var subscription: AnyCancellable? = nil
     
@@ -84,7 +83,6 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         
         let t = getTerminal()
         
-        t.installPalette(colors: theme.ansi)
         t.foregroundColor = theme.foreground
         t.backgroundColor = theme.background
         

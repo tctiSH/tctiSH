@@ -15,6 +15,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         
+        // Register our default values; which will be used for any unset values.
+        UserDefaults.standard.register(defaults: [
+            "resume_behavior": "persistent_boot",
+            "boot_snapshot": "",
+            "disk_name": "disk",
+            "font_size": 14,
+            "theme": "solzarizedDark"
+        ])
+        
         // To minimize startup time, start our kernel before anything else.
         qemu = QEMUInterface()
         qemu!.startQemuThread()
@@ -22,22 +31,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         return true
     }
 
-    func applicationWillResignActive(_ application: UIApplication) {
-        // Sent when the application is about to move from active to inactive state. This can occur for certain types of temporary interruptions (such as an incoming phone call or SMS message) or when the user quits the application and it begins the transition to the background state.
-        // Use this method to pause ongoing tasks, disable timers, and invalidate graphics rendering callbacks. Games should use this method to pause the game.
-    }
-
+    
     func applicationDidEnterBackground(_ application: UIApplication) {
         let taskIdentifier = application.beginBackgroundTask {}
         qemu?.performBackgroundSave()
         application.endBackgroundTask(taskIdentifier)
     }
 
-    /// Automatically save our VM state on exit.
-    func applicationWillTerminate(_ application: UIApplication) {
-    }
-    
-    
 
 }
 

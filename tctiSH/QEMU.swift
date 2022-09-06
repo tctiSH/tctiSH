@@ -31,10 +31,10 @@ public class QEMUInterface {
         let diskPath = getPersistentStore().path
         
         // ... figure out if we're using our A or B boot image ...
-        let preferAImage = (getBootABStatus() == "A")
+        let bootImageName = getBootImageName()
             
         // ... and run QEMU.
-        run_background_qemu(kernelPath, initrdPath, bundlePrefix, diskPath, preferAImage);
+        run_background_qemu(kernelPath, initrdPath, bundlePrefix, diskPath, bootImageName);
     }
     
     /// Saves the state of the running QEMU instance.
@@ -51,7 +51,6 @@ public class QEMUInterface {
     }
     
     /// Saves the state of the running QEMU instance in a background-safe manner.
-    /// With no arguments, loads from the Instant Boot cache.
     func performBackgroundSave() {
         let nextABStatus = getNextBootABStatus()
         let nextTag = "instantboot\(nextABStatus)"
@@ -61,20 +60,41 @@ public class QEMUInterface {
         setABBootStatus(status: nextABStatus)
     }
     
+    /// Gets the boot image used for the user-selected boot mode.
+    private func getBootImageName() -> String? {
+        let mode = UserDefaults.standard.string(forKey: "resume_behavior")
+        
+        switch mode {
+        case "persistent_boot":
+            return "instantboot\(getBootABStatus())"
+        case "snapshot_boot":
+            return UserDefaults.standard.string(forKey: "boot_snapshot")
+        case "recovery_boot":
+            return nil
+        case "clean_boot":
+            return "instantboot"
+        default:
+            NSLog("got invalid settings from settings pane! no boot mode \(String(describing: mode))")
+            exit(1);
+        }
+    }
+    
 
     /// Returns the URL to a qcow image that will acts as our persistent store.
     /// TODO: figure out if we want to use qcow2, or if we should implement a different file backend?
     private func getPersistentStore() -> URL
     {
+        let diskName = UserDefaults.standard.string(forKey: "disk_name") ?? "disk"
+        
         // Figure out where our persistent store would be located.
         var targetURL = try! FileManager.default.url(
             for: .documentDirectory,
             in: .userDomainMask,
-            appropriateFor: URL(fileURLWithPath: "disk.qcow"),
+            appropriateFor: URL(fileURLWithPath: "\(diskName).qcow"),
             create: false)
         
         // Scult our filename so it ends in "disk.qcow".
-        targetURL.appendPathComponent("disk")
+        targetURL.appendPathComponent(diskName)
         targetURL.appendPathExtension("qcow")
 
         // If it doesn't exist, create a new copy based on our empty disk.
@@ -90,25 +110,26 @@ public class QEMUInterface {
     /// Returns the path to the file that contains our A/B boot status.
     private func getBootABStatusFile() -> URL
     {
+        let diskName = UserDefaults.standard.string(forKey: "disk_name") ?? "disk"
+        
         // Figure out where our persistent store would be located.
         var targetURL = try! FileManager.default.url(
             for: .documentDirectory,
             in: .userDomainMask,
-            appropriateFor: URL(fileURLWithPath: "ab_status.conf"),
+            appropriateFor: URL(fileURLWithPath: "\(diskName).conf"),
             create: true)
         
         // Scult our filename so it ends in "ab_status.conf".
-        targetURL.appendPathComponent("ab_status")
+        targetURL.appendPathComponent(diskName)
         targetURL.appendPathExtension("conf")
 
-        // If we don't have an AB status file, create one.
+        // If we don't have an AB status file, create an empty one.
         if !FileManager.default.fileExists(atPath: targetURL.path) {
-            try! "A".write(to: targetURL, atomically: true, encoding: .utf8)
+            try! "".write(to: targetURL, atomically: true, encoding: .utf8)
         }
     
         return targetURL
     }
-    
     
     /// Returns whether we're booting using the 'A' or 'B' instant boot image.
     /// Allows us to have a fallback when saving.
@@ -116,7 +137,6 @@ public class QEMUInterface {
         let configFile = getBootABStatusFile()
         return try! String(contentsOf: configFile)
     }
-    
     
     /// Returns the next place to _save_ a boot image; the opposite of the A/B
     /// boot image last written.

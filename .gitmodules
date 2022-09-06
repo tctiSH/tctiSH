@@ -6,4 +6,4 @@
 	url = git@github.com:ktemkin/ish.git
 [submodule "third-party/SwiftTerm"]
 	path = third-party/SwiftTerm
-	url = https://github.com/migueldeicaza/SwiftTerm.git
+	url = https://github.com/tctish/SwiftTerm.git

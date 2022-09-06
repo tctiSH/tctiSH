@@ -7,81 +7,49 @@
       <BreakpointProxy
          BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
          <BreakpointContent
-            uuid = "3289B893-E786-4BE1-A55B-A30C5CD4C9E7"
-            shouldBeEnabled = "No"
+            uuid = "7E3F2890-7B2C-433E-B877-E991391845F5"
+            shouldBeEnabled = "Yes"
             ignoreCount = "0"
             continueAfterRunningActions = "No"
-            filePath = "tctiSH/UIKitSshTerminalView.swift"
+            filePath = "tctiSH/TerminalView.swift"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "54"
-            endingLineNumber = "54"
-            landmarkName = "connect()"
+            startingLineNumber = "192"
+            endingLineNumber = "192"
+            landmarkName = "requestOpenLink(source:link:params:)"
             landmarkType = "7">
-         </BreakpointContent>
-      </BreakpointProxy>
-      <BreakpointProxy
-         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
-         <BreakpointContent
-            uuid = "0E0256E3-C764-4E19-8BD5-6E241AAF1D50"
-            shouldBeEnabled = "No"
-            ignoreCount = "0"
-            continueAfterRunningActions = "No"
-            filePath = "tctiSH/UIKitSshTerminalView.swift"
-            startingColumnNumber = "9223372036854775807"
-            endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "70"
-            endingLineNumber = "70"
-            landmarkName = "connect()"
-            landmarkType = "7">
-         </BreakpointContent>
-      </BreakpointProxy>
-      <BreakpointProxy
-         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
-         <BreakpointContent
-            uuid = "3867E16F-0D75-48B8-9A3F-8A5F5947C7CD"
-            shouldBeEnabled = "No"
-            ignoreCount = "0"
-            continueAfterRunningActions = "No"
-            filePath = "tctiSH/qemu_launcher.c"
-            startingColumnNumber = "9223372036854775807"
-            endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "124"
-            endingLineNumber = "124"
-            landmarkName = "run_background_qemu(kernel_path, initrd_path, bios_path, disk_path, preferABootImage)"
-            landmarkType = "9">
-         </BreakpointContent>
-      </BreakpointProxy>
-      <BreakpointProxy
-         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
-         <BreakpointContent
-            uuid = "CA9EBD1F-B681-4355-8E85-1F87F6C0D984"
-            shouldBeEnabled = "No"
-            ignoreCount = "0"
-            continueAfterRunningActions = "No"
-            filePath = "tctiSH/QEMULauncher.swift"
-            startingColumnNumber = "9223372036854775807"
-            endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "27"
-            endingLineNumber = "27"
-            landmarkName = "startQemuThread()"
-            landmarkType = "7">
-         </BreakpointContent>
-      </BreakpointProxy>
-      <BreakpointProxy
-         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
-         <BreakpointContent
-            uuid = "0957ECBF-A938-483E-9D0F-5566FD79F738"
-            shouldBeEnabled = "No"
-            ignoreCount = "0"
-            continueAfterRunningActions = "No"
-            filePath = "tctiSH/qemu_launcher.c"
-            startingColumnNumber = "9223372036854775807"
-            endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "94"
-            endingLineNumber = "94"
-            landmarkName = "qemu_thread(raw_args)"
-            landmarkType = "9">
+            <Locations>
+               <Location
+                  uuid = "7E3F2890-7B2C-433E-B877-E991391845F5 - b20052da9b98a246"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "tctiSH.TctiTermView.requestOpenLink(source: SwiftTerm.TerminalView, link: Swift.String, params: Swift.Dictionary&lt;Swift.String, Swift.String&gt;) -&gt; ()"
+                  moduleName = "tctiSH"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/ktemkin/Projects/tctiSH/tctiSH/TerminalView.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "192"
+                  endingLineNumber = "192"
+                  offsetFromSymbolStart = "408">
+               </Location>
+               <Location
+                  uuid = "7E3F2890-7B2C-433E-B877-E991391845F5 - b20052da9b98a246"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "tctiSH.TctiTermView.requestOpenLink(source: SwiftTerm.TerminalView, link: Swift.String, params: Swift.Dictionary&lt;Swift.String, Swift.String&gt;) -&gt; ()"
+                  moduleName = "tctiSH"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/ktemkin/Projects/tctiSH/tctiSH/TerminalView.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "192"
+                  endingLineNumber = "192"
+                  offsetFromSymbolStart = "520">
+               </Location>
+            </Locations>
          </BreakpointContent>
       </BreakpointProxy>
    </Breakpoints>
