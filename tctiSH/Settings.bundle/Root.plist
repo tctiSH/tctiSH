@@ -56,6 +56,26 @@
 		</dict>
 		<dict>
 			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Title</key>
+			<string>JIT Mode</string>
+			<key>Key</key>
+			<string>jit_mode</string>
+			<key>DefaultValue</key>
+			<string>JIT When Possible</string>
+			<key>Titles</key>
+			<array>
+				<string>JIT When Possible</string>
+				<string>Always Use TCTI</string>
+			</array>
+			<key>Values</key>
+			<array>
+				<string>jit_when_possible</string>
+				<string>never_jit</string>
+			</array>
+		</dict>
+		<dict>
+			<key>Type</key>
 			<string>PSGroupSpecifier</string>
 			<key>Title</key>
 			<string>Appearance</string>

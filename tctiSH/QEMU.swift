@@ -32,9 +32,12 @@ public class QEMUInterface {
         
         // ... figure out if we're using our A or B boot image ...
         let bootImageName = getBootImageName(forceRecoveryBoot: forceRecoveryBoot)
+
+        // ... find where our QEMU binary is actually located ...
+        let qemuImage = getAppropriateQemuFramework().path
             
         // ... and run QEMU.
-        run_background_qemu(kernelPath, initrdPath, bundlePrefix, diskPath, bootImageName);
+        run_background_qemu(qemuImage, kernelPath, initrdPath, bundlePrefix, diskPath, bootImageName, AppDelegate.usingJitHacks);
     }
     
     /// Saves the state of the running QEMU instance.
@@ -59,6 +62,27 @@ public class QEMUInterface {
         Thread.sleep(forTimeInterval: TimeInterval(2))
         setABBootStatus(status: nextABStatus)
     }
+
+
+    /// Fetches the path to the QEMU framework appropriate for this environment.
+    /// Will return a JIT-capable image if JIT is supported; or a TCTI image otherwise.
+    private func getAppropriateQemuFramework() -> URL {
+        var frameworkURL = Bundle.main.bundleURL
+        frameworkURL.appendPathComponent("Frameworks", isDirectory: true)
+
+        // Select our QEMU binary based on whether or not we're allowed to JIT.
+        var qemuName = "qemu-x86_64-softmmu"
+        if (AppDelegate.usingJitHacks) {
+            qemuName += "_jit"
+            AppDelegate.usingJitHacks = true
+        }
+
+        frameworkURL.appendPathComponent("\(qemuName).framework", isDirectory: true)
+        frameworkURL.appendPathComponent(qemuName)
+
+        return frameworkURL
+    }
+
     
     /// Gets the boot image used for the user-selected boot mode.
     private func getBootImageName(forceRecoveryBoot: Bool) -> String? {

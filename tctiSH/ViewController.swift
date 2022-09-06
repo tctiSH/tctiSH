@@ -88,6 +88,13 @@ class ViewController: UIViewController {
         view.addSubview(tv)
 
 
+        // If JIT hacks are running, give the user a nice message.
+        if AppDelegate.usingJitHacks {
+            NSLog("JIT hacks online.")
+            tv.feed(text: "[Using full-JIT for magic speed! 🐆]\r\n\r\n")
+        }
+
+
         // If we're doing a recovery boot by user choice, provide a message letting the
         // user know that this will take a hot moment.
         if UserDefaults.standard.string(forKey: "resume_behavior") == "recovery_boot" {

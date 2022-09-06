@@ -360,9 +360,9 @@ build () {
 }
 
 
-build_qemu () {
+build_qemu_tcti () {
 	NAME="QEMU_TCTI"
-    QEMU_DIR="$BASEDIR/qemu-tcti"
+    QEMU_DIR="$BASEDIR/qemu-tcti/qemu_tcti"
 
     QEMU_CFLAGS="$CFLAGS"
     QEMU_CXXFLAGS="$CXXFLAGS"
@@ -375,10 +375,10 @@ build_qemu () {
     LDFLAGS=
 
     pwd="$(pwd)"
+	mkdir -p "$QEMU_DIR"
     cd "$QEMU_DIR"
     echo "${GREEN}Configuring QEMU...${NC}"
-    ./configure --prefix="$PREFIX" --host="$CHOST" --cross-prefix="" --with-coroutine=libucontext $@
-	cd "build"
+    ../configure --prefix="$PREFIX" --host="$CHOST" --cross-prefix="" --with-coroutine=libucontext $@
     echo "${GREEN}Building QEMU...${NC}"
     ninja
     echo "${GREEN}Installing QEMU...${NC}"
@@ -389,6 +389,38 @@ build_qemu () {
     CXXFLAGS="$QEMU_CXXFLAGS"
     LDFLAGS="$QEMU_LDFLAGS"
 }
+
+build_qemu_jit () {
+	NAME="QEMU_JIT"
+    QEMU_DIR="$BASEDIR/qemu-tcti/qemu_jit"
+
+    QEMU_CFLAGS="$CFLAGS"
+    QEMU_CXXFLAGS="$CXXFLAGS"
+    QEMU_LDFLAGS="$LDFLAGS"
+    export QEMU_CFLAGS
+    export QEMU_CXXFLAGS
+    export QEMU_LDFLAGS
+    CFLAGS=
+    CXXFLAGS=
+    LDFLAGS=
+
+    pwd="$(pwd)"
+	mkdir -p "$QEMU_DIR"
+    cd "$QEMU_DIR"
+    echo "${GREEN}Configuring QEMU-JIT...${NC}"
+    ../configure --prefix="$PREFIX" --host="$CHOST" --cross-prefix="" --with-coroutine=libucontext $@
+    echo "${GREEN}Building QEMU-JIT...${NC}"
+    ninja
+	echo "${GREEN}Copying single library...${NC}"
+	echo cp "libqemu-x86_64-softmmu.dylib" "$PREFIX/lib/libqemu-x86_64-softmmu_jit.dylib"
+	cp "libqemu-x86_64-softmmu.dylib" "$PREFIX/lib/libqemu-x86_64-softmmu_jit.dylib"
+
+	cd "$pwd"
+    CFLAGS="$QEMU_CFLAGS"
+    CXXFLAGS="$QEMU_CXXFLAGS"
+    LDFLAGS="$QEMU_LDFLAGS"
+}
+
 
 meson_build () {
     SRCDIR="$1"
@@ -591,7 +623,8 @@ QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-gnutls --disable
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-nettle --disable-virglrenderer --disable-libusb"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-libssh --disable-zstd --enable-slirp=git"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-sdl --with-coroutine=libucontext"
-QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --enable-tcg-tcti --target-list=x86_64-softmmu"
+QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --target-list=x86_64-softmmu"
+QEMU_PLATFORM_TCTI_FLAGS="--enable-tcg-tcti"
 
 # Setup directories
 BASEDIR="$(dirname "$(realpath $0)")"
@@ -686,7 +719,8 @@ rm -f "$BUILD_DIR/meson.cross"
 copy_private_headers
 build_pkg_config
 build_qemu_dependencies
-build_qemu $QEMU_PLATFORM_BUILD_FLAGS
+build_qemu_tcti $QEMU_PLATFORM_BUILD_FLAGS $QEMU_PLATFORM_TCTI_FLAGS
+build_qemu_jit $QEMU_PLATFORM_BUILD_FLAGS
 fixup_all
 echo "${GREEN}All done!${NC}"
 touch "$BUILD_DIR/BUILD_SUCCESS"

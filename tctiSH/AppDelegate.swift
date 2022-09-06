@@ -12,7 +12,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
     var qemu: QEMUInterface?
 
+    // Global application state.
+    // FIXME: move these to a nice, clean singleton
     static var forceRecoveryBoot = false
+    static var usingJitHacks = false
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
 
@@ -26,6 +29,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             "theme": "solzarizedDark",
             "attempting_boot": false
         ])
+
+#if !targetEnvironment(macCatalyst)
+        // If possible, attempt to enable JIT for this process.
+        AppDelegate.usingJitHacks = set_up_jit()
+#endif
 
         // If we attempted a boot, but did not finish one, something went wrong last time.
         // Force a recovery boot.

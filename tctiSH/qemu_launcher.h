@@ -1,9 +1,9 @@
 //
 //  qemu_launcher.h
-//  tctiSH
+//  Code for launching QEMU.
 //
 //  Created by Kate Temkin on 9/1/22.
-//  Copyright © 2022 Kate Temkin. All rights reserved.
+//  Copyright © 2022 Kate Temkin.
 //
 
 #ifndef qemu_launcher_h
@@ -11,11 +11,16 @@
 
 #include <stdbool.h>
 
-void run_background_qemu(const char *kernel_path,
+/// Sets up an environment where we can JIT.
+bool set_up_jit(void);
+
+/// Runs QEMU in a background thread, providing our shell.
+void run_background_qemu(const char *qemu_path,
+                         const char *kernel_path,
                          const char *initrd_path,
                          const char *bios_path,
                          const char *disk_path,
-                         const char *snapshot_name);
-
+                         const char *snapshot_name,
+                         bool is_jit);
 
 #endif /* qemu_launcher_h */

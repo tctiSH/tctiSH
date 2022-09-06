@@ -16,13 +16,13 @@
 		81B605AD3C0955DC2C31EBCC /* Pods_tctiSH.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C9FFBC130DA1A3B7A450025B /* Pods_tctiSH.framework */; };
 		8D4939E228C3245D00F57421 /* Settings.bundle in Resources */ = {isa = PBXBuildFile; fileRef = 8D4939E128C3245D00F57421 /* Settings.bundle */; };
 		8D4939E428C33B0300F57421 /* empty.qcow in Resources */ = {isa = PBXBuildFile; fileRef = 8D4939E328C33B0300F57421 /* empty.qcow */; };
+		8D4939E728C770DD00F57421 /* qemu-x86_64-softmmu_jit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8D4939E528C770DD00F57421 /* qemu-x86_64-softmmu_jit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		8DA7A63728C19A4900FDBD78 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 4959FFDA2447F971001F42C0 /* SwiftTerm */; };
 		8DE8208628C167070035686B /* QEMU.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DE8208528C167070035686B /* QEMU.swift */; };
 		8DE8208E28C176310035686B /* qemu_launcher.c in Sources */ = {isa = PBXBuildFile; fileRef = 8DE8208D28C176310035686B /* qemu_launcher.c */; };
 		8DE8209028C180770035686B /* initrd.img in Resources */ = {isa = PBXBuildFile; fileRef = 8DE8208F28C180770035686B /* initrd.img */; };
 		8DE8209228C1808F0035686B /* bzImage in Resources */ = {isa = PBXBuildFile; fileRef = 8DE8209128C1808F0035686B /* bzImage */; };
 		8DF5F02A28C1BCC900FB1F1C /* qemu-x86_64-softmmu.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F02828C1BCC800FB1F1C /* qemu-x86_64-softmmu.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		8DF5F02C28C1BCE900FB1F1C /* qemu-x86_64-softmmu.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F02828C1BCC800FB1F1C /* qemu-x86_64-softmmu.framework */; };
 		8DF5F03728C1BCEB00FB1F1C /* gmodule-2.0.0.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F02D28C1BCEA00FB1F1C /* gmodule-2.0.0.framework */; };
 		8DF5F03828C1BCEC00FB1F1C /* gmodule-2.0.0.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F02D28C1BCEA00FB1F1C /* gmodule-2.0.0.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		8DF5F03928C1BCEC00FB1F1C /* glib-2.0.0.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F02E28C1BCEA00FB1F1C /* glib-2.0.0.framework */; };
@@ -64,6 +64,7 @@
 				8DF5F04828C1BCF000FB1F1C /* gobject-2.0.0.framework in Embed Frameworks */,
 				8DF5F03A28C1BCEC00FB1F1C /* glib-2.0.0.framework in Embed Frameworks */,
 				8DF5F03828C1BCEC00FB1F1C /* gmodule-2.0.0.framework in Embed Frameworks */,
+				8D4939E728C770DD00F57421 /* qemu-x86_64-softmmu_jit.framework in Embed Frameworks */,
 				8DF5F03E28C1BCED00FB1F1C /* iconv.2.framework in Embed Frameworks */,
 				8DF5F04428C1BCEE00FB1F1C /* ffi.7.framework in Embed Frameworks */,
 				8DF5F04228C1BCEE00FB1F1C /* pixman-1.0.framework in Embed Frameworks */,
@@ -87,6 +88,7 @@
 		49BD1A69224207B7005A2252 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		8D4939E128C3245D00F57421 /* Settings.bundle */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.plug-in"; path = Settings.bundle; sourceTree = "<group>"; };
 		8D4939E328C33B0300F57421 /* empty.qcow */ = {isa = PBXFileReference; lastKnownFileType = file; name = empty.qcow; path = assets/empty.qcow; sourceTree = "<group>"; };
+		8D4939E528C770DD00F57421 /* qemu-x86_64-softmmu_jit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "qemu-x86_64-softmmu_jit.framework"; path = "sysroot-iOS-arm64/Frameworks/qemu-x86_64-softmmu_jit.framework"; sourceTree = "<group>"; };
 		8DE8208528C167070035686B /* QEMU.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QEMU.swift; sourceTree = "<group>"; };
 		8DE8208728C16AA70035686B /* libqemu-x86_64-softmmu.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libqemu-x86_64-softmmu.dylib"; path = "qemu-tcti/build/libqemu-x86_64-softmmu.dylib"; sourceTree = "<group>"; };
 		8DE8208B28C176310035686B /* tctiSH-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "tctiSH-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -137,7 +139,6 @@
 				8DF5F03F28C1BCED00FB1F1C /* intl.framework in Frameworks */,
 				8DF5F04928C1BCF000FB1F1C /* gio-2.0.0.framework in Frameworks */,
 				8DA7A63728C19A4900FDBD78 /* SwiftTerm in Frameworks */,
-				8DF5F02C28C1BCE900FB1F1C /* qemu-x86_64-softmmu.framework in Frameworks */,
 				8DF5F03728C1BCEB00FB1F1C /* gmodule-2.0.0.framework in Frameworks */,
 				8DF5F03928C1BCEC00FB1F1C /* glib-2.0.0.framework in Frameworks */,
 				8DF5F04728C1BCF000FB1F1C /* gobject-2.0.0.framework in Frameworks */,
@@ -154,6 +155,7 @@
 		49AE019F2410AB0A0051E902 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				8D4939E528C770DD00F57421 /* qemu-x86_64-softmmu_jit.framework */,
 				8DF5F03428C1BCEB00FB1F1C /* charset.1.framework */,
 				8DF5F03328C1BCEB00FB1F1C /* ffi.7.framework */,
 				8DF5F03628C1BCEB00FB1F1C /* gio-2.0.0.framework */,
