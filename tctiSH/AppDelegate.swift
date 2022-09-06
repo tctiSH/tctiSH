@@ -11,22 +11,34 @@ import UIKit
 class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
     var qemu: QEMUInterface?
-    
+
+    static var forceRecoveryBoot = false
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        
+
+
         // Register our default values; which will be used for any unset values.
         UserDefaults.standard.register(defaults: [
             "resume_behavior": "persistent_boot",
             "boot_snapshot": "",
             "disk_name": "disk",
             "font_size": 14,
-            "theme": "solzarizedDark"
+            "theme": "solzarizedDark",
+            "attempting_boot": false
         ])
+
+        // If we attempted a boot, but did not finish one, something went wrong last time.
+        // Force a recovery boot.
+        if UserDefaults.standard.bool(forKey: "attempting_boot") {
+            AppDelegate.forceRecoveryBoot = true
+        }
+
+        // Mark ourselves as attempting a boot.
+        UserDefaults.standard.set(true, forKey: "attempting_boot")
         
         // To minimize startup time, start our kernel before anything else.
         qemu = QEMUInterface()
-        qemu!.startQemuThread()
+        qemu!.startQemuThread(forceRecoveryBoot: AppDelegate.forceRecoveryBoot)
         
         return true
     }

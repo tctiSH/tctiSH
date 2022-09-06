@@ -16,6 +16,9 @@ class ViewController: UIViewController {
     var tv: TerminalView!
     
     let padding: CGFloat = 7
+
+    /// Sequence used to clear our terminal.
+    let terminalClearSequence : ArraySlice<UInt8> = [27, 91, 72, 27, 91, 74]
     
     var useAutoLayout: Bool {
         get { false }
@@ -83,13 +86,40 @@ class ViewController: UIViewController {
         // Start up our terminal emulator, which will display our actual terminal.
         tv = TctiTermView(frame: makeFrame (keyboardDelta: 0))
         view.addSubview(tv)
-        
-        // If we're doing a recovery boot, provide a message letting the user know
-        // that this will take a hot moment.
+
+
+        // If we're doing a recovery boot by user choice, provide a message letting the
+        // user know that this will take a hot moment.
         if UserDefaults.standard.string(forKey: "resume_behavior") == "recovery_boot" {
             tv.feed(text: "(Recovery booting; startup will take a bit.)\r\n\r\n")
         }
-        
+
+
+        // If we're forcing a recovery boot by something other than user choice, provide
+        // a message letting the user know
+        else if AppDelegate.forceRecoveryBoot {
+
+            tv.feed(text: "It seems like our last attempt at resuming\r\n")
+            tv.feed(text: "might not have gone so well. We'll recover\r\n")
+            tv.feed(text: "by restarting things the slow way.\r\n\r\n")
+
+            tv.feed(text: "This will take ~20 seconds or so.\r\n\r\n")
+
+        } else {
+
+            // Provide some filler content,to ensure the ScrollView starts with something in it;
+            // and then issue a "clear", so it's off the backlog. This is a cheap, hackish way of
+            // getting there to be something in the UIScrollView buffer; which means that we avoid
+            // the nasty "transparent" boxes it tries to squish at either end if there's not enough content.
+            //
+            // We could squish in spacer controls; but these do the same thing and don't muck up the
+            // position math SwiftTerm does later.
+            for _ in 0...25 {
+                tv.feed(text:"\n")
+            }
+
+        }
+
         setupKeyboardMonitor()
         tv.becomeFirstResponder()
         

@@ -1,5 +1,8 @@
 .DS_Store
 *.xcuserstate
+UserInterfaceState.xcuserstate
+*.xcbkptlist
+*.userdatad
 
 # Linux assets.
 *.qcow*

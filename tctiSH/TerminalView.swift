@@ -147,9 +147,15 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
                     //self.feed(text: "[ERROR?] \(error)\n")
                 } else {
                     self.connected = true
-                    
+
+                    // Mark us as no longer attempting boot.
+                    UserDefaults.standard.set(false, forKey: "attempting_boot")
+
                     let t = self.getTerminal()
                     s.setTerminalSize(width: UInt (t.cols), height: UInt (t.rows))
+
+                    // At this point 
+                    t.updateFullScreen()
                 }
             }
         }
@@ -197,4 +203,5 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
             }
         }
     }
+
 }

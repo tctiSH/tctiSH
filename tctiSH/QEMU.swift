@@ -20,7 +20,7 @@ public class QEMUInterface {
     var monitorSocket : Socket?
     
     /// Start our background QEMU thread.
-    func startQemuThread() {
+    func startQemuThread(forceRecoveryBoot: Bool = false) {
         
         // Figure out where our QEMU resources are...
         let bundlePrefix = Bundle.main.resourcePath!
@@ -31,7 +31,7 @@ public class QEMUInterface {
         let diskPath = getPersistentStore().path
         
         // ... figure out if we're using our A or B boot image ...
-        let bootImageName = getBootImageName()
+        let bootImageName = getBootImageName(forceRecoveryBoot: forceRecoveryBoot)
             
         // ... and run QEMU.
         run_background_qemu(kernelPath, initrdPath, bundlePrefix, diskPath, bootImageName);
@@ -61,8 +61,13 @@ public class QEMUInterface {
     }
     
     /// Gets the boot image used for the user-selected boot mode.
-    private func getBootImageName() -> String? {
-        let mode = UserDefaults.standard.string(forKey: "resume_behavior")
+    private func getBootImageName(forceRecoveryBoot: Bool) -> String? {
+        var mode = UserDefaults.standard.string(forKey: "resume_behavior")
+
+        // If we're forcing a recovery boot, override the read mode.
+        if forceRecoveryBoot {
+            mode = "recovery_boot"
+        }
         
         switch mode {
         case "persistent_boot":
