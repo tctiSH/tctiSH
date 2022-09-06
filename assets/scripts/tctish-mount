@@ -1,0 +1,40 @@
+#!/bin/bash
+
+set +x
+
+# Print usage if not provided
+if [ $# -ne 2 ]; then
+	echo "usage: $0 <host path> <mountpoint>"
+	exit 0
+fi
+
+# Select a different path to our host depending if this is run inside.
+if [[ $(uname -r) == *"tctish"* ]]; then
+	QMP_TARGET="192.168.100.2 10045"
+	NC="/bin/nc"
+else
+	QMP_TARGET="127.0.0.1 10045"
+	NC="nc"
+fi
+
+# Get a unique name for this mount.
+TAG=$(/bin/mktemp -u | cut -c 10-)
+PATH=$1
+MOUNTPOINT=$2
+
+# Pass through the relevant folder to the tctiSH...
+$NC -c $QMP_TARGET > /dev/null << EOF 
+fsdev_add fsdriver=local,path=$PATH,security_model=none,id=$TAG
+device_add virtio-9p-pci,fsdev=$TAG,mount_tag=$TAG
+EOF
+
+# ... rescan for any new PCI devices, in case this is a first mount ...
+/bin/sleep 1
+echo 1 > /sys/bus/pci/rescan
+
+# ... and finally, mount the device.
+#/bin/sleep 1
+/bin/mount -t 9p -o trans=virtio "$TAG" "$MOUNTPOINT" -oversion=9p2000.L
+
+
+

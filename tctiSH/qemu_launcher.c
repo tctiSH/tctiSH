@@ -104,6 +104,9 @@ static void* qemu_thread(void *raw_args) {
         // Kernel command line; tells our image how to handle disk images.
         // This variant selects the provided qcow disk file.
         "-append", "tcti_disk=file",
+
+        // Provide a few cores.
+        "-smp", "cpus=4",
         
         // Monitor conection for tctiSH.
         "-monitor", "tcp:localhost:10044,server,wait=off",

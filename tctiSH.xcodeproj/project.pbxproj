@@ -17,6 +17,7 @@
 		8D4939E228C3245D00F57421 /* Settings.bundle in Resources */ = {isa = PBXBuildFile; fileRef = 8D4939E128C3245D00F57421 /* Settings.bundle */; };
 		8D4939E428C33B0300F57421 /* empty.qcow in Resources */ = {isa = PBXBuildFile; fileRef = 8D4939E328C33B0300F57421 /* empty.qcow */; };
 		8D4939E728C770DD00F57421 /* qemu-x86_64-softmmu_jit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8D4939E528C770DD00F57421 /* qemu-x86_64-softmmu_jit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		8D4C77AA28C77D35002AF286 /* ConfigServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D4C77A928C77D35002AF286 /* ConfigServer.swift */; };
 		8DA7A63728C19A4900FDBD78 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 4959FFDA2447F971001F42C0 /* SwiftTerm */; };
 		8DE8208628C167070035686B /* QEMU.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DE8208528C167070035686B /* QEMU.swift */; };
 		8DE8208E28C176310035686B /* qemu_launcher.c in Sources */ = {isa = PBXBuildFile; fileRef = 8DE8208D28C176310035686B /* qemu_launcher.c */; };
@@ -89,6 +90,7 @@
 		8D4939E128C3245D00F57421 /* Settings.bundle */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.plug-in"; path = Settings.bundle; sourceTree = "<group>"; };
 		8D4939E328C33B0300F57421 /* empty.qcow */ = {isa = PBXFileReference; lastKnownFileType = file; name = empty.qcow; path = assets/empty.qcow; sourceTree = "<group>"; };
 		8D4939E528C770DD00F57421 /* qemu-x86_64-softmmu_jit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "qemu-x86_64-softmmu_jit.framework"; path = "sysroot-iOS-arm64/Frameworks/qemu-x86_64-softmmu_jit.framework"; sourceTree = "<group>"; };
+		8D4C77A928C77D35002AF286 /* ConfigServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigServer.swift; sourceTree = "<group>"; };
 		8DE8208528C167070035686B /* QEMU.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QEMU.swift; sourceTree = "<group>"; };
 		8DE8208728C16AA70035686B /* libqemu-x86_64-softmmu.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libqemu-x86_64-softmmu.dylib"; path = "qemu-tcti/build/libqemu-x86_64-softmmu.dylib"; sourceTree = "<group>"; };
 		8DE8208B28C176310035686B /* tctiSH-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "tctiSH-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -227,6 +229,7 @@
 				8DF5F05A28C2815100FB1F1C /* Theming.swift */,
 				8DF5F05C28C281D100FB1F1C /* ColorLoader.swift */,
 				8D4939E128C3245D00F57421 /* Settings.bundle */,
+				8D4C77A928C77D35002AF286 /* ConfigServer.swift */,
 			);
 			path = tctiSH;
 			sourceTree = "<group>";
@@ -383,6 +386,7 @@
 			files = (
 				8DE8208E28C176310035686B /* qemu_launcher.c in Sources */,
 				4936D22124512AF2005CEE27 /* TerminalView.swift in Sources */,
+				8D4C77AA28C77D35002AF286 /* ConfigServer.swift in Sources */,
 				8DF5F05B28C2815100FB1F1C /* Theming.swift in Sources */,
 				49BD1A60224207B5005A2252 /* ViewController.swift in Sources */,
 				8DF5F05D28C281D100FB1F1C /* ColorLoader.swift in Sources */,

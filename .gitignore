@@ -3,6 +3,7 @@
 UserInterfaceState.xcuserstate
 *.xcbkptlist
 *.userdatad
+xcuserdata
 
 # Linux assets.
 *.qcow*

@@ -14,6 +14,7 @@ pushd ../qemu-tcti/build_mac
 		--disable-bsd-user \
 		--disable-guest-agent \
 		--enable-libssh \
+		--enable-virtfs \
 		--enable-slirp=system \
 		--extra-cflags=-DNCURSES_WIDECHAR=1 \
 		--disable-sdl \
