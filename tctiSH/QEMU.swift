@@ -35,6 +35,8 @@ public class QEMUInterface {
 
         // ... find where our QEMU binary is actually located ...
         let qemuImage = getAppropriateQemuFramework().path
+
+        NSLog(qemuImage)
             
         // ... and run QEMU.
         run_background_qemu(qemuImage, kernelPath, initrdPath, bundlePrefix, diskPath, bootImageName, AppDelegate.usingJitHacks);
@@ -43,14 +45,14 @@ public class QEMUInterface {
     /// Saves the state of the running QEMU instance.
     /// With no arguments, updates the Instant Boot cache.
     func saveState(tag: String) {
-        issueMonitorCommand(command: "savevm \(tag)")
+        issueMonitorCommand("savevm \(tag)")
     }
     
     /// Saves the state of the running QEMU instance.
     /// With no arguments, loads from the Instant Boot cache.
     func loadState(tag: String) {
-        issueMonitorCommand(command: "loadvm \(tag)")
-        issueMonitorCommand(command: "c")
+        issueMonitorCommand("loadvm \(tag)")
+        issueMonitorCommand("c")
     }
     
     /// Saves the state of the running QEMU instance in a background-safe manner.
@@ -61,6 +63,35 @@ public class QEMUInterface {
         saveState(tag: nextTag)
         Thread.sleep(forTimeInterval: TimeInterval(2))
         setABBootStatus(status: nextABStatus)
+    }
+
+
+    /// Sets up a given host URL for mounting.
+    func mount(hostPath: URL, interfaceId: String? = nil) -> String {
+        return mount(hostPath: hostPath.path, interfaceId: interfaceId)
+    }
+
+    /// Sets up a given host path for mounting.
+    func mount(hostPath: String, interfaceId: String? = nil) -> String {
+        let tag = generateMountTag()
+        let id = interfaceId ?? generateMountTag(length: 6)
+
+        // Add our virtfs device to QEMU...
+        NSLog("fsdev_add fsdriver=local,path=\(hostPath),security_model=none,id=\(id)")
+        issueMonitorCommand("fsdev_add fsdriver=local,path=\(hostPath),security_model=none,id=\(id)")
+
+        // ... and expose it as a virtio device.
+        NSLog("device_add virtio-9p-pci,fsdev=\(id),mount_tag=\(tag)")
+        issueMonitorCommand("device_add virtio-9p-pci,fsdev=\(id),mount_tag=\(tag)")
+
+        return tag
+    }
+
+
+    /// Generates a random tag suitable for use in mounting.
+    private func generateMountTag(length: Int = 12) -> String {
+      let letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+      return "m" + String((0..<length).map{ _ in letters.randomElement()! })
     }
 
 
@@ -194,7 +225,7 @@ public class QEMUInterface {
     
     /// Issue a QEMU managament protocol scheme command.
     @discardableResult
-    private func issueMonitorCommand(command: String) -> String {
+    private func issueMonitorCommand(_ command: String) -> String {
         let terminatedCommand = "\(command)\r\n"
         
         // Send our command ...

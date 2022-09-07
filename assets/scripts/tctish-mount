@@ -23,7 +23,7 @@ PATH=$1
 MOUNTPOINT=$2
 
 # Pass through the relevant folder to the tctiSH...
-$NC -c $QMP_TARGET > /dev/null << EOF 
+$NC -c $QMP_TARGET << EOF 
 fsdev_add fsdriver=local,path=$PATH,security_model=none,id=$TAG
 device_add virtio-9p-pci,fsdev=$TAG,mount_tag=$TAG
 EOF

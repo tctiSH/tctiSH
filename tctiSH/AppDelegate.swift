@@ -11,6 +11,8 @@ import UIKit
 class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
     var qemu: QEMUInterface?
+    var configServer : ConfigServer?
+
 
     // Global application state.
     // FIXME: move these to a nice, clean singleton
@@ -54,7 +56,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // To minimize startup time, start our kernel before anything else.
         qemu = QEMUInterface()
         qemu!.startQemuThread(forceRecoveryBoot: AppDelegate.forceRecoveryBoot)
-        
+
+        // Finally, before starting, spawn our background configuration server.
+        configServer = ConfigServer(qemuInterface: qemu!, listenImmediately: true)
+
         return true
     }
 
