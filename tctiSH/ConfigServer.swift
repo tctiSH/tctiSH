@@ -96,9 +96,6 @@ class ConfigServer {
         // ... and handle requests from it.
         queue.async { [unowned self, client] in
 
-            // Announce our presence to the other side...
-            self.announceSelf(to: client)
-
             // ... and then go into a simple command loop.
             do {
                 while clientAlive {
@@ -209,11 +206,6 @@ class ConfigServer {
             sendErrorResponse("\(message.key) is not a valid font propertly", to: client)
         }
 
-    }
-
-    /// Announces ourself and our capabilities to the other side.
-    private func announceSelf(to: Client) {
-        sendMessage(ConfigurationMessage(command: "hello", key: "protocol_version", value: "0.0.0"), to: to)
     }
 
     /// Indicates something was wrong with a received command.

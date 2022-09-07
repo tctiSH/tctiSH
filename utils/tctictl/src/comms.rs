@@ -47,4 +47,3 @@ pub(crate) fn run_command(command: String, key: Option<String>, value: Option<St
     return exchange_message(message)
 }
 
-;
