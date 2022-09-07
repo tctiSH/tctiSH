@@ -1,9 +1,6 @@
 [submodule "qemu-tcti"]
 	path = qemu-tcti
-	url = https://github.com/ktemkin/qemu
-[submodule "ish"]
-	path = ish
-	url = git@github.com:ktemkin/ish.git
+	url = https://github.com/tctiSH/qemu.git
 [submodule "third-party/SwiftTerm"]
 	path = third-party/SwiftTerm
-	url = https://github.com/tctish/SwiftTerm.git
+	url = https://github.com/tctiSH/SwiftTerm.git
