@@ -159,8 +159,8 @@ class ConfigServer {
                 sendErrorResponse("command not recognized", to: client)
             }
 
-        } catch {
-            sendErrorResponse("unable to process command", to: client)
+        } catch let err {
+            sendErrorResponse("error processing command: \(err)", to: client)
         }
     }
 
@@ -194,16 +194,21 @@ class ConfigServer {
 
         // Allow adjustment of font size.
         case "size":
-            let size = Int(message.value ?? "")
-            if let size = size {
-                UserDefaults.standard.set(size, forKey: "font_size")
-                sendAckResponse(command: "font_size", to: client)
+            if let value = message.value {
+                let size = Int(value)
+                if let size = size {
+                    UserDefaults.standard.set(size, forKey: "font_size")
+                    sendAckResponse(command: "font_size", to: client)
 
+                } else {
+                    sendErrorResponse("could not parse font size \(value)", to: client)
+                }
             } else {
-                sendErrorResponse("could not parse font size \(message.value)", to: client)
+                sendErrorResponse("adjusting size requires an argument", to: client)
             }
         default:
-            sendErrorResponse("\(message.key) is not a valid font propertly", to: client)
+            let key = message.key ?? "-nil-"
+            sendErrorResponse("\(key) is not a valid font propertly", to: client)
         }
 
     }
@@ -233,6 +238,7 @@ class ConfigServer {
         do {
             let rawMessage = try JSONEncoder().encode(message)
             try to.write(from: rawMessage)
+            try to.write(from: "\n")
         } catch {
             NSLog("failed to send message!")
         }

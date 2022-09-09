@@ -74,6 +74,13 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         
     }
     
+    func clear() {
+        
+        /// Sequence used to clear our terminal.
+        let terminalClearSequence : ArraySlice<UInt8> = [27, 91, 72, 27, 91, 74]
+        self.feed(byteArray: terminalClearSequence)
+        
+    }
     
     /// Sets up use of the user's theme.
     func setUpTheming() {
@@ -143,7 +150,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
             .connect()
             .authenticate(.byPassword(username: "root", password: "toor"))
             .open { [unowned self] (error) in
-                if let error = error {
+                if error != nil {
                     //self.feed(text: "[ERROR?] \(error)\n")
                 } else {
                     self.connected = true
@@ -152,7 +159,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
                     UserDefaults.standard.set(false, forKey: "attempting_boot")
 
                     let t = self.getTerminal()
-                    s.setTerminalSize(width: UInt (t.cols), height: UInt (t.rows))
+                    _ = s.setTerminalSize(width: UInt (t.cols), height: UInt (t.rows))
 
                     // At this point 
                     t.updateFullScreen()
@@ -177,7 +184,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     
     public func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
         if let s = shell {
-            s.setTerminalSize(width: UInt (newCols), height: UInt (newRows))
+            _ = s.setTerminalSize(width: UInt (newCols), height: UInt (newRows))
         }
     }
     

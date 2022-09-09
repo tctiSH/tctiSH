@@ -21,8 +21,12 @@
 #include <mach-o/loader.h>
 #include <mach-o/getsect.h>
 
-
 #include "qemu_launcher.h"
+
+// For early development / test distribution, always produce logs.
+#ifndef DEBUG_QEMU
+#define DEBUG_QEMU
+#endif
 
 #define ARGUMENT_MAX (2048)
 #define PATH_MAX     (1024)
@@ -60,6 +64,11 @@ struct qemu_args {
     char *snapshot_name;
     char *dll_name;
     bool is_jit;
+    
+#ifdef DEBUG_QEMU
+    char *log_file;
+#endif
+    
 };
 
 /// Core thread that runs our background QEMU.
@@ -76,7 +85,7 @@ static void* qemu_thread(void *raw_args) {
     char *argv[] = {
         "qemu-system",
         
-        // Tell QEMU where any option ROMS it might want areh hiding.
+        // Tell QEMU where any option ROMS it might want are hiding.
         "-L", args->bios_dir,
         
         // We're a terminal; we don't display anything.
@@ -84,6 +93,11 @@ static void* qemu_thread(void *raw_args) {
         
         // Guest memory.
         "-m", "1G",
+        
+#ifdef DEBUG_QEMU
+        // Write to a local log.
+        "-D", args->log_file,
+#endif
         
         // Networking.
         "-device", "virtio-net-pci,id=net1,netdev=net0",
@@ -147,6 +161,7 @@ static void* qemu_thread(void *raw_args) {
     free(args->kernel_filename);
     free(args->initrd_filename);
     free(args->disk_args);
+    free(args->log_file);
     free(args);
     
     return NULL;
@@ -159,6 +174,7 @@ void run_background_qemu(const char* qemu_path,
                          const char* bios_path,
                          const char* disk_path,
                          const char* snapshot_name,
+                         const char* log_file_path,
                          bool is_jit)
 {
     pthread_t thread;
@@ -171,6 +187,7 @@ void run_background_qemu(const char* qemu_path,
     args->kernel_filename  = calloc(PATH_MAX, sizeof(char));
     args->initrd_filename  = calloc(PATH_MAX, sizeof(char));
     args->bios_dir         = calloc(PATH_MAX, sizeof(char));
+    args->log_file         = calloc(PATH_MAX, sizeof(char));
     if (snapshot_name) {
         args->snapshot_name = calloc(PATH_MAX, sizeof(char));
     } else {
@@ -186,6 +203,7 @@ void run_background_qemu(const char* qemu_path,
     strncpy(args->qemu_image, qemu_path, PATH_MAX - 1);
     strncpy(args->kernel_filename, kernel_path, PATH_MAX - 1);
     strncpy(args->initrd_filename, initrd_path, PATH_MAX - 1);
+    strncpy(args->log_file, log_file_path, PATH_MAX - 1);
     strncpy(args->bios_dir, bios_path, PATH_MAX - 1);
     if (args->snapshot_name) {
         strncpy(args->snapshot_name, snapshot_name, PATH_MAX - 1);

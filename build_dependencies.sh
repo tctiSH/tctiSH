@@ -618,11 +618,12 @@ PLATFORM_FAMILY_NAME="$PLATFORM_FAMILY_PREFIX"
 
 # QEMU build flags. Looong.
 QEMU_PLATFORM_BUILD_FLAGS="--disable-debug-info --enable-shared-lib --disable-hvf --disable-cocoa"
-QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-slirp-smbd --disable-curl" 
+QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-slirp-smbd --disable-curl --disable-lzo" 
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-gnutls --disable-vnc --disable-gcrypt"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-nettle --disable-virglrenderer --disable-libusb"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-libssh --disable-zstd --enable-slirp=git"
-QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-sdl --with-coroutine=libucontext"
+QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-sdl --disable-snappy --with-coroutine=libucontext"
+QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-capstone --disable-gtk"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --enable-virtfs --target-list=x86_64-softmmu"
 QEMU_PLATFORM_TCTI_FLAGS="--enable-tcg-tcti"
 
@@ -698,28 +699,28 @@ export CPPFLAGS
 export CXXFLAGS
 export OBJCFLAGS
 export LDFLAGS
-
-check_env
-echo "${GREEN}Starting build for ${PLATFORM_FAMILY_NAME} ${ARCH} [${NCPU} jobs]${NC}"
-
-if [ ! -f "$BUILD_DIR/BUILD_SUCCESS" ]; then
-    if [ ! -z "$REBUILD" ]; then
-        echo "${RED}Error, no previous successful build found.${NC}"
-        exit 1
-    fi
-fi
-
-if [ -z "$REBUILD" ]; then
-    download_all
-fi
-echo "${GREEN}Deleting old sysroot!${NC}"
-rm -rf "$PREFIX/"*
-rm -f "$BUILD_DIR/BUILD_SUCCESS"
-rm -f "$BUILD_DIR/meson.cross"
-copy_private_headers
-build_pkg_config
-build_qemu_dependencies
-build_qemu_tcti $QEMU_PLATFORM_BUILD_FLAGS $QEMU_PLATFORM_TCTI_FLAGS
+#
+#check_env
+#echo "${GREEN}Starting build for ${PLATFORM_FAMILY_NAME} ${ARCH} [${NCPU} jobs]${NC}"
+#
+#if [ ! -f "$BUILD_DIR/BUILD_SUCCESS" ]; then
+#    if [ ! -z "$REBUILD" ]; then
+#        echo "${RED}Error, no previous successful build found.${NC}"
+#        exit 1
+#    fi
+#fi
+#
+#if [ -z "$REBUILD" ]; then
+#    download_all
+#fi
+#echo "${GREEN}Deleting old sysroot!${NC}"
+#rm -rf "$PREFIX/"*
+#rm -f "$BUILD_DIR/BUILD_SUCCESS"
+#rm -f "$BUILD_DIR/meson.cross"
+#copy_private_headers
+#build_pkg_config
+#build_qemu_dependencies
+#build_qemu_tcti $QEMU_PLATFORM_BUILD_FLAGS $QEMU_PLATFORM_TCTI_FLAGS
 build_qemu_jit $QEMU_PLATFORM_BUILD_FLAGS
 fixup_all
 echo "${GREEN}All done!${NC}"

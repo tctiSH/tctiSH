@@ -21,6 +21,7 @@ void run_background_qemu(const char *qemu_path,
                          const char *bios_path,
                          const char *disk_path,
                          const char *snapshot_name,
+                         const char *log_file_path,
                          bool is_jit);
 
 #endif /* qemu_launcher_h */

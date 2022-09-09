@@ -11,7 +11,6 @@
 		49BD1A5E224207B5005A2252 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49BD1A5D224207B5005A2252 /* AppDelegate.swift */; };
 		49BD1A60224207B5005A2252 /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49BD1A5F224207B5005A2252 /* ViewController.swift */; };
 		49BD1A63224207B5005A2252 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 49BD1A61224207B5005A2252 /* Main.storyboard */; };
-		49BD1A65224207B7005A2252 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 49BD1A64224207B7005A2252 /* Assets.xcassets */; };
 		49BD1A68224207B7005A2252 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 49BD1A66224207B7005A2252 /* LaunchScreen.storyboard */; };
 		81B605AD3C0955DC2C31EBCC /* Pods_tctiSH.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C9FFBC130DA1A3B7A450025B /* Pods_tctiSH.framework */; };
 		8D2AC18E28C7EF2D005DB7D4 /* Atomics in Frameworks */ = {isa = PBXBuildFile; productRef = 8D2AC18D28C7EF2D005DB7D4 /* Atomics */; };
@@ -20,6 +19,7 @@
 		8D4939E728C770DD00F57421 /* qemu-x86_64-softmmu_jit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8D4939E528C770DD00F57421 /* qemu-x86_64-softmmu_jit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		8D4C77AA28C77D35002AF286 /* ConfigServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D4C77A928C77D35002AF286 /* ConfigServer.swift */; };
 		8DA7A63728C19A4900FDBD78 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 4959FFDA2447F971001F42C0 /* SwiftTerm */; };
+		8DD4FBBC28CA96E700691935 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8DD4FBBB28CA96E600691935 /* Assets.xcassets */; };
 		8DE8208628C167070035686B /* QEMU.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DE8208528C167070035686B /* QEMU.swift */; };
 		8DE8208E28C176310035686B /* qemu_launcher.c in Sources */ = {isa = PBXBuildFile; fileRef = 8DE8208D28C176310035686B /* qemu_launcher.c */; };
 		8DE8209028C180770035686B /* initrd.img in Resources */ = {isa = PBXBuildFile; fileRef = 8DE8208F28C180770035686B /* initrd.img */; };
@@ -85,13 +85,13 @@
 		49BD1A5D224207B5005A2252 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		49BD1A5F224207B5005A2252 /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewController.swift; sourceTree = "<group>"; };
 		49BD1A62224207B5005A2252 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
-		49BD1A64224207B7005A2252 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		49BD1A67224207B7005A2252 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		49BD1A69224207B7005A2252 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		8D4939E128C3245D00F57421 /* Settings.bundle */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.plug-in"; path = Settings.bundle; sourceTree = "<group>"; };
 		8D4939E328C33B0300F57421 /* empty.qcow */ = {isa = PBXFileReference; lastKnownFileType = file; name = empty.qcow; path = assets/empty.qcow; sourceTree = "<group>"; };
 		8D4939E528C770DD00F57421 /* qemu-x86_64-softmmu_jit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "qemu-x86_64-softmmu_jit.framework"; path = "sysroot-iOS-arm64/Frameworks/qemu-x86_64-softmmu_jit.framework"; sourceTree = "<group>"; };
 		8D4C77A928C77D35002AF286 /* ConfigServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigServer.swift; sourceTree = "<group>"; };
+		8DD4FBBB28CA96E600691935 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		8DE8208528C167070035686B /* QEMU.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QEMU.swift; sourceTree = "<group>"; };
 		8DE8208728C16AA70035686B /* libqemu-x86_64-softmmu.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libqemu-x86_64-softmmu.dylib"; path = "qemu-tcti/build/libqemu-x86_64-softmmu.dylib"; sourceTree = "<group>"; };
 		8DE8208B28C176310035686B /* tctiSH-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "tctiSH-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -123,8 +123,6 @@
 		8DF5F04F28C1C16000FB1F1C /* vgabios-stdvga.bin */ = {isa = PBXFileReference; lastKnownFileType = archive.macbinary; name = "vgabios-stdvga.bin"; path = "sysroot-iOS-arm64/share/qemu/vgabios-stdvga.bin"; sourceTree = "<group>"; };
 		8DF5F05328C1C18200FB1F1C /* efi-virtio.rom */ = {isa = PBXFileReference; lastKnownFileType = file; name = "efi-virtio.rom"; path = "sysroot-iOS-arm64/share/qemu/efi-virtio.rom"; sourceTree = "<group>"; };
 		8DF5F05528C1D96100FB1F1C /* tctiSH.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = tctiSH.entitlements; sourceTree = "<group>"; };
-		8DF5F05628C2758700FB1F1C /* memory_state.qcow */ = {isa = PBXFileReference; lastKnownFileType = file; name = memory_state.qcow; path = assets/memory_state.qcow; sourceTree = "<group>"; };
-		8DF5F05828C2777C00FB1F1C /* memory_state.qcow */ = {isa = PBXFileReference; lastKnownFileType = file; name = memory_state.qcow; path = assets/memory_state.qcow; sourceTree = "<group>"; };
 		8DF5F05A28C2815100FB1F1C /* Theming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theming.swift; sourceTree = "<group>"; };
 		8DF5F05C28C281D100FB1F1C /* ColorLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorLoader.swift; sourceTree = "<group>"; };
 		9A05E33B868D09494792FFFD /* Pods-tctiSH.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-tctiSH.debug.xcconfig"; path = "Target Support Files/Pods-tctiSH/Pods-tctiSH.debug.xcconfig"; sourceTree = "<group>"; };
@@ -186,8 +184,6 @@
 			isa = PBXGroup;
 			children = (
 				8D4939E328C33B0300F57421 /* empty.qcow */,
-				8DF5F05628C2758700FB1F1C /* memory_state.qcow */,
-				8DF5F05828C2777C00FB1F1C /* memory_state.qcow */,
 				8DF5F05328C1C18200FB1F1C /* efi-virtio.rom */,
 				8DF5F04E28C1C16000FB1F1C /* kvmvapic.bin */,
 				8DF5F04D28C1C16000FB1F1C /* linuxboot_dma.bin */,
@@ -216,11 +212,11 @@
 		49BD1A5C224207B5005A2252 /* tctiSH */ = {
 			isa = PBXGroup;
 			children = (
+				8DD4FBBB28CA96E600691935 /* Assets.xcassets */,
 				8DF5F05528C1D96100FB1F1C /* tctiSH.entitlements */,
 				49BD1A5D224207B5005A2252 /* AppDelegate.swift */,
 				49BD1A5F224207B5005A2252 /* ViewController.swift */,
 				49BD1A61224207B5005A2252 /* Main.storyboard */,
-				49BD1A64224207B7005A2252 /* Assets.xcassets */,
 				49BD1A66224207B7005A2252 /* LaunchScreen.storyboard */,
 				49BD1A69224207B7005A2252 /* Info.plist */,
 				4936D22024512AF2005CEE27 /* TerminalView.swift */,
@@ -334,7 +330,7 @@
 				8DE8209228C1808F0035686B /* bzImage in Resources */,
 				8DE8209028C180770035686B /* initrd.img in Resources */,
 				49BD1A68224207B7005A2252 /* LaunchScreen.storyboard in Resources */,
-				49BD1A65224207B7005A2252 /* Assets.xcassets in Resources */,
+				8DD4FBBC28CA96E700691935 /* Assets.xcassets in Resources */,
 				49BD1A63224207B5005A2252 /* Main.storyboard in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -478,6 +474,7 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
+				OTHER_CFLAGS = "";
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -535,6 +532,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
+				OTHER_CFLAGS = "";
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
@@ -552,6 +550,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = 3G3GCZ6DA6;
+				ENABLE_BITCODE = NO;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/sysroot-iOS-arm64/Frameworks",
@@ -567,6 +566,8 @@
 					"$(PROJECT_DIR)/qemu-tcti/build",
 					"$(PROJECT_DIR)/assets/sysroot-iOS-arm64/lib",
 				);
+				OTHER_CFLAGS = "";
+				"OTHER_CFLAGS[arch=*]" = "-DDEBUG_QEMU";
 				PRODUCT_BUNDLE_IDENTIFIER = com.ktemkin.tctiSH.ios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -587,6 +588,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = 3G3GCZ6DA6;
+				ENABLE_BITCODE = NO;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/sysroot-iOS-arm64/Frameworks",
@@ -602,6 +604,7 @@
 					"$(PROJECT_DIR)/qemu-tcti/build",
 					"$(PROJECT_DIR)/assets/sysroot-iOS-arm64/lib",
 				);
+				OTHER_CFLAGS = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.ktemkin.tctiSH.ios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";

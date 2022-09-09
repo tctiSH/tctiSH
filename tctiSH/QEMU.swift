@@ -35,11 +35,14 @@ public class QEMUInterface {
 
         // ... find where our QEMU binary is actually located ...
         let qemuImage = getAppropriateQemuFramework().path
-
+        
+        // ... figure out where to put our logs, if we're logging ...
+        let logFile = getDatastoreURL("qemu", fileExtension: "log", create: false).path
+        
         NSLog(qemuImage)
             
         // ... and run QEMU.
-        run_background_qemu(qemuImage, kernelPath, initrdPath, bundlePrefix, diskPath, bootImageName, AppDelegate.usingJitHacks);
+        run_background_qemu(qemuImage, kernelPath, initrdPath, bundlePrefix, diskPath, bootImageName, logFile, AppDelegate.usingJitHacks);
     }
     
     /// Saves the state of the running QEMU instance.
@@ -147,15 +150,7 @@ public class QEMUInterface {
         let diskName = UserDefaults.standard.string(forKey: "disk_name") ?? "disk"
         
         // Figure out where our persistent store would be located.
-        var targetURL = try! FileManager.default.url(
-            for: .documentDirectory,
-            in: .userDomainMask,
-            appropriateFor: URL(fileURLWithPath: "\(diskName).qcow"),
-            create: false)
-        
-        // Scult our filename so it ends in "disk.qcow".
-        targetURL.appendPathComponent(diskName)
-        targetURL.appendPathExtension("qcow")
+        let targetURL = getDatastoreURL(diskName, fileExtension: "qcow")
 
         // If it doesn't exist, create a new copy based on our empty disk.
         if !FileManager.default.fileExists(atPath: targetURL.path) {
@@ -172,21 +167,31 @@ public class QEMUInterface {
     {
         let diskName = UserDefaults.standard.string(forKey: "disk_name") ?? "disk"
         
-        // Figure out where our persistent store would be located.
-        var targetURL = try! FileManager.default.url(
-            for: .documentDirectory,
-            in: .userDomainMask,
-            appropriateFor: URL(fileURLWithPath: "\(diskName).conf"),
-            create: true)
-        
-        // Scult our filename so it ends in "ab_status.conf".
-        targetURL.appendPathComponent(diskName)
-        targetURL.appendPathExtension("conf")
+        let targetURL = getDatastoreURL(diskName, fileExtension: "conf")
 
         // If we don't have an AB status file, create an empty one.
         if !FileManager.default.fileExists(atPath: targetURL.path) {
             try! "".write(to: targetURL, atomically: true, encoding: .utf8)
         }
+    
+        return targetURL
+    }
+    
+    
+    /// Retreives the path to a file in our local data store.
+    /// Currently fetches a path in the per-app 'Documents' directory; but this may change.
+    private func getDatastoreURL(_ name : String, fileExtension: String, create: Bool = true) -> URL {
+        
+        // Figure out where our persistent store would be located.
+        var targetURL = try! FileManager.default.url(
+            for: .documentDirectory,
+            in: .userDomainMask,
+            appropriateFor: URL(fileURLWithPath: "\(name).\(fileExtension)"),
+            create: create)
+        
+        // Scult our filename so it ends in "ab_status.conf".
+        targetURL.appendPathComponent(name)
+        targetURL.appendPathExtension(fileExtension)
     
         return targetURL
     }

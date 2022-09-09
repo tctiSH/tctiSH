@@ -7,6 +7,9 @@ mod comms;
 // Simple commands.
 mod simple;
 
+// File sharing commands.
+mod mount;
+
 use clap::{Parser, Subcommand};
 
 
@@ -69,11 +72,11 @@ enum LowlevelCommands {
     },
 
     // Simple font configuration.
-    //#[clap(arg_required_else_help = false)]
-    //#[clap(about ="Configure the terminal's font")]
-    //PrepareMount {
-    //    host: String
-    //},
+    #[clap(arg_required_else_help = false)]
+    #[clap(about ="Configure the terminal's font")]
+    PrepareMount {
+        host_path: String
+    },
 }
 
 //
@@ -106,6 +109,12 @@ fn lowlevel(subcommand: LowlevelCommands) {
 
         LowlevelCommands::Raw { command, key, value } => {
             let result = comms::run_command(command, key, value);
+            dbg!(result);
+        }
+
+
+        LowlevelCommands::PrepareMount { host_path } => {
+            let result = mount::prepare_mount(host_path);
             dbg!(result);
         }
 

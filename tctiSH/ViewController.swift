@@ -17,9 +17,6 @@ class ViewController: UIViewController {
     
     let padding: CGFloat = 7
 
-    /// Sequence used to clear our terminal.
-    let terminalClearSequence : ArraySlice<UInt8> = [27, 91, 72, 27, 91, 74]
-    
     var useAutoLayout: Bool {
         get { false }
     }
