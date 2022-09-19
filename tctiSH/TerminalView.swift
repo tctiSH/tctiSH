@@ -18,18 +18,41 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     var shell: SSHShell?
     var authenticationChallenge: AuthenticationChallenge?
     var connected : Bool = false
-    
+
     /// Timer that is used to poll for connections if our connection drops.
     private var timer: Publishers.Autoconnect<Timer.TimerPublisher>? = nil
     private var subscription: AnyCancellable? = nil
-    
+
     public override init (frame: CGRect)
     {
         super.init (frame: frame, font: UIFont(name: "Menlo-Regular", size: 14))
         self.terminalDelegate = self
+
+        // Handle settings changes.
+        NotificationCenter.default.addObserver(self, selector: #selector(TctiTermView.applySettings), name: UserDefaults.didChangeNotification, object: nil)
+        applySettings()
+
+        // Create the SSH provider we'll use to connect to our instance.
+        //
+        // Using this over e.g. serial mode ensures we have an out-of-band
+        // connection for e.g. terminal resizes to travel over, so SIGWINCH
+        // works correctly.
+        shell = try? SSHShell(sshLibrary: Libssh2.self,
+                              host: "localhost",
+                              port: 10022,
+                              terminal: "xterm-256color")
+        shell?.log.enabled = false
+
+        setUpTheming()
+
+        // TODO: figure out if this should be automatic?
+        start()
         
+    }
+
+    func start() {
         // Set up a timer to periodically poll our VM until it's ready for connection.
-        timer = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
+        timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
         subscription = timer?.sink(receiveValue: { _ in
             if self.connected {
                 self.timer?.upstream.connect().cancel()
@@ -37,24 +60,9 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
                 self.connect()
             }
         })
-        
-        // Handle settings changes.
-        NotificationCenter.default.addObserver(self, selector: #selector(TctiTermView.applySettings), name: UserDefaults.didChangeNotification, object: nil)
-        applySettings()
-       
-        // Create the SSH provider we'll use to connect to our instance.
-        //
-        // Using this over e.g. serial mode ensures we have an out-of-band
-        // connection for e.g. terminal resizes to travel over, so SIGWINCH
-        // works correctly.
-        shell = try? SSHShell(sshLibrary: Libssh2.self,
-                                  host: "localhost",
-                                  port: 10022,
-                                  terminal: "xterm-256color")
-        shell?.log.enabled = false
-        
-        self.bounces = false
+
     }
+
     
     /// Callback notified each time a setting is changed.
     @objc
@@ -84,7 +92,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     
     /// Sets up use of the user's theme.
     func setUpTheming() {
-       // FIXME: have this be user-specifiable
+        // FIXME: have this be user-specifiable
         let theme = DefaultThemes.solzariedDark
         self.installColors(theme.ansi)
         
@@ -116,29 +124,29 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     
     func sshEventCallback(data: Data?, error: Data?) {
         if let d = data {
-                    let sliced = Array(d) [0...]
-                    
-                    // We chunk the processing of data, as the SSH library might have
-                    // received a lot of data, and we do not want the terminal to
-                    // parse it all, and then render, we want to parse in chunks to
-                    // give the terminal the chance to update the display as it goes.
-                    let blocksize = 1024
-                    var next = 0
-                    let last = sliced.endIndex
+            let sliced = Array(d) [0...]
 
-                    while next < last {
+            // We chunk the processing of data, as the SSH library might have
+            // received a lot of data, and we do not want the terminal to
+            // parse it all, and then render, we want to parse in chunks to
+            // give the terminal the chance to update the display as it goes.
+            let blocksize = 1024
+            var next = 0
+            let last = sliced.endIndex
 
-                        let end = min (next+blocksize, last)
-                        let chunk = sliced [next..<end]
+            while next < last {
 
-                        self.feed(byteArray: chunk)
-                        next = end
-                    }
-                }
+                let end = min (next+blocksize, last)
+                let chunk = sliced [next..<end]
+
+                self.feed(byteArray: chunk)
+                next = end
+            }
+        }
 
         
     }
-  
+
     func connect()
     {
         if let s = shell {
@@ -151,6 +159,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
             .authenticate(.byPassword(username: "root", password: "toor"))
             .open { [unowned self] (error) in
                 if error != nil {
+                    NSLog("\(error)")
                     //self.feed(text: "[ERROR?] \(error)\n")
                 } else {
                     self.connected = true
@@ -161,7 +170,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
                     let t = self.getTerminal()
                     _ = s.setTerminalSize(width: UInt (t.cols), height: UInt (t.rows))
 
-                    // At this point 
+                    // At this point
                     t.updateFullScreen()
                 }
             }

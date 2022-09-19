@@ -1,0 +1,36 @@
+#!/bin/bash
+#
+# Restore tctiSH mounts after a resume.
+#
+
+MOUNTS_FILE=${1:-/proc/mounts}
+TMP_MOUNTS=$(mktemp)
+
+# Create a copy of our mounts file that won't change under us.
+cat $MOUNTS_FILE > $TMP_MOUNTS
+cleanup () {
+	rm $TMP_MOUNTS
+}
+trap cleanup EXIT
+
+# Remount a single mount point.
+remount () {
+	TAG=$1
+	MOUNTPOINT=$2
+	FILESYSTEM=$3
+	OPTIONS=$4
+
+	if [ $FILESYSTEM = "9p" ]; then
+
+		# Unmount the filesystem...
+		umount "$MOUNTPOINT"
+
+		# .. and then remount it.
+		mount -t $FILESYSTEM -o $OPTIONS $TAG "$MOUNTPOINT"
+	fi
+}
+
+# Iterate over each mount-point, and remount it.
+while read line; do
+	remount $line
+done < $TMP_MOUNTS

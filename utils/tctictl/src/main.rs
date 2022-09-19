@@ -3,12 +3,9 @@
  */
 
 mod comms;
-
-// Simple commands.
-mod simple;
-
-// File sharing commands.
 mod mount;
+mod simple;
+mod ui;
 
 use clap::{Parser, Subcommand};
 
@@ -44,6 +41,12 @@ enum Commands {
         value: Option<String>
     },
 
+    #[clap(about ="Mount an iOS path into tctiSH")]
+    Mount {
+        #[clap(help ="The linux path where the directory should be mounted")]
+        mountpoint: String
+    },
+
     // Low-level commands not used by typical users.
     #[clap(about ="Commands that directly poke the configuration server's internals")]
     Lowlevel {
@@ -56,7 +59,6 @@ enum Commands {
 #[derive(Debug, Subcommand)]
 enum LowlevelCommands {
 
-    // Simple font configuration.
     #[clap(arg_required_else_help = false)]
     #[clap(about ="Issues a raw API command")]
     Raw {
@@ -71,11 +73,15 @@ enum LowlevelCommands {
         value: Option<String>
     },
 
-    // Simple font configuration.
-    #[clap(arg_required_else_help = false)]
-    #[clap(about ="Configure the terminal's font")]
+    #[clap(about ="Prepares a host directory to be mounted into tctiSH")]
     PrepareMount {
-        host_path: String
+        ios_path: String
+    },
+
+    #[clap(about ="Directly map a host path into tctiSH")]
+    Mount {
+        ios_path: String,
+        linux_path: String
     },
 }
 
@@ -94,6 +100,28 @@ fn main() {
             simple::handle_font(property, value);
         }
 
+        // Mount a host folder into the guest.
+        Commands::Mount { mountpoint } => {
+            let folder = ui::select_folder_as_bookmark();
+            match folder {
+
+                // If we got a path in response, mount it.
+                Ok(bookmark) => {
+                    let result = mount::mount_from_host(bookmark, mountpoint);
+                    if let Err(result) = result {
+                        eprintln!("Failed to mount: {}\n", result);
+                    }
+                }
+
+                // Otherwise, error out.
+                Err(err) => {
+                    eprintln!("Couldn't select a folder to mount: {}", err);
+                }
+            }
+
+        }
+
+        // General low-level subcommands.
         Commands::Lowlevel { subcommand } => {
             lowlevel(subcommand)
         }
@@ -112,10 +140,16 @@ fn lowlevel(subcommand: LowlevelCommands) {
             dbg!(result);
         }
 
-
-        LowlevelCommands::PrepareMount { host_path } => {
-            let result = mount::prepare_mount(host_path);
+        LowlevelCommands::PrepareMount { ios_path } => {
+            let result = mount::prepare_mount_from_path(ios_path);
             dbg!(result);
+        }
+
+        LowlevelCommands::Mount { ios_path, linux_path } => {
+            let result = mount::mount_from_host(ios_path, linux_path);
+            if let Err(result) = result {
+                eprintln!("Failed to mount: {}\n", result);
+            }
         }
 
     }

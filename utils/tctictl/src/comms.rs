@@ -1,6 +1,6 @@
 //! Protocol for communicating with the tctiSH host.
 
-use std::{net::TcpStream, io::BufRead, time::Duration, io::BufReader};
+use std::{net::TcpStream, io::BufRead, time::Duration, io::{BufReader, Write}};
 
 use anyhow::{Result, anyhow};
 use serde::{Serialize, Deserialize};
@@ -10,12 +10,6 @@ const CONFIGURATION_HOST_ADDRESS : &str = "localhost:10050";
 
 #[cfg(target_os = "linux")]
 const CONFIGURATION_HOST_ADDRESS : &str = "192.168.100.2:10050";
-
-// The maximum length we expect from a packet.
-const MAX_PACKET_LENGTH : usize = 4096;
-
-// The maximum amount of time we're 
-const READ_TIMEOUT : Duration =  Duration::new(1, 0);
 
 /// Message exchanged back and forth with our 
 #[derive(Debug, Serialize, Deserialize)]
@@ -36,11 +30,15 @@ pub(crate) struct ConfigurationMessage {
 pub(crate) fn exchange_message(message: ConfigurationMessage) -> Result<ConfigurationMessage> {
 
     // Get a connection to our ConfigServer...
-    let socket = TcpStream::connect(CONFIGURATION_HOST_ADDRESS)?;
+    let mut socket = TcpStream::connect(CONFIGURATION_HOST_ADDRESS)?;
     let mut socket_reader = BufReader::new(socket.try_clone()?);
 
     // ... cajole our message into being JSON, and splat it up to the host.
-    serde_json::to_writer(&socket, &message).unwrap();
+    let raw_message = serde_json::to_string(&message)? + "\n";
+    let size_written = socket.write(&raw_message.into_bytes());
+    if size_written.is_err() || (size_written.unwrap() == 0){
+        return Err(anyhow!("response error'd out without data"));
+    }
 
     // Every packet from the ConfigServer should have a response; try to read it.
     let mut raw_response = String::new();

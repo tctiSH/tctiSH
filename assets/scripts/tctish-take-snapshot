@@ -9,14 +9,17 @@ fi
 # Select a different path to our host depending if this is run inside.
 if [[ $(uname -r) == *"tctish"* ]]; then
 	QMP_TARGET="192.168.100.2 10045"
+	NC="/bin/nc"
 else
 	QMP_TARGET="127.0.0.1 10045"
+	NC="nc"
 fi
+
 
 # The snapshot tag.
 TAG=$1
 
 # Perform the command.
-nc -c $QMP_TARGET > /dev/null << EOF 
+$NC -c $QMP_TARGET > /dev/null << EOF 
 savevm $TAG
 EOF

@@ -12,15 +12,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
     var qemu: QEMUInterface?
     var configServer : ConfigServer?
-
+    var saving : Bool = false
 
     // Global application state.
     // FIXME: move these to a nice, clean singleton
     static var forceRecoveryBoot = false
     static var usingJitHacks = false
+    static var isFirstBoot = false
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
 
+        let default_images : [String: [String:String]] = [:]
 
         // Register our default values; which will be used for any unset values.
         UserDefaults.standard.register(defaults: [
@@ -30,7 +32,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             "font_size": 14,
             "theme": "solzarizedDark",
             "attempting_boot": false,
-            "jit_mode": "jit_when_possible"
+            "jit_mode": "jit_when_possible",
+            "images": default_images
         ])
 
         let settingsAllowJit = UserDefaults.standard.string(forKey: "jit_mode") == "jit_when_possible"
@@ -56,6 +59,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // To minimize startup time, start our kernel before anything else.
         qemu = QEMUInterface()
         qemu!.startQemuThread(forceRecoveryBoot: AppDelegate.forceRecoveryBoot)
+        AppDelegate.isFirstBoot = qemu!.isFirstBoot()
 
         // Finally, before starting, spawn our background configuration server.
         configServer = ConfigServer(qemuInterface: qemu!, listenImmediately: true)
@@ -65,9 +69,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     
     func applicationDidEnterBackground(_ application: UIApplication) {
+        if (saving) {
+            return;
+        }
+
+        saving = true
         let taskIdentifier = application.beginBackgroundTask {}
         qemu?.performBackgroundSave()
         application.endBackgroundTask(taskIdentifier)
+        saving = false
     }
 
 

@@ -20,13 +20,9 @@
 #include <mach/mach.h>
 #include <mach-o/loader.h>
 #include <mach-o/getsect.h>
+#include <sys/fcntl.h>
 
 #include "qemu_launcher.h"
-
-// For early development / test distribution, always produce logs.
-#ifndef DEBUG_QEMU
-#define DEBUG_QEMU
-#endif
 
 #define ARGUMENT_MAX (2048)
 #define PATH_MAX     (1024)
@@ -40,11 +36,11 @@ extern int csops(pid_t pid, unsigned int ops, void * useraddr, size_t usersize);
 extern boolean_t exc_server(mach_msg_header_t *, mach_msg_header_t *);
 extern int ptrace(int request, pid_t pid, caddr_t addr, int data);
 
-#define    CS_OPS_STATUS             0    /* return status */
+#define    CS_OPS_STATUS             0  /* return status */
 #define    CS_KILL          0x00000200  /* kill process if it becomes invalid */
 #define    CS_DEBUGGED      0x10000000  /* process is currently or has previously been debugged and allowed to run with invalid pages */
-#define    PT_TRACE_ME               0       /* child declares it's being traced */
-#define    PT_SIGEXC                12      /* signals as exceptions for current_proc */
+#define    PT_TRACE_ME               0  /* child declares it's being traced */
+#define    PT_SIGEXC                12  /* signals as exceptions for current_proc */
 
 
 //
@@ -61,14 +57,10 @@ struct qemu_args {
     char *kernel_filename;
     char *initrd_filename;
     char *disk_args;
-    char *snapshot_name;
+    char *shared_folder_args;
+    char *boot_image_name;
     char *dll_name;
     bool is_jit;
-    
-#ifdef DEBUG_QEMU
-    char *log_file;
-#endif
-    
 };
 
 /// Core thread that runs our background QEMU.
@@ -94,14 +86,13 @@ static void* qemu_thread(void *raw_args) {
         // Guest memory.
         "-m", "1G",
         
-#ifdef DEBUG_QEMU
-        // Write to a local log.
-        "-D", args->log_file,
-#endif
-        
         // Networking.
+        //
+        // Debug note: one can remove the 127.0.0.1 from the above string to make SSH'ing the VM possible
+        // from the debug host. This isn't recommended for debug builds.
         "-device", "virtio-net-pci,id=net1,netdev=net0",
-        "-netdev", "user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100,hostfwd=tcp::10022-:22",
+        "-netdev", "user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100,hostfwd=tcp:127.0.0.1:10022-:22",
+        
         
         // Provide our host RNG to our guest; to speed up entropy generation.
         "-device", "virtio-rng-pci",
@@ -127,19 +118,19 @@ static void* qemu_thread(void *raw_args) {
         // Monitor conection in-guest tools.
         "-monitor", "tcp:localhost:10045,server,wait=off",
 
-        // Use JIT if we have JIT hacks,
+        // Use JIT if we have JIT hacks.
         "-accel", args->is_jit ? "tcg,split-wx=on" : "tcg",
-        
-        // Resume from our instant boot cache, if possible.
-        "-loadvm", args->snapshot_name,
+
+        // Share in our core shared folder, always.
+        "-fsdev", args->shared_folder_args,
+        "-device", "virtio-9p-pci,fsdev=fsdev0,mount_tag=shared",
+
+        // These _must_ be last.
+        "-loadvm", args->boot_image_name
     };
-    
-    // Compute the number of arguments.
+
     int argc = ARRAY_SIZE(argv);
-    
-    // If we don't have a snapshot, remove those arguments.
-    // (This is a "recovery boot").
-    if (!args->snapshot_name) {
+    if (args->boot_image_name == NULL) {
         argc -= 2;
     }
 
@@ -152,6 +143,7 @@ static void* qemu_thread(void *raw_args) {
     qemu_cleanup = dlsym(qemu_dll, "qemu_cleanup");
 
     // Finally, run the lightweight VM.
+
     qemu_init(argc, (const char **)argv, (const char **)envp);
     qemu_main_loop();
     qemu_cleanup();
@@ -161,7 +153,10 @@ static void* qemu_thread(void *raw_args) {
     free(args->kernel_filename);
     free(args->initrd_filename);
     free(args->disk_args);
-    free(args->log_file);
+    free(args->shared_folder_args);
+    if (args->boot_image_name) {
+        free(args->boot_image_name);
+    }
     free(args);
     
     return NULL;
@@ -173,8 +168,8 @@ void run_background_qemu(const char* qemu_path,
                          const char* initrd_path,
                          const char* bios_path,
                          const char* disk_path,
-                         const char* snapshot_name,
-                         const char* log_file_path,
+                         const char* shared_folder_path,
+                         const char* boot_image_name,
                          bool is_jit)
 {
     pthread_t thread;
@@ -182,31 +177,32 @@ void run_background_qemu(const char* qemu_path,
     
     struct qemu_args *args = calloc(1, sizeof(struct qemu_args));
 
-    args->is_jit           = is_jit;
-    args->qemu_image       = calloc(PATH_MAX, sizeof(char));
-    args->kernel_filename  = calloc(PATH_MAX, sizeof(char));
-    args->initrd_filename  = calloc(PATH_MAX, sizeof(char));
-    args->bios_dir         = calloc(PATH_MAX, sizeof(char));
-    args->log_file         = calloc(PATH_MAX, sizeof(char));
-    if (snapshot_name) {
-        args->snapshot_name = calloc(PATH_MAX, sizeof(char));
-    } else {
-        args->snapshot_name = NULL;
+    args->is_jit             = is_jit;
+    args->qemu_image         = calloc(PATH_MAX, sizeof(char));
+    args->kernel_filename    = calloc(PATH_MAX, sizeof(char));
+    args->initrd_filename    = calloc(PATH_MAX, sizeof(char));
+    args->bios_dir           = calloc(PATH_MAX, sizeof(char));
+    if (boot_image_name) {
+        args->boot_image_name = calloc(PATH_MAX, sizeof(char));
     }
-    
+
     // Create our disk argument.
-    args->disk_args         = calloc(ARGUMENT_MAX, sizeof(char));
+    args->disk_args  = calloc(ARGUMENT_MAX, sizeof(char));
     snprintf(args->disk_args, ARGUMENT_MAX, "media=disk,id=drive1,if=none,file=%s,discard=unmap,detect-zeroes=unmap",
              disk_path);
-    
+
+    // Create our shared-folder argument.
+    args->shared_folder_args  = calloc(ARGUMENT_MAX, sizeof(char));
+    snprintf(args->shared_folder_args, ARGUMENT_MAX, "local,path=%s,security_model=none,id=fsdev0",
+             shared_folder_path);
+
     // Copy in each of our filenames.
     strncpy(args->qemu_image, qemu_path, PATH_MAX - 1);
     strncpy(args->kernel_filename, kernel_path, PATH_MAX - 1);
     strncpy(args->initrd_filename, initrd_path, PATH_MAX - 1);
-    strncpy(args->log_file, log_file_path, PATH_MAX - 1);
     strncpy(args->bios_dir, bios_path, PATH_MAX - 1);
-    if (args->snapshot_name) {
-        strncpy(args->snapshot_name, snapshot_name, PATH_MAX - 1);
+    if (boot_image_name) {
+        strncpy(args->boot_image_name, boot_image_name, PATH_MAX - 1);
     }
 
     // Finally, spawn our thread.

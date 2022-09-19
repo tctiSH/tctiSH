@@ -9,16 +9,31 @@
 import Socket
 import Foundation
 
+/// Structure that stores the metadata associated with a given mount.
+struct DiskMountInfo : Codable {
+    /// The bookmark data assosciated with the disk mount.
+    var bookmark : Data
+
+    /// The tag used for configuring the fsdev backing file provider.
+    var fsdev_tag : String
+
+    /// The tag used for mounting the device into the VM.
+    var mount_tag : String
+}
+
 
 /// Provides an interface for running / controlling a QEMU VM.
 public class QEMUInterface {
     
-    /// The port on which we connecto using the QEMU machine protocol.
+    /// The port on which we connect using the QEMU monitor.
     private static let monitorPort : Int32 = 10044
-    
+
     /// Our QEMU human-readable protocol socket.
     var monitorSocket : Socket?
-    
+
+    /// A queue used for general monitor operations.
+    let monitorQueue = DispatchQueue(label: "com.ktemkin.ios.tctiSH.monitor")
+
     /// Start our background QEMU thread.
     func startQemuThread(forceRecoveryBoot: Bool = false) {
         
@@ -35,14 +50,15 @@ public class QEMUInterface {
 
         // ... find where our QEMU binary is actually located ...
         let qemuImage = getAppropriateQemuFramework().path
+
+        // ... figure out the folder we'll be sharing into our environment ...
+        let sharedFolder = getSharedFolder().path
         
-        // ... figure out where to put our logs, if we're logging ...
-        let logFile = getDatastoreURL("qemu", fileExtension: "log", create: false).path
-        
-        NSLog(qemuImage)
-            
-        // ... and run QEMU.
-        run_background_qemu(qemuImage, kernelPath, initrdPath, bundlePrefix, diskPath, bootImageName, logFile, AppDelegate.usingJitHacks);
+        // ... and start up the QEMU kernel, which will start paused.
+        run_background_qemu(qemuImage, kernelPath, initrdPath, bundlePrefix, diskPath, sharedFolder, bootImageName, AppDelegate.usingJitHacks);
+
+        // Finally, recreate our persistent mounts, so they're available in the VM.
+        recreatePersistentMounts()
     }
     
     /// Saves the state of the running QEMU instance.
@@ -57,35 +73,164 @@ public class QEMUInterface {
         issueMonitorCommand("loadvm \(tag)")
         issueMonitorCommand("c")
     }
-    
+
     /// Saves the state of the running QEMU instance in a background-safe manner.
     func performBackgroundSave() {
-        let nextABStatus = getNextBootABStatus()
-        let nextTag = "instantboot\(nextABStatus)"
-        
-        saveState(tag: nextTag)
-        Thread.sleep(forTimeInterval: TimeInterval(2))
-        setABBootStatus(status: nextABStatus)
+        if let terminal = ViewController.getCurrentTerminal() {
+            let nextTag = getNextInstantResumeTag()
+
+            // Never take a snapshot before we've connected to our VM.
+            if (!terminal.connected) {
+                return;
+            }
+
+            saveState(tag: nextTag)
+            Thread.sleep(forTimeInterval: TimeInterval(2))
+            setResumeImage(tag: nextTag)
+        }
+    }
+
+    /// Get the next 'instant resume' file image.
+    /// This ensures we never overwrite an image until our save is complete.
+    private func getNextInstantResumeTag() -> String {
+        let current = getImageProperty(diskName: getDiskName(), property: "resume_image", defaultValue: "b")
+
+        if current.last == "b" {
+            return "instant_resume_a"
+        } else {
+            return "instant_resume_b"
+        }
+    }
+
+    /// Starts or resumes the tctiSH instance's execution.
+    func pause() {
+        issueMonitorCommand("halt")
+    }
+
+
+    /// Starts or resumes the tctiSH instance's execution.
+    func resume() {
+        issueMonitorCommand("cont")
+    }
+
+    private func setupMountPermissions(bookmarkData: Data) -> URL? {
+        var isStale = false;
+
+        // Rehydrate our data back into a bookmark...
+        let hostPath = try? URL(resolvingBookmarkData: bookmarkData, bookmarkDataIsStale: &isStale)
+        guard (hostPath != nil) && !isStale else {
+            return nil
+        }
+
+        // ... revive its security context ...
+        _ = hostPath?.startAccessingSecurityScopedResource()
+
+        return hostPath
+    }
+
+    /// Sets up a given host URL for mounting.
+    func mount(bookmarkData: Data, interfaceId: String? = nil, predefinedTag: String? = nil,
+               persistent: Bool = true) -> String? {
+        let tag = predefinedTag ?? generateMountTag(length: 6)
+        let id = interfaceId ?? generateMountTag(length: 6)
+
+        let hostPath = setupMountPermissions(bookmarkData: bookmarkData)
+
+        // ... and, finally, mount the target URL.
+        if persistent {
+            makeMountPersistent(bookmarkData: bookmarkData, interfaceId: id, tag: tag)
+        }
+        return mount(hostPath: hostPath!, interfaceId: id, predefinedTag: tag)
+    }
+
+    /// Saves mount data into our "VM" configuration, so we can automatically remount it on startup.
+    private func makeMountPersistent(bookmarkData: Data, interfaceId: String, tag: String) {
+
+        // Get an encapsulation of our mount data...
+        let mountInfo = DiskMountInfo(bookmark: bookmarkData, fsdev_tag: interfaceId, mount_tag: tag)
+        let serializedData = try! JSONEncoder().encode(mountInfo)
+        let serializedString = String(data: serializedData, encoding: .utf8)!
+
+        // ... and associate it with this image.
+        let slot = getNextMountSlotName()
+        setImageProperty(diskName: getDiskName(), property: slot, value: serializedString)
+    }
+
+
+    /// Returns the next ImageProperty name appropriate for storing a
+    private func getNextMountSlotName() -> String {
+        let existingSlots = getPersistentMounts().count
+        return "disk_mount_\(existingSlots)"
+    }
+
+    /// Returns all known disk-mount data, so persistent disks can be remounted.
+    private func getPersistentMounts() -> [DiskMountInfo] {
+        var slot = 0
+        var mounts : [DiskMountInfo] = []
+
+        while true {
+            let mount_info = getMountInfo(slotName: "disk_mount_\(slot)")
+            if let mount_info = mount_info {
+                mounts.append(mount_info)
+            } else {
+                return mounts
+            }
+
+            slot += 1
+        }
+    }
+
+    /// Returns any mount information associated with a given disk mount slot;
+    /// or nil if the slot wasn't present.
+    private func getMountInfo(slotName: String, disk: String? = nil) -> DiskMountInfo? {
+
+        // Fetch any data stored in the current mount slot.
+        let diskName = disk ?? getDiskName()
+        let serializedString = getImageProperty(diskName: diskName, property: slotName, defaultValue: "")
+        let serializedData = Data(serializedString.utf8)
+
+        // If there wasn't any, early abort.
+        guard serializedString != "" else {
+            return nil
+        }
+
+        // Finally, parse the data back into mount-info.
+        return try? JSONDecoder().decode(DiskMountInfo.self, from: serializedData)
+    }
+
+    /// Re-creates a mount point on image startup.
+    private func recreatePersistentMount(mount_info : DiskMountInfo) {
+        _ = self.setupMountPermissions(bookmarkData: mount_info.bookmark)
+    }
+
+
+    /// Re-creates all mounts from the persistent mount pool.
+    private func recreatePersistentMounts() {
+        for mount in self.getPersistentMounts() {
+            self.recreatePersistentMount(mount_info: mount)
+        }
     }
 
 
     /// Sets up a given host URL for mounting.
-    func mount(hostPath: URL, interfaceId: String? = nil) -> String {
-        return mount(hostPath: hostPath.path, interfaceId: interfaceId)
+    func mount(hostPath: URL, interfaceId: String? = nil, predefinedTag: String? = nil) -> String {
+        return mount(hostPath: hostPath.path, interfaceId: interfaceId, predefinedTag: predefinedTag)
     }
 
     /// Sets up a given host path for mounting.
-    func mount(hostPath: String, interfaceId: String? = nil) -> String {
-        let tag = generateMountTag()
-        let id = interfaceId ?? generateMountTag(length: 6)
+    func mount(hostPath: String, interfaceId: String? = nil, predefinedTag: String? = nil) -> String {
+        let tag = predefinedTag ?? generateMountTag(length: 6)
 
-        // Add our virtfs device to QEMU...
-        NSLog("fsdev_add fsdriver=local,path=\(hostPath),security_model=none,id=\(id)")
-        issueMonitorCommand("fsdev_add fsdriver=local,path=\(hostPath),security_model=none,id=\(id)")
+        // Use our tag to get a unique symlink path...
+        // FIXME: resolve this to something based on the mount URL?
+        var symlinkDestination = getSharedFolder()
+        symlinkDestination.appendPathComponent(tag, isDirectory: true)
 
-        // ... and expose it as a virtio device.
-        NSLog("device_add virtio-9p-pci,fsdev=\(id),mount_tag=\(tag)")
-        issueMonitorCommand("device_add virtio-9p-pci,fsdev=\(id),mount_tag=\(tag)")
+        // ... and then create a symlink to the target.
+        if FileManager.default.fileExists(atPath: symlinkDestination.path) {
+            try? FileManager.default.removeItem(at: symlinkDestination)
+        }
+        try? FileManager.default.createSymbolicLink(atPath: symlinkDestination.path, withDestinationPath: hostPath)
 
         return tag
     }
@@ -129,7 +274,12 @@ public class QEMUInterface {
         
         switch mode {
         case "persistent_boot":
-            return "instantboot\(getBootABStatus())"
+            let resume_image = getResumeImage()
+            if isFirstBoot() {
+                return nil
+            } else {
+                return resume_image
+            }
         case "snapshot_boot":
             return UserDefaults.standard.string(forKey: "boot_snapshot")
         case "recovery_boot":
@@ -141,13 +291,17 @@ public class QEMUInterface {
             exit(1);
         }
     }
-    
 
+    /// Returns a string indicating the currently used disc name.
+    private func getDiskName() -> String {
+        return UserDefaults.standard.string(forKey: "disk_name") ?? "disk"
+    }
+    
     /// Returns the URL to a qcow image that will acts as our persistent store.
     /// TODO: figure out if we want to use qcow2, or if we should implement a different file backend?
     private func getPersistentStore() -> URL
     {
-        let diskName = UserDefaults.standard.string(forKey: "disk_name") ?? "disk"
+        let diskName = getDiskName()
         
         // Figure out where our persistent store would be located.
         let targetURL = getDatastoreURL(diskName, fileExtension: "qcow")
@@ -156,26 +310,29 @@ public class QEMUInterface {
         if !FileManager.default.fileExists(atPath: targetURL.path) {
             let emptyDiskURL = Bundle.main.url(forResource: "empty", withExtension: "qcow")
             try! FileManager.default.copyItem(at: emptyDiskURL!, to: targetURL)
-        }
-    
-        return targetURL
-    }
-    
-    
-    /// Returns the path to the file that contains our A/B boot status.
-    private func getBootABStatusFile() -> URL
-    {
-        let diskName = UserDefaults.standard.string(forKey: "disk_name") ?? "disk"
-        
-        let targetURL = getDatastoreURL(diskName, fileExtension: "conf")
 
-        // If we don't have an AB status file, create an empty one.
-        if !FileManager.default.fileExists(atPath: targetURL.path) {
-            try! "".write(to: targetURL, atomically: true, encoding: .utf8)
+            // Reset the startup to base instant-boot, since we now have a new disk.
+            setResumeImage(tag: "instantboot")
         }
     
         return targetURL
     }
+
+
+    /// Returns the URL of a folder that can be used as the root of our iOS mounts.
+    private func getSharedFolder() -> URL
+    {
+        // Figure out where our persistent store would be located.
+        let targetURL = getDatastoreURL("SharedFolder", fileExtension: "d")
+
+        // If it doesn't exist, create a new copy based on our empty disk.
+        if !FileManager.default.fileExists(atPath: targetURL.path) {
+            try! FileManager.default.createDirectory(at: targetURL, withIntermediateDirectories: false)
+        }
+
+        return targetURL
+    }
+
     
     
     /// Retreives the path to a file in our local data store.
@@ -195,64 +352,69 @@ public class QEMUInterface {
     
         return targetURL
     }
-    
-    /// Returns whether we're booting using the 'A' or 'B' instant boot image.
-    /// Allows us to have a fallback when saving.
-    private func getBootABStatus() -> String {
-        let configFile = getBootABStatusFile()
-        return try! String(contentsOf: configFile)
+
+    /// Returns a property from the disk-image metadata store.
+    private func getImageProperty(diskName: String, property: String, defaultValue: String) -> String {
+        let imageStore = UserDefaults.standard.dictionary(forKey: "images") as? [String : [String:String]]
+        let images = imageStore ?? [:]
+        let image = images[diskName] ?? [:]
+        return image[property] ?? defaultValue
     }
-    
-    /// Returns the next place to _save_ a boot image; the opposite of the A/B
-    /// boot image last written.
-    private func getNextBootABStatus() -> String {
-        let configFile = getBootABStatusFile()
-        let status = try! String(contentsOf: configFile)
-        
-        // Return the opposite of whatever was booted last.
-        if (status == "A") {
-            return "B"
-        } else {
-            return "A"
-        }
+
+    /// Sets a property from the disk-image metadata store.
+    private func setImageProperty(diskName: String, property: String, value: String)  {
+
+        // Get the current image-store...
+        var imageStore = UserDefaults.standard.dictionary(forKey: "images") as? [String : [String:String]]
+        var images = imageStore ?? [:]
+
+        // ... update the relevant property value ...
+        images[diskName] = images[diskName] ?? [:]
+        images[diskName]![property] = value
+
+        // ... and save it back to our configuration.
+        UserDefaults.standard.set(images, forKey: "images")
     }
-    
-    
-    /// Sets whether we're using the 'A' or 'B' boot image, for future boots.
-    private func setABBootStatus(status: String) {
-        assert((status == "A") || (status == "B"))
-        
-        let configFile = getBootABStatusFile()
-        try! status.write(to: configFile, atomically: true, encoding: .utf8)
+
+    func isFirstBoot() -> Bool {
+        let image = getResumeImage()
+        // FIXME: get rid of instantboot, here; it's just a simple transitionalt hing
+        return (image == "") || (image == "instantboot")
     }
-    
-    
-    
+
+    /// Gets the name of the save-state to be used for resuming a VM in "persist state" mode.
+    private func getResumeImage(diskName: String? = nil) -> String {
+        let diskName = diskName ?? getDiskName()
+        return getImageProperty(diskName: diskName, property: "resume_image", defaultValue: "")
+    }
+
+    /// Sets the name of the save-state to be used for resuming a VM in "persist state" mode.
+    private func setResumeImage(tag: String, diskName: String? = nil) {
+        let diskName = diskName ?? getDiskName()
+        setImageProperty(diskName: diskName, property: "resume_image", value: tag)
+    }
+
     /// Issue a QEMU managament protocol scheme command.
-    @discardableResult
-    private func issueMonitorCommand(_ command: String) -> String {
+    private func issueMonitorCommand(_ command: String) {
         let terminatedCommand = "\(command)\r\n"
         
         // Send our command ...
         ensureMonitorConnection()
-        try! monitorSocket?.write(from: terminatedCommand.data(using: .utf8)!)
-        
-        // ... and get the response.
-        return try! monitorSocket!.readString()!
+        _ = try? monitorSocket?.write(from: terminatedCommand.data(using: .utf8)!)
     }
-    
-    
+
     /// Ensures we have a connection to our VM over the QEMU management protocol.
     private func ensureMonitorConnection() {
         
         // If we already have a connection, we're done!
-        if monitorSocket != nil {
-            return
+        if let monitorSocket = monitorSocket {
+            if monitorSocket.isConnected {
+                return
+            }
         }
         
         // Create a connection to QEMU via QMP.
         monitorSocket = try! Socket.create()
         try! monitorSocket!.connect(to: "127.0.0.1", port: QEMUInterface.monitorPort)
-        
     }
 }

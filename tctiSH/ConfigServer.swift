@@ -39,7 +39,7 @@ class ConfigServer {
     var connectedClients = [Int32: Socket]()
 
     /// A queue used to synchronize access to our sockets.
-    let clientLockQueue = DispatchQueue(label: "com.ktemkin.ios.tctiSH")
+    let clientLockQueue = DispatchQueue(label: "com.ktemkin.ios.tctiSH.configserver")
 
     /// Our interface to our QEMU kernel.
     /// Should only be accessed from our command loop.
@@ -141,8 +141,13 @@ class ConfigServer {
                 sendMessage(response, to: client)
 
             // Requests that we pop up a file picker to choose a path.
-            case "choose_path":
-                sendErrorResponse("choose_path is not yet implemented", to: client)
+            case "choose_folder":
+                handleChoosePath(message: message, from: client)
+
+            // Requests that we pop up a filer picker to choose a path,
+            // and then ensure that path is accessible to QEMU.
+            case "open_folder":
+                handleOpenPath(message: message, from: client)
 
             // Requests that we prepare a given device for mounting.
             // Responds with the 'tag' used to mount the device with a `mount -t 9p` command.
@@ -164,21 +169,112 @@ class ConfigServer {
         }
     }
 
+    /// Fetches a "folder picker" result for our client.
+    private func handleChoosePath(message: ConfigurationMessage, from: Client, openSecurityContext: Bool = false) {
+        let client = from
+
+        // No arguments, for now.
+        _ = message
+
+        // Fetch a directory from the user.
+        let directory = DirectoryPicker.popUpModalDialog()
+
+        // If we didn't get one, return that this was cancelled.
+        if (directory == []) {
+            sendResponse(command: "choose_folder", key: "status", value: "cancelled", to: client)
+            return
+        }
+
+        // Fetch the actual URL picked; opening it, if required.
+        let url = directory.first!
+        if (openSecurityContext) {
+            _ = url.startAccessingSecurityScopedResource()
+        }
+
+        // Return the selected URL.
+        sendResponse(command: "choose_folder", key: "directory", value: url.path, to: client)
+    }
+
+    /// Fetches a "folder picker" result for our client, and returns a serialized _bookmark_
+    /// associated with a security context; so it can be used to persistently open a folder.
+    private func handleOpenPath(message: ConfigurationMessage, from: Client) {
+        let client = from
+
+        // No arguments, for now.
+        _ = message
+
+        // Fetch a directory from the user.
+        let directory = DirectoryPicker.popUpModalDialog()
+
+        // If we didn't get one, return that this was cancelled.
+        if (directory == []) {
+            sendResponse(command: "open_folder", key: "status", value: "cancelled", to: client)
+            return
+        }
+
+        // Fetch the actual URL picked; opening it, if required.
+        let url = directory.first!
+
+        // Ensure we have access to the bookmark.
+        _ = url.startAccessingSecurityScopedResource()
+        defer { url.stopAccessingSecurityScopedResource() }
+
+        do {
+            // Get a bookmark for the relevant data...
+            let bookmarkData = try url.bookmarkData()
+
+            // ... encode it for transport ...
+            let encodedBookmark = bookmarkData.base64EncodedString()
+
+            // ... and return it to the caller.
+            sendResponse(command: "open_folder", key: "bookmark", value: encodedBookmark, to: client)
+
+        } catch let err {
+            sendErrorResponse("failed to create bookmark: \(err)", to: client)
+        }
+    }
+
+
     /// Command that sets up the QEMU side of a host-side mount.
     private func handlePrepareMountCommand(message: ConfigurationMessage, from: Client) {
         let client = from
 
         if let hostPath = message.value {
-            // TODO: validate the mount path, here
+            var tag = ""
+            var isBookmark = false
 
-            // Perform our actual mount...
-            let tag = qemu.mount(hostPath: hostPath)
+            // If we have a type, check to see if this is actually an encoded bookmark.
+            if let type = message.key {
+                isBookmark = (type != "")
+            }
+
+            // If we have a bookmark, decode it to a URL, and then use that to mount.
+            if isBookmark {
+                // Rehydrate the bookmark back into a URL...
+                let bookmarkData = Data(base64Encoded: hostPath)
+                if let bookmarkData = bookmarkData {
+
+                    // ... and use it to re-mount the image.
+                    let mount_result = qemu.mount(bookmarkData: bookmarkData, predefinedTag: message.key!)
+                    if let mount_result = mount_result {
+                        tag = mount_result
+                    } else {
+                        sendErrorResponse("bookmark no longer valid", to: client)
+                    }
+
+                } else {
+                    sendErrorResponse("invalid encoded bookmark", to: client)
+                }
+
+            }
+            // Otherwise, use the host path directly.
+            else {
+                tag = qemu.mount(hostPath: hostPath)
+            }
 
             // ... and send the generated tag back to the host.
             let response = ConfigurationMessage(command: "prepare_mount.response", key: "tag", value: tag)
             sendMessage(response, to: client)
-
-            // FIXME: make this non-volatile?
         } else {
             sendErrorResponse("invalid argument to a mount command", to: client)
         }

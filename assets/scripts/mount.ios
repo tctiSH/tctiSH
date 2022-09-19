@@ -1,0 +1,60 @@
+#!/bin/bash
+# Mount helper for mounting iOS things.
+
+SHORT=s,f,n,v,N:,o:,t:
+OPTS=$(/bin/getopt -a -n mount.ios --options $SHORT -- "$@")
+
+FAKE=0
+
+eval set -- "$OPTS"
+
+while :
+do
+  case "$1" in
+
+	# Handle fake mounts.
+	-f )
+	  FAKE
+	  shift
+	  ;;
+	
+	## For now, ignore most flags.
+	-s | -n | -v )
+	  shift
+      ;;
+
+	## For now, ignore all arguments.
+	-N | -o | -t )
+      shift 2
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      echo "Unexpected option: $1"
+	  exit -1
+      ;;
+  esac
+done
+
+# Print arguments if we don't have them.
+if [ $# != 2 ]; then
+	echo "usage: mount.ios <mount_name> <mountpoint>"
+	exit -1
+fi
+
+# Perform the actual mount
+if [ $FAKE == 1 ]; then
+	echo tctictl mount $1
+else
+	tctictl mount $1
+fi
+
+
+# Perform the actual mount
+if [ $FAKE == 1 ]; then
+	echo mount --bind /ios_host/$1 $2
+else
+	 mount --bind /ios_host/$1 $2
+fi

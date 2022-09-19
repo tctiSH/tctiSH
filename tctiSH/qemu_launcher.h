@@ -20,8 +20,8 @@ void run_background_qemu(const char *qemu_path,
                          const char *initrd_path,
                          const char *bios_path,
                          const char *disk_path,
-                         const char *snapshot_name,
-                         const char *log_file_path,
+                         const char *shared_folder_path,
+                         const char *boot_image_name,
                          bool is_jit);
 
 #endif /* qemu_launcher_h */

@@ -3,12 +3,12 @@
 # The architecture of we're targeting with QEMU.
 TCTI_ARCH="x86_64"
 
-USE_SSH=0
+USE_SSH=1
 USE_DISK_STANDIN=1
 INSTANT_STARTUP=0
-EXAMPLE_FOREIGN_MOUNT=0
+FOREIGN_MOUNT=1
 
-# The (initial) ram size of the disk0
+# The (initial) ram size of the disk.
 INITIAL_RAM_SIZE="1G"
 
 # The size of the image used to emulate iOS storage.
@@ -73,11 +73,11 @@ fi
 
 
 # If we're using an example of pulling in something from the host, do that.
-if [ $EXAMPLE_FOREIGN_MOUNT != 0 ]; then
+if [ $FOREIGN_MOUNT != 0 ]; then
 	echo "Passing /tmp into the vm, as an example."
 	echo "mount with: mount -t 9p -o trans=virtio foreign /mnt -oversion=9p2000.L"
 	CONSOLE_QEMU_OPTIONS="$CONSOLE_QEMU_OPTIONS -fsdev local,path=/tmp/,security_model=none,id=fsdev0"
-	CONSOLE_QEMU_OPTIONS="$CONSOLE_QEMU_OPTIONS -device virtio-9p-pci,fsdev=fsdev0,mount_tag=foreign"
+	CONSOLE_QEMU_OPTIONS="$CONSOLE_QEMU_OPTIONS -device virtio-9p-pci,fsdev=fsdev0,mount_tag=shared"
 fi
 
 #fsdev_add local,path=/tmp/,mount_tag=foreign,security_model=none,id=fsdev0
@@ -88,14 +88,13 @@ fi
 	-kernel bzImage \
 	-initrd initrd.img \
 	-m $INITIAL_RAM_SIZE \
-	-smp cpus=4 \
 	-device virtio-net-pci,id=net1,netdev=net0 \
 	-netdev user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100,hostfwd=tcp::10022-:22,hostfwd=tcp::10023-:23 \
 	-device virtio-rng-pci \
 	$CONSOLE_QEMU_OPTIONS \
 	-append "$CONSOLE_KERNEL_OPTIONS" \
 	-monitor tcp:localhost:10044,server,wait=off \
-	-monitor tcp:localhost:10045,server,wait=off
+	-monitor tcp:localhost:10045,server,wait=off &
 QEMU_PID=$!
 
 
