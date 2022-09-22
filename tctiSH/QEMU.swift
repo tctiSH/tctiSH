@@ -11,6 +11,7 @@ import Foundation
 
 /// Structure that stores the metadata associated with a given mount.
 struct DiskMountInfo : Codable {
+
     /// The bookmark data assosciated with the disk mount.
     var bookmark : Data
 
@@ -24,18 +25,25 @@ struct DiskMountInfo : Codable {
 
 /// Provides an interface for running / controlling a QEMU VM.
 public class QEMUInterface {
-    
+
+    /// The hostfwd pattern used to make SSH connections available to the application.
+    private static let sshHostForward : String = "tcp:127.0.0.1:10022-:22"
+
     /// The port on which we connect using the QEMU monitor.
     private static let monitorPort : Int32 = 10044
 
     /// Our QEMU human-readable protocol socket.
     var monitorSocket : Socket?
+    var monitorSocketPath : String?
 
     /// A queue used for general monitor operations.
     let monitorQueue = DispatchQueue(label: "com.ktemkin.ios.tctiSH.monitor")
 
     /// Start our background QEMU thread.
     func startQemuThread(forceRecoveryBoot: Bool = false) {
+
+        // Clear any state left over from previous runs.
+        clearLastCWDFile()
         
         // Figure out where our QEMU resources are...
         let bundlePrefix = Bundle.main.resourcePath!
@@ -44,8 +52,9 @@ public class QEMUInterface {
         
         // ... get a disk to run with ...
         let diskPath = getPersistentStore().path
+        NSLog("Disk path: \(diskPath)")
         
-        // ... figure out if we're using our A or B boot image ...
+        // ... figure out which image we'll be restoring state from ...
         let bootImageName = getBootImageName(forceRecoveryBoot: forceRecoveryBoot)
 
         // ... find where our QEMU binary is actually located ...
@@ -53,9 +62,12 @@ public class QEMUInterface {
 
         // ... figure out the folder we'll be sharing into our environment ...
         let sharedFolder = getSharedFolder().path
+
+        // ... get a filename for our unix domain monitor-connection socket ...
+        monitorSocketPath = getDatastoreURL("monitor", fileExtension: "socket").path
         
         // ... and start up the QEMU kernel, which will start paused.
-        run_background_qemu(qemuImage, kernelPath, initrdPath, bundlePrefix, diskPath, sharedFolder, bootImageName, AppDelegate.usingJitHacks);
+        run_background_qemu(qemuImage, kernelPath, initrdPath, bundlePrefix, diskPath, sharedFolder, bootImageName, monitorSocketPath, AppDelegate.usingJitHacks);
 
         // Finally, recreate our persistent mounts, so they're available in the VM.
         recreatePersistentMounts()
@@ -113,6 +125,18 @@ public class QEMUInterface {
         issueMonitorCommand("cont")
     }
 
+    /// Terminates the SSH channel used for console comms.
+    func stopHostChannels() {
+        issueMonitorCommand("hostfwd_remove \(QEMUInterface.sshHostForward)")
+    }
+
+    /// Terminates the SSH channel used for console comms.
+    func startHostChannels() {
+        issueMonitorCommand("hostfwd_add \(QEMUInterface.sshHostForward)")
+    }
+
+    /// Sets up the permissions for using a bookmarked folder.
+    /// Used to restore access to an iOS folder.
     private func setupMountPermissions(bookmarkData: Data) -> URL? {
         var isStale = false;
 
@@ -203,7 +227,6 @@ public class QEMUInterface {
         _ = self.setupMountPermissions(bookmarkData: mount_info.bookmark)
     }
 
-
     /// Re-creates all mounts from the persistent mount pool.
     private func recreatePersistentMounts() {
         for mount in self.getPersistentMounts() {
@@ -222,7 +245,6 @@ public class QEMUInterface {
         let tag = predefinedTag ?? generateMountTag(length: 6)
 
         // Use our tag to get a unique symlink path...
-        // FIXME: resolve this to something based on the mount URL?
         var symlinkDestination = getSharedFolder()
         symlinkDestination.appendPathComponent(tag, isDirectory: true)
 
@@ -298,7 +320,6 @@ public class QEMUInterface {
     }
     
     /// Returns the URL to a qcow image that will acts as our persistent store.
-    /// TODO: figure out if we want to use qcow2, or if we should implement a different file backend?
     private func getPersistentStore() -> URL
     {
         let diskName = getDiskName()
@@ -320,7 +341,8 @@ public class QEMUInterface {
 
 
     /// Returns the URL of a folder that can be used as the root of our iOS mounts.
-    private func getSharedFolder() -> URL
+    /// Typically mounted as `/ios_host`.
+    static func getSharedFolder() -> URL
     {
         // Figure out where our persistent store would be located.
         let targetURL = getDatastoreURL("SharedFolder", fileExtension: "d")
@@ -333,11 +355,38 @@ public class QEMUInterface {
         return targetURL
     }
 
+
+    /// Returns the URL of a folder that can be used as the root of our iOS mounts.
+    /// Typically mounted as `/ios_host`.
+    func getSharedFolder() -> URL {
+        return QEMUInterface.getSharedFolder()
+    }
+
+
+    /// Returns the path of a shared file that can be used to pass our last-cwd to the guest.
+    /// Contents of the file are managed by our console frontend.
+    static func getLastCWDFile() -> URL {
+        var cwdFile = QEMUInterface.getSharedFolder()
+        cwdFile.appendPathComponent("last_cwd.dat")
+
+        return cwdFile
+    }
+
+
+    /// Removes any last-CWD file present, which is used to store the current CWD.
+    func clearLastCWDFile() {
+        let cwdFile = QEMUInterface.getLastCWDFile()
+
+        // If we have a cwdfile, delete it.
+        if FileManager.default.fileExists(atPath: cwdFile.path) {
+            try? FileManager.default.removeItem(at: cwdFile)
+        }
+    }
     
     
     /// Retreives the path to a file in our local data store.
     /// Currently fetches a path in the per-app 'Documents' directory; but this may change.
-    private func getDatastoreURL(_ name : String, fileExtension: String, create: Bool = true) -> URL {
+    private static func getDatastoreURL(_ name : String, fileExtension: String, create: Bool = true) -> URL {
         
         // Figure out where our persistent store would be located.
         var targetURL = try! FileManager.default.url(
@@ -352,6 +401,14 @@ public class QEMUInterface {
     
         return targetURL
     }
+
+
+    /// Retreives the path to a file in our local data store.
+    /// Currently fetches a path in the per-app 'Documents' directory; but this may change.
+    private func getDatastoreURL(_ name : String, fileExtension: String, create: Bool = true) -> URL {
+        QEMUInterface.getDatastoreURL(name, fileExtension: fileExtension, create: create)
+    }
+
 
     /// Returns a property from the disk-image metadata store.
     private func getImageProperty(diskName: String, property: String, defaultValue: String) -> String {
@@ -376,6 +433,7 @@ public class QEMUInterface {
         UserDefaults.standard.set(images, forKey: "images")
     }
 
+    /// Returns true iff this is a first-boot of the VM.
     func isFirstBoot() -> Bool {
         let image = getResumeImage()
         // FIXME: get rid of instantboot, here; it's just a simple transitionalt hing
@@ -414,7 +472,7 @@ public class QEMUInterface {
         }
         
         // Create a connection to QEMU via QMP.
-        monitorSocket = try! Socket.create()
-        try! monitorSocket!.connect(to: "127.0.0.1", port: QEMUInterface.monitorPort)
+        monitorSocket = try! Socket.create(family: .unix, type: .stream, proto: .unix)
+        try! monitorSocket!.connect(to: monitorSocketPath!)
     }
 }

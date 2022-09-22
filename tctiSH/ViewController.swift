@@ -73,7 +73,7 @@ class ViewController: UIViewController {
         // If this is our first boot, create the image we'll use for resuming.
         else if AppDelegate.isFirstBoot {
             tv.feed(text: "Welcome to tctiSH! This first boot will take\r\n")
-            tv.feed(text: "just a bit longer, as we set up this disk image\r\n")
+            tv.feed(text: "just a bit longer, as we set up this environment\r\n")
             tv.feed(text: "for later use. Future boots will be way faster!\r\n\r\n")
 
             tv.feed(text: "This will take ~20 seconds or so.\r\n\r\n")

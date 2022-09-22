@@ -83,6 +83,10 @@ enum LowlevelCommands {
         ios_path: String,
         linux_path: String
     },
+
+
+    #[clap(about ="Fetches the host's perspective on our CWD.")]
+    GetCWD {},
 }
 
 //
@@ -151,6 +155,23 @@ fn lowlevel(subcommand: LowlevelCommands) {
                 eprintln!("Failed to mount: {}\n", result);
             }
         }
+
+        LowlevelCommands::GetCWD {} => {
+            let result = simple::handle_getcwd();
+            match result {
+
+                // If we got a path in response, mount it.
+                Ok(cwd) => {
+                    println!("{}", cwd);
+                }
+
+                // Otherwise, error out.
+                Err(err) => {
+                    eprintln!("Couldn't get the CWD: {}", err);
+                }
+            }
+        }
+
 
     }
 

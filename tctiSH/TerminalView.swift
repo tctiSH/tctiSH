@@ -8,6 +8,7 @@
 
 import Foundation
 import UIKit
+import AVKit
 import SwiftTerm
 import SwiftSH
 import Combine
@@ -15,9 +16,23 @@ import Combine
 
 /// Termainal view that behaves like an Xterm into our linux environment.
 public class TctiTermView: TerminalView, TerminalViewDelegate {
+
     var shell: SSHShell?
     var authenticationChallenge: AuthenticationChallenge?
     var connected : Bool = false
+
+    var pipController : AVPictureInPictureController?
+
+    /// The current working directory, if one is known/available.
+    private var _cwd : String?
+    public var cwd : String? {
+        get {
+            return _cwd
+        }
+    }
+
+    /// Set to true to enable SSH logging.
+    private static var sshLoggingEnabled : Bool = false
 
     /// Timer that is used to poll for connections if our connection drops.
     private var timer: Publishers.Autoconnect<Timer.TimerPublisher>? = nil
@@ -41,8 +56,9 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
                               host: "localhost",
                               port: 10022,
                               terminal: "xterm-256color")
-        shell?.log.enabled = false
+        shell?.log.enabled = TctiTermView.sshLoggingEnabled
 
+        // Make sure the terminal looks the way it should before anything's displayed.
         setUpTheming()
 
         // TODO: figure out if this should be automatic?
@@ -50,6 +66,11 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         
     }
 
+    ///
+    func getPiPSource() -> AVPictureInPictureController.ContentSource {
+    }
+
+    /// Starts the actual SSH terminal process.
     func start() {
         // Set up a timer to periodically poll our VM until it's ready for connection.
         timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -63,7 +84,25 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
 
     }
 
-    
+    /// Forces the SSH session to reconnect.
+    func forceReconnect() {
+
+        // Force-recreate our SSH session...
+        shell = try? SSHShell(sshLibrary: Libssh2.self,
+                              host: "localhost",
+                              port: 10022,
+                              environment: [],
+                              terminal: "xterm-256color")
+
+        shell?.log.enabled = TctiTermView.sshLoggingEnabled
+
+        // ... add a line-feed to ensure the cursor is in a valid drawing position, again...
+        self.feed(text: "\r\n")
+
+        // ... and reconnect.
+        connect()
+    }
+
     /// Callback notified each time a setting is changed.
     @objc
     func applySettings() {
@@ -162,41 +201,48 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
                     NSLog("\(error)")
                     //self.feed(text: "[ERROR?] \(error)\n")
                 } else {
-                    self.connected = true
-
                     // Mark us as no longer attempting boot.
+                    self.connected = true
                     UserDefaults.standard.set(false, forKey: "attempting_boot")
 
+                    // Inform the SSH server of our new size, so it can resize its PTY.
                     let t = self.getTerminal()
                     _ = s.setTerminalSize(width: UInt (t.cols), height: UInt (t.rows))
 
-                    // At this point
+                    // Finally, update the terminal to display the new connection.
                     t.updateFullScreen()
                 }
             }
         }
     }
 
+    /// Compliance initializer for things that can do encoding/decoding.
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    // TerminalViewDelegate conformance
+    /// Callback that occurs when the terminal is scrolled.
+    /// Can be used to save the scrollback, if desired.
     public func scrolled(source: TerminalView, position: Double) {
-        //
+        // Nothing to do here, yet.
     }
-    
+
+
+    /// Callback that occurs when the guest VM requests a terminal title change.
     public func setTerminalTitle(source: TerminalView, title: String) {
-        //
+        NSLog("TODO: set app title to include: \(title)")
     }
     
-    
+
+    /// Callback that occurs when the terminal's effective area has changed.
     public func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
-        if let s = shell {
-            _ = s.setTerminalSize(width: UInt (newCols), height: UInt (newRows))
-        }
+
+        // Pass through the size-change to our SSH session.
+        _ = shell?.setTerminalSize(width: UInt(newCols), height: UInt(newRows))
     }
-    
+
+
+    /// Function usd to send data across our SSH connection.
     public func send(source: TerminalView, data: ArraySlice<UInt8>) {
         shell?.write(Data (data)) { err in
             if let e = err {
@@ -204,11 +250,23 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
             }
         }
     }
-    
+
+    /// Callback that occurs when we receive OSC 7, which indicates the current working directory.
+    /// The default tctiSH setup's shell integration generates OSC-7 each time the prompt is issue.
     public func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
-        
+        _cwd = directory
+
+        if let directory = directory {
+            // Get a filename for our shared CWD file...
+            let cwdFile = QEMUInterface.getLastCWDFile()
+
+            // ... and write the CWD into it.
+            try? directory.write(to: cwdFile, atomically: true, encoding: .utf8)
+        }
+
     }
 
+    /// Callback that occurs when the user clicks on a URL or link in the tctiSH scrollback.
     public func requestOpenLink (source: TerminalView, link: String, params: [String:String])
     {
         if let fixedup = link.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {

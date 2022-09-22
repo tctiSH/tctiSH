@@ -58,6 +58,7 @@ struct qemu_args {
     char *initrd_filename;
     char *disk_args;
     char *shared_folder_args;
+    char *monitor_channel_args;
     char *boot_image_name;
     char *dll_name;
     bool is_jit;
@@ -92,8 +93,7 @@ static void* qemu_thread(void *raw_args) {
         // from the debug host. This isn't recommended for debug builds.
         "-device", "virtio-net-pci,id=net1,netdev=net0",
         "-netdev", "user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100,hostfwd=tcp:127.0.0.1:10022-:22",
-        
-        
+
         // Provide our host RNG to our guest; to speed up entropy generation.
         "-device", "virtio-rng-pci",
         
@@ -113,7 +113,7 @@ static void* qemu_thread(void *raw_args) {
         "-smp", "cpus=4",
         
         // Monitor conection for tctiSH.
-        "-monitor", "tcp:localhost:10044,server,wait=off",
+        "-monitor", args->monitor_channel_args,
         
         // Monitor conection in-guest tools.
         "-monitor", "tcp:localhost:10045,server,wait=off",
@@ -170,6 +170,7 @@ void run_background_qemu(const char* qemu_path,
                          const char* disk_path,
                          const char* shared_folder_path,
                          const char* boot_image_name,
+                         const char* monitor_socket_path,
                          bool is_jit)
 {
     pthread_t thread;
@@ -195,6 +196,11 @@ void run_background_qemu(const char* qemu_path,
     args->shared_folder_args  = calloc(ARGUMENT_MAX, sizeof(char));
     snprintf(args->shared_folder_args, ARGUMENT_MAX, "local,path=%s,security_model=none,id=fsdev0",
              shared_folder_path);
+
+    // Create our monitor argument.
+    args->monitor_channel_args  = calloc(ARGUMENT_MAX, sizeof(char));
+    snprintf(args->monitor_channel_args, ARGUMENT_MAX, "unix:%s,server,nowait",
+             monitor_socket_path);
 
     // Copy in each of our filenames.
     strncpy(args->qemu_image, qemu_path, PATH_MAX - 1);

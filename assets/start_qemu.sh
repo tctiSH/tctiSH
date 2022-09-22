@@ -93,6 +93,8 @@ fi
 	-device virtio-rng-pci \
 	$CONSOLE_QEMU_OPTIONS \
 	-append "$CONSOLE_KERNEL_OPTIONS" \
+	-audiodev coreaudio,id=snd0 \
+	-soundhw hda \
 	-monitor tcp:localhost:10044,server,wait=off \
 	-monitor tcp:localhost:10045,server,wait=off &
 QEMU_PID=$!

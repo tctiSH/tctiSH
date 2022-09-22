@@ -6,6 +6,7 @@
 //
 
 import UIKit
+import AVKit
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -13,6 +14,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var qemu: QEMUInterface?
     var configServer : ConfigServer?
     var saving : Bool = false
+
+    /// The controller used to support Picture in Picture.
+    var pipController : AVPictureInPictureController?
 
     // Global application state.
     // FIXME: move these to a nice, clean singleton
@@ -73,11 +77,51 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return;
         }
 
+        if backgroundToPip() {
+            NSLog("-----SWITCHED TO PIP-----")
+            return();
+        }
+
         saving = true
         let taskIdentifier = application.beginBackgroundTask {}
         qemu?.performBackgroundSave()
         application.endBackgroundTask(taskIdentifier)
         saving = false
+
+
+        NSLog("-----BACKGROUNDED-----")
+    }
+
+    /// Attempts to background the app to Picture in Picture.
+    func backgroundToPip() -> Bool {
+        if let term = ViewController.getCurrentTerminal() {
+
+            // Create a controller for Picture in Picture.
+            pipController = AVPictureInPictureController(contentSource: term.getPiPSource())
+            if pipController == nil {
+                return false
+            }
+
+            pipController?.startPictureInPicture()
+            true
+        }
+
+        return false
+    }
+
+
+    func applicationProtectedDataWillBecomeUnavailable(_ application: UIApplication) {
+        NSLog("-----LOCKED-----")
+        qemu?.stopHostChannels()
+        configServer?.stop()
+    }
+
+    func applicationProtectedDataDidBecomeAvailable(_ application: UIApplication) {
+        NSLog("-----UNLOCKED-----")
+        NSLog("reconnecting SSH channels...")
+        configServer?.listen()
+        qemu?.startHostChannels()
+        ViewController.getCurrentTerminal()?.forceReconnect()
     }
 
 

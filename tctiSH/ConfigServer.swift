@@ -50,11 +50,13 @@ class ConfigServer {
 
     /// Flag that's used to indicate when we should stop.
     private var stopping : ManagedAtomic<Bool>
+    private var stopped : ManagedAtomic<Bool>
 
     /// Brings up a server and starts it listening.
     init(qemuInterface: QEMUInterface, listenImmediately: Bool = false) {
         self.qemu = qemuInterface
         self.stopping = ManagedAtomic<Bool>(false)
+        self.stopped  = ManagedAtomic<Bool>(false)
 
         if (listenImmediately) {
             listen()
@@ -63,12 +65,20 @@ class ConfigServer {
 
     /// Starts a thread that listens and handles any requests from our client.
     func listen() {
+        self.stopped.store(false, ordering: .relaxed)
+
         let queue = DispatchQueue.global(qos: .userInteractive)
         queue.async { [unowned self] in
 
             // Wait for a new connection from our guest...
             let socket = try! Socket.create()
             try! socket.listen(on: ConfigServer.configurationPort)
+
+            // Ensure that we mark ourselves as stopped once we're done.
+            defer {
+                socket.close()
+                self.stopped.store(true, ordering: .relaxed)
+            }
 
             // Try to get a new connection.
             while !self.stopping.load(ordering: .relaxed) {
@@ -79,6 +89,41 @@ class ConfigServer {
             }
         }
     }
+
+    /// Stops execution of the server.
+    public func stop(completion: @escaping () -> ()) {
+
+        // Mark ourselves as stopping...
+        self.stopping.store(true, ordering: .relaxed)
+
+        DispatchQueue.main.async {
+
+            // Wait for "stopped" to be set to true, and then call our callback.
+            while true {
+                if self.stopped.load(ordering: .relaxed) {
+                    completion()
+                }
+            }
+        }
+    }
+
+    /// Stops execution of the server. Blocking.
+    public func stop(blocking: Bool = false) {
+        // Mark ourselves as stopping...
+        self.stopping.store(true, ordering: .relaxed)
+
+        // ... and wait for the stopping to complete.
+        if blocking {
+            while !self.stopped.load(ordering: .relaxed) {}
+        }
+    }
+
+    /// Reconnects the configuration server.
+    public func reconnect() {
+        self.stop()
+        self.listen()
+    }
+
 
     /// Handles any communications with a connected client.
     private func handleClient(client: Socket) {
@@ -158,6 +203,10 @@ class ConfigServer {
             // Font configuration command.
             case "font":
                 handleFontConfig(message: message, from: client)
+
+            // Handle requests for the CWD.
+            case "getcwd":
+                handleGetCWD(message: message, from: client)
 
             // Respond to all other commands with, basically, "idk".
             default:
@@ -308,6 +357,21 @@ class ConfigServer {
         }
 
     }
+
+    /// Command that fetches the CWD for the current shell.
+    /// Used for restoring the CWD after a reconnect.
+    private func handleGetCWD(message: ConfigurationMessage, from: Client) {
+        let client = from
+
+        if let term = ViewController.getCurrentTerminal() {
+            if let cwd = term.cwd {
+                sendResponse(command: "getcwd", key: "cwd", value: cwd, to: client)
+            }
+        }
+
+        sendResponse(command: "getcwd", key: "unknown", value: "", to: client)
+    }
+
 
     /// Indicates something was wrong with a received command.
     private func sendErrorResponse(_ message: String, to: Client) {
