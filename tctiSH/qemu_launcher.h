@@ -22,6 +22,7 @@ void run_background_qemu(const char *qemu_path,
                          const char *disk_path,
                          const char *shared_folder_path,
                          const char *boot_image_name,
+                         const char *memory_value,
                          const char *monitor_socket_path,
                          bool is_jit);
 

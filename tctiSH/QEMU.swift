@@ -63,11 +63,17 @@ public class QEMUInterface {
         // ... figure out the folder we'll be sharing into our environment ...
         let sharedFolder = getSharedFolder().path
 
+        // ... figure out how much memory to give the VM ...
+        let memoryValue = getMemoryValue()
+
         // ... get a filename for our unix domain monitor-connection socket ...
         monitorSocketPath = getDatastoreURL("monitor", fileExtension: "socket").path
         
         // ... and start up the QEMU kernel, which will start paused.
-        run_background_qemu(qemuImage, kernelPath, initrdPath, bundlePrefix, diskPath, sharedFolder, bootImageName, monitorSocketPath, AppDelegate.usingJitHacks);
+        run_background_qemu(qemuImage, kernelPath, initrdPath, bundlePrefix, diskPath, sharedFolder, bootImageName, memoryValue, monitorSocketPath, AppDelegate.usingJitHacks);
+
+        // Mark the amount of memory we booted with, for next time.
+        setLastMemoryValue(value: memoryValue)
 
         // Finally, recreate our persistent mounts, so they're available in the VM.
         recreatePersistentMounts()
@@ -293,6 +299,11 @@ public class QEMUInterface {
         if forceRecoveryBoot {
             mode = "recovery_boot"
         }
+
+        // If our memory value has changed, force a recovery boot.
+        if memoryValueChanged() {
+            mode = "recovery_boot"
+        }
         
         switch mode {
         case "persistent_boot":
@@ -318,7 +329,27 @@ public class QEMUInterface {
     private func getDiskName() -> String {
         return UserDefaults.standard.string(forKey: "disk_name") ?? "disk"
     }
-    
+
+    /// Returns the argument that specifies the QEMU initial memory.
+    private func getMemoryValue() -> String {
+        return UserDefaults.standard.string(forKey: "memory") ?? "1G"
+    }
+
+    /// Get the memory value that was used at the last boot.
+    private func getLastMemoryValue() -> String {
+        return UserDefaults.standard.string(forKey: "last_memory") ?? "1G"
+    }
+
+    /// Set the memory value that was used at the last boot.
+    private func setLastMemoryValue(value: String) {
+        return UserDefaults.standard.set(value, forKey: "last_memory")
+    }
+
+    /// Returns true iff the memory setting has changed since the last boot.
+    func memoryValueChanged() -> Bool {
+        return getMemoryValue() != getLastMemoryValue()
+    }
+
     /// Returns the URL to a qcow image that will acts as our persistent store.
     private func getPersistentStore() -> URL
     {

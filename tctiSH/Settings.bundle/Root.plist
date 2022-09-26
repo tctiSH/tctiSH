@@ -72,6 +72,34 @@
 		</dict>
 		<dict>
 			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Title</key>
+			<string>Memory (requires restart)</string>
+			<key>Key</key>
+			<string>memory</string>
+			<key>DefaultValue</key>
+			<string>1G</string>
+			<key>Titles</key>
+			<array>
+				<string>512M</string>
+				<string>1G</string>
+				<string>2G</string>
+				<string>3G (somewhat likely to OOM)</string>
+				<string>4G (likely to OOM)</string>
+				<string>5G (silly; will crash)</string>
+			</array>
+			<key>Values</key>
+			<array>
+				<string>512M</string>
+				<string>1G</string>
+				<string>2G</string>
+				<string>3G</string>
+				<string>4G</string>
+				<string>5G</string>
+			</array>
+		</dict>
+		<dict>
+			<key>Type</key>
 			<string>PSGroupSpecifier</string>
 			<key>Title</key>
 			<string>Appearance</string>

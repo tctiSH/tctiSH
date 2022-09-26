@@ -61,6 +61,7 @@ struct qemu_args {
     char *monitor_channel_args;
     char *boot_image_name;
     char *dll_name;
+    char *memory_value;
     bool is_jit;
 };
 
@@ -85,7 +86,7 @@ static void* qemu_thread(void *raw_args) {
         "-display", "none",
         
         // Guest memory.
-        "-m", "1G",
+        "-m", args->memory_value,
         
         // Networking.
         //
@@ -154,6 +155,7 @@ static void* qemu_thread(void *raw_args) {
     free(args->initrd_filename);
     free(args->disk_args);
     free(args->shared_folder_args);
+    free(args->memory_value);
     if (args->boot_image_name) {
         free(args->boot_image_name);
     }
@@ -170,6 +172,7 @@ void run_background_qemu(const char* qemu_path,
                          const char* disk_path,
                          const char* shared_folder_path,
                          const char* boot_image_name,
+                         const char* memory_value,
                          const char* monitor_socket_path,
                          bool is_jit)
 {
@@ -183,6 +186,7 @@ void run_background_qemu(const char* qemu_path,
     args->kernel_filename    = calloc(PATH_MAX, sizeof(char));
     args->initrd_filename    = calloc(PATH_MAX, sizeof(char));
     args->bios_dir           = calloc(PATH_MAX, sizeof(char));
+    args->memory_value       = calloc(PATH_MAX, sizeof(char));
     if (boot_image_name) {
         args->boot_image_name = calloc(PATH_MAX, sizeof(char));
     }
@@ -202,11 +206,12 @@ void run_background_qemu(const char* qemu_path,
     snprintf(args->monitor_channel_args, ARGUMENT_MAX, "unix:%s,server,nowait",
              monitor_socket_path);
 
-    // Copy in each of our filenames.
+    // Copy in each of our filenames/arguments.
     strncpy(args->qemu_image, qemu_path, PATH_MAX - 1);
     strncpy(args->kernel_filename, kernel_path, PATH_MAX - 1);
     strncpy(args->initrd_filename, initrd_path, PATH_MAX - 1);
     strncpy(args->bios_dir, bios_path, PATH_MAX - 1);
+    strncpy(args->memory_value, memory_value, PATH_MAX - 1);
     if (boot_image_name) {
         strncpy(args->boot_image_name, boot_image_name, PATH_MAX - 1);
     }

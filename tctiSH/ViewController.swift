@@ -87,6 +87,15 @@ class ViewController: UIViewController {
             tv.feed(text: "by restarting things the slow way.\r\n\r\n")
 
             tv.feed(text: "This will take ~20 seconds or so.\r\n\r\n")
+        }
+        // If the user has just changed the amount of memory in the VM, they'll need a full
+        // boot to re-populate the environment. Let them know.
+        else if AppDelegate.memoryValueChanged {
+            tv.feed(text: "The memory limit placed on tctiSH has changed.\r\n")
+            tv.feed(text: "We'll need to re-create our 'instant boot'\r\n")
+            tv.feed(text: "environment, just this once after the change.\r\n\r\n")
+
+            tv.feed(text: "This will take ~20 seconds or so.\r\n\r\n")
 
         } else {
             // Provide some filler content,to ensure the ScrollView starts with something in it;

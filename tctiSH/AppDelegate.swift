@@ -23,6 +23,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     static var forceRecoveryBoot = false
     static var usingJitHacks = false
     static var isFirstBoot = false
+    static var memoryValueChanged = false
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
 
@@ -37,7 +38,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             "theme": "solzarizedDark",
             "attempting_boot": false,
             "jit_mode": "jit_when_possible",
-            "images": default_images
+            "images": default_images,
+            "memory": "1G",
         ])
 
         let settingsAllowJit = UserDefaults.standard.string(forKey: "jit_mode") == "jit_when_possible"
@@ -64,6 +66,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         qemu = QEMUInterface()
         qemu!.startQemuThread(forceRecoveryBoot: AppDelegate.forceRecoveryBoot)
         AppDelegate.isFirstBoot = qemu!.isFirstBoot()
+        AppDelegate.memoryValueChanged = qemu!.memoryValueChanged()
 
         // Finally, before starting, spawn our background configuration server.
         configServer = ConfigServer(qemuInterface: qemu!, listenImmediately: true)
