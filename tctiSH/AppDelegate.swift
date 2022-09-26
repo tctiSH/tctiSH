@@ -61,12 +61,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         // Mark ourselves as attempting a boot.
         UserDefaults.standard.set(true, forKey: "attempting_boot")
-        
-        // To minimize startup time, start our kernel before anything else.
+
+        // Create a QEMU interface, which will launch our background kernel.
         qemu = QEMUInterface()
+
+        // Figure out if our memory limit has changed, and thus we'll need to print a message.
+        // This lets the user know to expect a delay, when appropriate.
+        AppDelegate.memoryValueChanged = qemu!.memoryValueChanged()
+
+        // To minimize startup time, start our kernel before anything else.
         qemu!.startQemuThread(forceRecoveryBoot: AppDelegate.forceRecoveryBoot)
         AppDelegate.isFirstBoot = qemu!.isFirstBoot()
-        AppDelegate.memoryValueChanged = qemu!.memoryValueChanged()
 
         // Finally, before starting, spawn our background configuration server.
         configServer = ConfigServer(qemuInterface: qemu!, listenImmediately: true)
