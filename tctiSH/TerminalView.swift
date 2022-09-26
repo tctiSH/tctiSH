@@ -17,11 +17,15 @@ import Combine
 /// Termainal view that behaves like an Xterm into our linux environment.
 public class TctiTermView: TerminalView, TerminalViewDelegate {
 
+    /// Interval at which we check for an SSH connection.
+    private static var sshPollingInterval : TimeInterval = 1.5
+
     var shell: SSHShell?
     var authenticationChallenge: AuthenticationChallenge?
     var connected : Bool = false
 
     var pipController : AVPictureInPictureController?
+
 
     /// The current working directory, if one is known/available.
     private var _cwd : String?
@@ -66,14 +70,10 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         
     }
 
-    ///
-    func getPiPSource() -> AVPictureInPictureController.ContentSource {
-    }
-
     /// Starts the actual SSH terminal process.
     func start() {
         // Set up a timer to periodically poll our VM until it's ready for connection.
-        timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+        timer = Timer.publish(every: TctiTermView.sshPollingInterval, on: .main, in: .common).autoconnect()
         subscription = timer?.sink(receiveValue: { _ in
             if self.connected {
                 self.timer?.upstream.connect().cancel()

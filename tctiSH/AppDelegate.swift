@@ -94,6 +94,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     /// Attempts to background the app to Picture in Picture.
     func backgroundToPip() -> Bool {
+        /*
         if let term = ViewController.getCurrentTerminal() {
 
             // Create a controller for Picture in Picture.
@@ -103,8 +104,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             }
 
             pipController?.startPictureInPicture()
-            true
         }
+        */
 
         return false
     }
