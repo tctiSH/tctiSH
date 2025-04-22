@@ -64,12 +64,12 @@
 		167779AEF7AA0CEFBE3340B6D6D3637D /* Command.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = Command.swift; path = SwiftSH/Command.swift; sourceTree = "<group>"; };
 		2106CAA124539ECEED2C61D91C81139A /* SSHLibrary.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SSHLibrary.swift; path = SwiftSH/SSHLibrary.swift; sourceTree = "<group>"; };
 		2182E243332A6D15BD0BC43CB073E51E /* Libssh2.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = Libssh2.swift; path = SwiftSH/Libssh2.swift; sourceTree = "<group>"; };
-		2323C64C0BD24F6D774D3D00361247D8 /* SwiftSH */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; name = SwiftSH; path = SwiftSH.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		2323C64C0BD24F6D774D3D00361247D8 /* SwiftSH.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = SwiftSH.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		2773C35652CD4D937237C81308A2CF9C /* Socket+Equatable.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "Socket+Equatable.swift"; path = "Sources/Socket/Socket+Equatable.swift"; sourceTree = "<group>"; };
 		2AB0B9990F1E11FD53AA214FEA0054B7 /* Channel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = Channel.swift; path = SwiftSH/Channel.swift; sourceTree = "<group>"; };
-		2EAA4A7F572E0FFFDA0F24140040D388 /* BlueSocket */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; name = BlueSocket; path = Socket.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		2EAA4A7F572E0FFFDA0F24140040D388 /* Socket.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Socket.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		392C061C0F1C5C3FCA3637BAA2B8D561 /* SFTP.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SFTP.swift; path = SwiftSH/SFTP.swift; sourceTree = "<group>"; };
-		3D399A504D4B0BB2B42C371E732D5CDA /* Pods-tctiSH */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; name = "Pods-tctiSH"; path = Pods_tctiSH.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		3D399A504D4B0BB2B42C371E732D5CDA /* Pods_tctiSH.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_tctiSH.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		44533BB35E4EAAB3800F8A184524BC8C /* SwiftSH-dummy.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = "SwiftSH-dummy.m"; sourceTree = "<group>"; };
 		4E1F6445CF74D874947013820C0B3B31 /* Pods-tctiSH-Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = "Pods-tctiSH-Info.plist"; sourceTree = "<group>"; };
 		4EC0BFB758F3996D585DCD2ECF35AE5A /* Pods-tctiSH.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; path = "Pods-tctiSH.release.xcconfig"; sourceTree = "<group>"; };
@@ -85,7 +85,7 @@
 		8987F401577BCEEC231DBA7BBCDE5DE8 /* BlueSocket.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; path = BlueSocket.release.xcconfig; sourceTree = "<group>"; };
 		8CB16929A9710D712FFF50172D20AF82 /* BlueSocket-umbrella.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; path = "BlueSocket-umbrella.h"; sourceTree = "<group>"; };
 		92C028992A0FC01A17C1143972082449 /* Pods-tctiSH-umbrella.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; path = "Pods-tctiSH-umbrella.h"; sourceTree = "<group>"; };
-		9D940727FF8FB9C785EB98E56350EF41 /* Podfile */ = {isa = PBXFileReference; explicitFileType = text.script.ruby; includeInIndex = 1; indentWidth = 2; lastKnownFileType = text; name = Podfile; path = ../Podfile; sourceTree = SOURCE_ROOT; tabWidth = 2; xcLanguageSpecificationIdentifier = xcode.lang.ruby; };
+		9D940727FF8FB9C785EB98E56350EF41 /* Podfile */ = {isa = PBXFileReference; explicitFileType = text.script.ruby; includeInIndex = 1; indentWidth = 2; name = Podfile; path = ../Podfile; sourceTree = SOURCE_ROOT; tabWidth = 2; xcLanguageSpecificationIdentifier = xcode.lang.ruby; };
 		9DA2438C2AAD7547344CC8747D00AD94 /* Libssh2.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; name = Libssh2.m; path = SwiftSH/Libssh2.m; sourceTree = "<group>"; };
 		A0913D1ABE21BD70378F87BC9B25D55D /* BlueSocket-prefix.pch */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; path = "BlueSocket-prefix.pch"; sourceTree = "<group>"; };
 		A398373ECC957F233688292DFF5F630A /* Pods-tctiSH-acknowledgements.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = "Pods-tctiSH-acknowledgements.plist"; sourceTree = "<group>"; };
@@ -191,7 +191,6 @@
 				E3371559914B108C1110DB1813944CCC /* SocketUtils.swift */,
 				A92FE948979D071E2569786CA52EF651 /* Support Files */,
 			);
-			name = BlueSocket;
 			path = BlueSocket;
 			sourceTree = "<group>";
 		};
@@ -238,9 +237,9 @@
 		C6D6AADD2F0183073E55DA781DAF5A63 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				2EAA4A7F572E0FFFDA0F24140040D388 /* BlueSocket */,
-				3D399A504D4B0BB2B42C371E732D5CDA /* Pods-tctiSH */,
-				2323C64C0BD24F6D774D3D00361247D8 /* SwiftSH */,
+				2EAA4A7F572E0FFFDA0F24140040D388 /* Socket.framework */,
+				3D399A504D4B0BB2B42C371E732D5CDA /* Pods_tctiSH.framework */,
+				2323C64C0BD24F6D774D3D00361247D8 /* SwiftSH.framework */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -263,7 +262,6 @@
 				C51549CA9D7493D0101486008F467A38 /* Libssh2 */,
 				94FDAB762A343CDA8FD5CC915215832B /* Support Files */,
 			);
-			name = SwiftSH;
 			path = SwiftSH;
 			sourceTree = "<group>";
 		};
@@ -338,7 +336,7 @@
 			);
 			name = SwiftSH;
 			productName = SwiftSH;
-			productReference = 2323C64C0BD24F6D774D3D00361247D8 /* SwiftSH */;
+			productReference = 2323C64C0BD24F6D774D3D00361247D8 /* SwiftSH.framework */;
 			productType = "com.apple.product-type.framework";
 		};
 		9717BE7FCECEF299173A5D71C18B19F5 /* BlueSocket */ = {
@@ -356,7 +354,7 @@
 			);
 			name = BlueSocket;
 			productName = Socket;
-			productReference = 2EAA4A7F572E0FFFDA0F24140040D388 /* BlueSocket */;
+			productReference = 2EAA4A7F572E0FFFDA0F24140040D388 /* Socket.framework */;
 			productType = "com.apple.product-type.framework";
 		};
 		AD039628F3CA39312415041D932355F9 /* Pods-tctiSH */ = {
@@ -376,7 +374,7 @@
 			);
 			name = "Pods-tctiSH";
 			productName = Pods_tctiSH;
-			productReference = 3D399A504D4B0BB2B42C371E732D5CDA /* Pods-tctiSH */;
+			productReference = 3D399A504D4B0BB2B42C371E732D5CDA /* Pods_tctiSH.framework */;
 			productType = "com.apple.product-type.framework";
 		};
 /* End PBXNativeTarget section */
@@ -385,8 +383,8 @@
 		BFDFE7DC352907FC980B868725387E98 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				LastSwiftUpdateCheck = 1240;
-				LastUpgradeCheck = 1240;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
 			};
 			buildConfigurationList = 4821239608C13582E20E6DA73FD5F1F9 /* Build configuration list for PBXProject "Pods" */;
 			compatibilityVersion = "Xcode 11.0";
@@ -511,7 +509,7 @@
 				GCC_PREFIX_HEADER = "Target Support Files/BlueSocket/BlueSocket-prefix.pch";
 				INFOPLIST_FILE = "Target Support Files/BlueSocket/BlueSocket-Info.plist";
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
-				IPHONEOS_DEPLOYMENT_TARGET = 10.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -545,7 +543,7 @@
 				GCC_PREFIX_HEADER = "Target Support Files/SwiftSH/SwiftSH-prefix.pch";
 				INFOPLIST_FILE = "Target Support Files/SwiftSH/SwiftSH-Info.plist";
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
-				IPHONEOS_DEPLOYMENT_TARGET = 8.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -565,7 +563,7 @@
 			};
 			name = Release;
 		};
-		8DE5143C03248BB6CD542DE3963D6F3A /* Debug */ = {
+		90D4D09BCB6A4660E43ACBE9ECB6FE9A /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -618,7 +616,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 13.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -631,7 +629,7 @@
 			};
 			name = Debug;
 		};
-		9E406C6AAF85E580207CD97B0044DEAB /* Release */ = {
+		9553C89E183877A5CB2F3C6801BEC129 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -681,7 +679,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 13.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -708,7 +706,7 @@
 				GCC_PREFIX_HEADER = "Target Support Files/SwiftSH/SwiftSH-prefix.pch";
 				INFOPLIST_FILE = "Target Support Files/SwiftSH/SwiftSH-Info.plist";
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
-				IPHONEOS_DEPLOYMENT_TARGET = 8.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -727,7 +725,7 @@
 			};
 			name = Debug;
 		};
-		B55EE5F37B55A0A9757C230B2235F919 /* Release */ = {
+		AD5BC53119980B67C39729E95D7044A7 /* Release */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 4EC0BFB758F3996D585DCD2ECF35AE5A /* Pods-tctiSH.release.xcconfig */;
 			buildSettings = {
@@ -743,7 +741,7 @@
 				DYLIB_INSTALL_NAME_BASE = "@rpath";
 				INFOPLIST_FILE = "Target Support Files/Pods-tctiSH/Pods-tctiSH-Info.plist";
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
-				IPHONEOS_DEPLOYMENT_TARGET = 13.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -781,7 +779,7 @@
 				GCC_PREFIX_HEADER = "Target Support Files/BlueSocket/BlueSocket-prefix.pch";
 				INFOPLIST_FILE = "Target Support Files/BlueSocket/BlueSocket-Info.plist";
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
-				IPHONEOS_DEPLOYMENT_TARGET = 10.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -799,7 +797,7 @@
 			};
 			name = Debug;
 		};
-		ED4F0F2AB8953CA603CE2B63625F9C8D /* Debug */ = {
+		D9693E1114E3B38682A708E5012639F9 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = C2CFB3EF81016F42D79306E7E86621A2 /* Pods-tctiSH.debug.xcconfig */;
 			buildSettings = {
@@ -815,7 +813,7 @@
 				DYLIB_INSTALL_NAME_BASE = "@rpath";
 				INFOPLIST_FILE = "Target Support Files/Pods-tctiSH/Pods-tctiSH-Info.plist";
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
-				IPHONEOS_DEPLOYMENT_TARGET = 13.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -851,8 +849,8 @@
 		4821239608C13582E20E6DA73FD5F1F9 /* Build configuration list for PBXProject "Pods" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				8DE5143C03248BB6CD542DE3963D6F3A /* Debug */,
-				9E406C6AAF85E580207CD97B0044DEAB /* Release */,
+				90D4D09BCB6A4660E43ACBE9ECB6FE9A /* Debug */,
+				9553C89E183877A5CB2F3C6801BEC129 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -869,8 +867,8 @@
 		BBD2477385F440BBDA202843AA2EE2FC /* Build configuration list for PBXNativeTarget "Pods-tctiSH" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				ED4F0F2AB8953CA603CE2B63625F9C8D /* Debug */,
-				B55EE5F37B55A0A9757C230B2235F919 /* Release */,
+				D9693E1114E3B38682A708E5012639F9 /* Debug */,
+				AD5BC53119980B67C39729E95D7044A7 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
