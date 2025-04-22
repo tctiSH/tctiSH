@@ -60,6 +60,9 @@ class ViewController: UIViewController {
         if AppDelegate.usingJitHacks {
             NSLog("JIT hacks online.")
             currentTerminal.feed(text: "[Using full-JIT for magic speed! 🐆]\r\n\r\n")
+        } else {
+            NSLog("JIT hacks offline.")
+            currentTerminal.feed(text: "[JIT not available! 🐘]\r\n\r\n")
         }
 
 

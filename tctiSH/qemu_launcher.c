@@ -21,6 +21,7 @@
 #include <mach-o/loader.h>
 #include <mach-o/getsect.h>
 #include <sys/fcntl.h>
+#include <sys/_types/_caddr_t.h>
 
 #include "qemu_launcher.h"
 
@@ -227,8 +228,15 @@ void run_background_qemu(const char* qemu_path,
 /// Returns true iff the process has a debugger attached.
 /// (Method from UTM.)
 static bool has_debugger_attached(void) {
+//    int flags;
+//    return !csops(getpid(), CS_OPS_STATUS, &flags, sizeof(flags)) && flags & CS_DEBUGGED;
+    
     int flags;
-    return !csops(getpid(), CS_OPS_STATUS, &flags, sizeof(flags)) && flags & CS_DEBUGGED;
+    if (csops(getpid(), CS_OPS_STATUS, &flags, sizeof(flags) != 0)) {
+        return false;
+    }
+
+    return flags & CS_DEBUGGED;
 }
 
 /// Exception passthrough for our debug hack.
@@ -243,24 +251,24 @@ static void *exception_handler(void *argument) {
 /// Attempts to enable JIT via a ptrace-based debugger.
 /// (Method from UTM.)
 static bool enable_ptrace_hack(void) {
-    bool debugged = has_debugger_attached();
-
-    // Thanks to this comment: https://news.ycombinator.com/item?id=18431524
-    // We use this hack to allow mmap with PROT_EXEC (which usually requires the
-    // dynamic-codesigning entitlement) by tricking the process into thinking
-    // that Xcode is debugging it. We abuse the fact that JIT is needed to
-    // debug the process.
-    if (ptrace(PT_TRACE_ME, 0, NULL, 0) < 0) {
-        return false;
-    }
-
-    // ptracing ourselves confuses the kernel and will cause bad things to
-    // happen to the system (hangs…) if an exception or signal occurs. Setup
-    // some "safety nets" so we can cause the process to exit in a somewhat sane
-    // state. We only need to do this if the debugger isn't attached. (It'll do
-    // this itself, and if we do it we'll interfere with its normal operation
-    // anyways.)
-    if (!debugged) {
+    if (has_debugger_attached()) {
+        return true;
+    } else {
+        // Thanks to this comment: https://news.ycombinator.com/item?id=18431524
+        // We use this hack to allow mmap with PROT_EXEC (which usually requires the
+        // dynamic-codesigning entitlement) by tricking the process into thinking
+        // that Xcode is debugging it. We abuse the fact that JIT is needed to
+        // debug the process.
+        if (ptrace(PT_TRACE_ME, 0, NULL, 0) < 0) {
+            return false;
+        }
+        
+        // ptracing ourselves confuses the kernel and will cause bad things to
+        // happen to the system (hangs…) if an exception or signal occurs. Setup
+        // some "safety nets" so we can cause the process to exit in a somewhat sane
+        // state. We only need to do this if the debugger isn't attached. (It'll do
+        // this itself, and if we do it we'll interfere with its normal operation
+        // anyways.)
         // First, ensure that signals are delivered as Mach software exceptions…
         ptrace(PT_SIGEXC, 0, NULL, 0);
 
@@ -275,9 +283,9 @@ static bool enable_ptrace_hack(void) {
         task_set_exception_ports(mach_task_self(), EXC_MASK_SOFTWARE, port, EXCEPTION_DEFAULT, THREAD_STATE_NONE);
         pthread_t thread;
         pthread_create(&thread, NULL, exception_handler, (void *)&port);
+        
+        return true;
     }
-
-    return true;
 }
 
 bool set_up_jit(void) {
