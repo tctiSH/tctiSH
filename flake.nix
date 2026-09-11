@@ -27,7 +27,12 @@
       ninja
     ];
   in {
-    devShells.${system}.default = pkgs.mkShell {
+    # mkShellNoCC because mkShell pulls in stdenv's cc-wrapper, which puts an
+    # old nix clang ahead of Xcode's on $PATH. QEMU's configure emits a bare
+    # `objc = ['clang']` into its meson cross file, so that wrapper gets picked
+    # up and injects -mmacos-version-min, conflicts with -miphoneos-version-min 
+    # and breaks the ObjC probe. This build must use only the Xcode toolchain.
+    devShells.${system}.default = pkgs.mkShellNoCC {
       packages = buildDependencies;
     };
   };

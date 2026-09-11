@@ -251,15 +251,31 @@ build_pkg_config() {
     DIR="$BUILD_DIR/$NAME"
     pwd="$(pwd)"
 
+    # pkg-config is a *host* tool, so it must build against the macOS SDK rather
+    # than the iOS one $SDKROOT points at. 'env -i' scrubs SDKROOT along with
+    # everything else, which makes clang fall back to its built-in Command Line
+    # Tools SDK which dies during linking if they are newer than the selected
+    # xcode.
+    HOST_SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
+
+    # pkg-config 0.29.2 bundles glib 2.38.2 (2013). clang 16 promoted several
+    # legacy-C patterns from warnings to hard errors, so that bundled glib no
+    # longer compiles as-is. Downgrade them back to warnings for this host tool
+    # only; nothing we ship is built with these flags. "-g -O2" is autoconf's
+    # default CFLAGS, restated here because setting CFLAGS at all replaces it.
+    HOST_CFLAGS="-g -O2 -Wno-error=int-conversion"
+    HOST_CFLAGS="$HOST_CFLAGS -Wno-error=implicit-function-declaration"
+    HOST_CFLAGS="$HOST_CFLAGS -Wno-error=incompatible-pointer-types"
+
     cd "$DIR"
     if [ -z "$REBUILD" ]; then
         echo "${GREEN}Configuring ${NAME}...${NC}"
-        env -i ./configure --prefix="$PREFIX" --bindir="$PREFIX/host/bin" --with-internal-glib $@
+        env -i SDKROOT="$HOST_SDKROOT" CFLAGS="$HOST_CFLAGS" ./configure --prefix="$PREFIX" --bindir="$PREFIX/host/bin" --with-internal-glib $@
     fi
     echo "${GREEN}Building ${NAME}...${NC}"
-    make -j$NCPU
+    SDKROOT="$HOST_SDKROOT" make -j$NCPU
     echo "${GREEN}Installing ${NAME}...${NC}"
-    make install
+    SDKROOT="$HOST_SDKROOT" make install
     cd "$pwd"
 
     export PATH="$PREFIX/host/bin:$PATH"
@@ -699,6 +715,17 @@ export CPPFLAGS
 export CXXFLAGS
 export OBJCFLAGS
 export LDFLAGS
+
+# Everything above bakes the iOS sysroot into $CFLAGS/$LDFLAGS as an explicit
+# -isysroot, which always wins over $SDKROOT. That leaves $SDKROOT free to point
+# at the *macOS* SDK.
+#
+# As meson and friends build native helper tools (glib's pcre dftables, qemu's
+# build-machine probes) by invoking a bare compiler with no -isysroot, this may
+# fail. Clang falls back to its built-in Command Line Tools SDK without this,
+# and if those are newer than the selected Xcode the linker dies.
+SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
+export SDKROOT
 
 check_env
 echo "${GREEN}Starting build for ${PLATFORM_FAMILY_NAME} ${ARCH} [${NCPU} jobs]${NC}"

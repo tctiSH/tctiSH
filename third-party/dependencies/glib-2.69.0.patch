@@ -23,3 +23,58 @@ index ecae8ae8a..065d22246 100644
 -- 
 2.32.0 (Apple Git-132)
 
+
+Subject: [PATCH] Silence -Wint-conversion in gatomic.c
+
+clang 16 promoted -Wint-conversion from a warning to a hard error. glib
+2.69.0 predates that, and its g_atomic_pointer_{add,and,or,xor} wrappers
+deliberately pass an integer through a gpointer* parameter, so the file no
+longer compiles with a current Apple clang. Suppress the diagnostic at the
+four call sites rather than weakening -Werror for the whole tree.
+
+--- a/glib/gatomic.c
++++ b/glib/gatomic.c
+@@ -426,7 +426,10 @@
+ (g_atomic_pointer_add) (volatile void *atomic,
+                         gssize         val)
+ {
++  #pragma clang diagnostic push
++  #pragma clang diagnostic ignored "-Wint-conversion"
+   return g_atomic_pointer_add ((gpointer *) atomic, val);
++  #pragma clang diagnostic pop
+ }
+ 
+ /**
+@@ -453,7 +456,10 @@
+ (g_atomic_pointer_and) (volatile void *atomic,
+                         gsize          val)
+ {
++  #pragma clang diagnostic push
++  #pragma clang diagnostic ignored "-Wint-conversion"
+   return g_atomic_pointer_and ((gpointer *) atomic, val);
++  #pragma clang diagnostic pop
+ }
+ 
+ /**
+@@ -480,7 +486,10 @@
+ (g_atomic_pointer_or) (volatile void *atomic,
+                        gsize          val)
+ {
++  #pragma clang diagnostic push
++  #pragma clang diagnostic ignored "-Wint-conversion"
+   return g_atomic_pointer_or ((gpointer *) atomic, val);
++  #pragma clang diagnostic pop
+ }
+ 
+ /**
+@@ -507,7 +516,10 @@
+ (g_atomic_pointer_xor) (volatile void *atomic,
+                         gsize          val)
+ {
++  #pragma clang diagnostic push
++  #pragma clang diagnostic ignored "-Wint-conversion"
+   return g_atomic_pointer_xor ((gpointer *) atomic, val);
++  #pragma clang diagnostic pop
+ }
+ 
+ #elif defined (G_PLATFORM_WIN32)
