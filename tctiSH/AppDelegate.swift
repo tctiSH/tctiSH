@@ -10,7 +10,6 @@ import AVKit
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
-    var window: UIWindow?
     var qemu: QEMUInterface?
     var configServer : ConfigServer?
     var saving : Bool = false
@@ -22,6 +21,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     // FIXME: move these to a nice, clean singleton
     static var forceRecoveryBoot = false
     static var usingJitHacks = false
+
+    /// Whether QEMU should hand its code buffer to an attached debugger.
+    ///
+    /// True only when TXM is present, matching StikJIT's own gate as the two
+    /// must never disagree.
+    static var blessJitRegions = false
     static var isFirstBoot = false
     static var memoryValueChanged = false
 
@@ -51,8 +56,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Mark ourselves as attempting a boot.
         UserDefaults.standard.set(true, forKey: "attempting_boot")
         
-        self.detectJit()
-        
+        // Settle how we're going to run and arrange it. 
+
+        // This has to happen _before_ QEMU exists: it reads `usingJitHacks` and
+        // `blessJitRegions` as it starts, and only asks for its code buffer to
+        // be blessed if it finds a debugger already attached.
+        JitEnablement.prepareForBoot()
+
         // Create a QEMU interface, which will launch our background kernel.
         qemu = QEMUInterface()
 
@@ -76,29 +86,21 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
     
     
-    func detectJit() {
-        let settingsAllowJit = UserDefaults.standard.string(forKey: "jit_mode") == "jit_when_possible"
-        
-#if targetEnvironment(macCatalyst)
-        AppDelegate.usingJitHacks = settingsAllowJit
-#else
-        if settingsAllowJit {
-            // If possible, attempt to enable JIT for this process.
-            AppDelegate.usingJitHacks = set_up_jit()
-        }
-#endif
-    }
-    
-    
-    func applicationDidEnterBackground(_ application: UIApplication) {
+    /// Saves VM state as the app leaves the foreground.
+    ///
+    /// Called by `SceneDelegate`: under the scene life cycle UIKit delivers
+    /// background transitions to the scene, not to the application delegate.
+    func handleEnteredBackground() {
         if (saving) {
             return;
         }
 
         if backgroundToPip() {
-            NSLog("-----SWITCHED TO PIP-----")
+            Log.ui.note("switched to picture in picture")
             return();
         }
+
+        let application = UIApplication.shared
 
         saving = true
         let taskIdentifier = application.beginBackgroundTask {}
@@ -107,7 +109,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         saving = false
 
 
-        NSLog("-----BACKGROUNDED-----")
+        Log.ui.note("backgrounded")
+    }
+
+    /// Rebuilds the shell after a spell in the background.
+    func handleWillEnterForeground() {
+        guard let terminal = ViewController.getCurrentTerminal(), terminal.connected else {
+            return
+        }
+
+        Log.ui.note("returned to the foreground; rebuilding the shell")
+        terminal.forceReconnect()
     }
 
     /// Attempts to background the app to Picture in Picture.
@@ -130,14 +142,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
 
     func applicationProtectedDataWillBecomeUnavailable(_ application: UIApplication) {
-        NSLog("-----LOCKED-----")
+        Log.ui.note("device locked; protected data is going away")
         qemu?.stopHostChannels()
         configServer?.stop()
     }
 
     func applicationProtectedDataDidBecomeAvailable(_ application: UIApplication) {
-        NSLog("-----UNLOCKED-----")
-        NSLog("reconnecting SSH channels...")
+        Log.ui.note("device unlocked")
+        Log.network.note("reconnecting SSH channels")
         configServer?.listen()
         qemu?.startHostChannels()
         ViewController.getCurrentTerminal()?.forceReconnect()

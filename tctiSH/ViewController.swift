@@ -21,6 +21,12 @@ class ViewController: UIViewController {
     /// Controls the offset at which this window will render given the keyboard's presence.
     var keyboardDelta: CGFloat = 0
 
+    /// Shows system status: how we're running and what's happening alongside.
+    private var status: StatusPresenter?
+
+    /// Whether the pairing-file alert has already been put up this launch.
+    private var hasOfferedPairingFile = false
+
     /// Stores the most recently used terminal; for singleton-style fetches.
     private static var currentTerminal : TctiTermView?
 
@@ -55,15 +61,6 @@ class ViewController: UIViewController {
         // Update our "most recent" singletons.
         ViewController.currentTerminal = currentTerminal
         ViewController.currentTerminalController = self
-
-        // If JIT hacks are running, give the user a nice message.
-        if AppDelegate.usingJitHacks {
-            NSLog("JIT hacks online.")
-            currentTerminal.feed(text: "[Using full-JIT for magic speed! 🐆]\r\n\r\n")
-        } else {
-            NSLog("JIT hacks offline.")
-            currentTerminal.feed(text: "[JIT not available! 🐘]\r\n\r\n")
-        }
 
 
         // If we're doing a recovery boot by user choice, provide a message letting the
@@ -117,6 +114,262 @@ class ViewController: UIViewController {
         setupKeyboardMonitor()
         currentTerminal.becomeFirstResponder()
 
+        // All of these need a window, which is exactly why the launch path
+        // couldn't do them itself.
+        status = StatusPresenter(over: view, backdrop: currentTerminal.nativeBackgroundColor)
+
+        // These stack rather than take turns, so both are on screen together.
+        // Order here is stacking order: the JIT verdict on top, where it reads
+        // first and then leaves after a few seconds, and the boot spinner under
+        // it for as long as the VM takes -- so there's never a moment with
+        // nothing on screen, which is what made an ordinary wait read as a hang.
+        reportJitOutcome()
+        reportBootProgress(for: currentTerminal)
+        observeJitPreparation()
+    }
+
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+
+        // Not in viewDidLoad. Presenting anything from there fails silently --
+        // the view isn't in a window yet, so there is nothing to present *from*
+        // -- and the symptom is simply that the alert never appears.
+        offerPairingFileIfWanted()
+    }
+
+
+    // MARK: - JIT status
+
+    /// Says that the VM is still coming up, until it isn't.
+    ///
+    /// Booting takes long enough -- tens of seconds from cold -- to look like a
+    /// hang, and the terminal stays empty throughout, so there is nothing else
+    /// on screen saying the app is alive.
+    ///
+    /// Open-ended on purpose: there's no way to know how far along a boot is, so
+    /// the dial spins rather than inventing a number.
+    private func reportBootProgress(for terminal: TctiTermView) {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(terminalDidConnect),
+            name: TctiTermView.didConnect,
+            object: nil)
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(terminalWillReconnect),
+            name: TctiTermView.willReconnect,
+            object: nil)
+
+        // Belt and braces: the observer goes on before anything could possibly
+        // have connected, but a pill that never goes away is a worse bug than a
+        // pill that never appears.
+        guard !terminal.connected else { return }
+
+        showBootProgress(message: "Starting Linux")
+    }
+
+    @objc private func terminalDidConnect() {
+        bootStallWatch?.cancel()
+        bootStallWatch = nil
+        status?.dismiss(key: Self.bootStatusKey)
+    }
+
+    /// Says that the session is coming back, after a lock or a spell in the
+    /// background.
+    ///
+    /// Shares the boot pill's key, so it inherits the stall watch: a resume that
+    /// never finishes is as much of a dead end as a boot that never finishes,
+    /// and offers the same way out.
+    @objc private func terminalWillReconnect() {
+        showBootProgress(message: "Resuming from snapshot")
+    }
+
+    /// Puts the boot pill up as a spinner, and starts the clock on it.
+    private func showBootProgress(message: String) {
+        status?.present(.init(key: Self.bootStatusKey,
+                              message: message,
+                              state: .indeterminate,
+                              duration: nil))
+
+        bootStallWatch?.cancel()
+
+        let watch = DispatchWorkItem { [weak self] in self?.bootLooksStalled() }
+        bootStallWatch = watch
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.bootStallDeadline, execute: watch)
+    }
+
+    /// Turns the boot pill into something you can act on.
+    ///
+    /// A spinner that has been going for half a minute has stopped being
+    /// information and started being scenery. The alternative to this was
+    /// finding the setting for a recovery boot, which is a lot to ask of someone
+    /// who has just been left looking at a blank terminal.
+    private func bootLooksStalled() {
+        Log.qemu.warn("no shell after \(Int(Self.bootStallDeadline))s; offering a recovery boot")
+
+        status?.present(.init(key: Self.bootStatusKey,
+                              message: "Tap to recover",
+                              state: .failed,
+                              duration: nil,
+                              tint: .systemRed,
+                              onTap: { [weak self] in self?.offerRecoveryBoot() }))
+    }
+
+    private func offerRecoveryBoot() {
+        let alert = UIAlertController(
+            title: "Recovery boot?",
+            message: "Linux hasn't come up. A recovery boot starts it again from "
+                   + "scratch, which usually fixes it -- but anything in the "
+                   + "resumed session is lost.",
+            preferredStyle: .alert)
+
+        alert.addAction(UIAlertAction(title: "Yes", style: .destructive) { [weak self] _ in
+            self?.performRecoveryBoot()
+        })
+
+        alert.addAction(UIAlertAction(title: "No", style: .cancel))
+
+        present(alert, animated: true)
+    }
+
+    private func performRecoveryBoot() {
+        let qemu = (UIApplication.shared.delegate as? AppDelegate)?.qemu
+
+        guard qemu?.requestRecoveryBoot() == true else {
+            // QEMU itself isn't answering, so there's nothing further to try
+            // from in here. Relaunching will recovery-boot on its own.
+            status?.present(.init(key: Self.bootStatusKey,
+                                  message: "Reopen the app",
+                                  state: .failed,
+                                  duration: nil,
+                                  tint: .systemRed))
+            return
+        }
+
+        // Back to waiting, with the clock restarted -- so a recovery boot that
+        // also stalls offers itself again rather than hanging silently.
+        showBootProgress(message: "Restarting Linux")
+    }
+
+    private static let bootStatusKey = "boot"
+
+    /// How long a boot may take before we assume it isn't going to finish.
+    ///
+    /// A cold boot is advertised to the user as taking about twenty seconds, so
+    /// this has to sit clear of that.
+    ///
+    /// Deliberately flat, blessing or not (Ara, 2026-09-14). Blessing finishes
+    /// before the guest starts, so once it has returned the boot has had its
+    /// thirty seconds like any other -- and stretching the deadline to cover
+    /// work that has already finished just delays the offer of a way out.
+    private static let bootStallDeadline: TimeInterval = 30
+
+    /// Fires if the shell never arrives.
+    private var bootStallWatch: DispatchWorkItem?
+
+    /// Says how this launch ended up running.
+    ///
+    /// Held briefly and then handed on: it is worth knowing, but it isn't worth
+    /// a permanent fixture, and anything queued behind it is more current.
+    private func reportJitOutcome() {
+        let outcome = JitEnablement.outcome
+
+        switch outcome {
+        case .blessed, .ptrace:
+            Log.jit.note("running with JIT")
+        case .interpreted(let reason):
+            Log.jit.note("running without JIT: \(reason.logDescription)")
+        }
+
+        status?.present(.init(key: "jit",
+                              message: outcome.status.message,
+                              state: .symbol(outcome.status.symbol),
+                              duration: 5))
+    }
+
+    /// Shows and updates the progress pill as background preparation runs.
+    private func observeJitPreparation() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(jitPreparationChanged),
+            name: JitEnablement.preparationDidChange,
+            object: nil)
+
+        // Preparation may well have started before this view existed.
+        jitPreparationChanged()
+    }
+
+    @objc private func jitPreparationChanged() {
+        switch JitEnablement.preparation {
+        case .idle:
+            break
+
+        case .running(let message, let fraction):
+            status?.present(.init(key: "prepare",
+                                  message: message,
+                                  state: fraction.map { .progress($0) } ?? .indeterminate,
+                                  duration: nil))
+
+        case .finished(let succeeded, let message):
+            // Held for a moment rather than vanishing the instant the work ends:
+            // whoever glanced away would otherwise never learn how it went.
+            status?.present(.init(key: "prepare",
+                                  message: message,
+                                  state: succeeded ? .succeeded : .failed,
+                                  duration: 3))
+        }
+    }
+
+    /// Offers to import a pairing file, if one was all that JIT was missing.
+    ///
+    /// Call only once the view is on screen. `viewDidAppear` runs again after
+    /// every dismissal -- returning from the document picker included -- so this
+    /// also has to remember that it has already asked.
+    private func offerPairingFileIfWanted() {
+        guard JitEnablement.needsPairingFile, !hasOfferedPairingFile else { return }
+        hasOfferedPairingFile = true
+
+        let alert = UIAlertController(
+            title: "Enable JIT?",
+            message: "tctiSH can run much faster with a debugger's help, but it "
+                   + "needs a pairing file for this device. Importing one now "
+                   + "will speed up the next launch.",
+            preferredStyle: .alert)
+
+        alert.addAction(UIAlertAction(title: "Choose File", style: .default) { _ in
+            // `importInteractively()` blocks until the user picks, so it cannot
+            // run on the main thread -- the picker it waits on is presented
+            // from there.
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = JitPairingFile.importInteractively()
+
+                DispatchQueue.main.async {
+                    switch result {
+                    case .imported:
+                        // Says so itself: preparation starts and puts up its own
+                        // pill within the second.
+                        JitEnablement.pairingFileArrived()
+
+                    case .cancelled:
+                        // Deliberate, so no comment. Asking again this launch
+                        // would just be nagging; the next one will offer.
+                        break
+
+                    case .failed:
+                        self.status?.present(.init(key: "pairing",
+                                                   message: "Couldn't read that file",
+                                                   state: .symbol("exclamationmark.triangle.fill"),
+                                                   duration: 5))
+                    }
+                }
+            }
+        })
+
+        alert.addAction(UIAlertAction(title: "Not Now", style: .cancel))
+
+        present(alert, animated: true)
     }
 
 

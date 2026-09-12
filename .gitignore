@@ -12,4 +12,5 @@ ramdisk
 # Dependency build folders.
 sysroot-iOS-arm64/
 build-iOS-arm64/
+build-StikJIT/
 

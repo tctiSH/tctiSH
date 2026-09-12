@@ -3,26 +3,15 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 54;
+	objectVersion = 71;
 	objects = {
 
 /* Begin PBXBuildFile section */
-		4936D22124512AF2005CEE27 /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4936D22024512AF2005CEE27 /* TerminalView.swift */; };
-		49BD1A5E224207B5005A2252 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49BD1A5D224207B5005A2252 /* AppDelegate.swift */; };
-		49BD1A60224207B5005A2252 /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49BD1A5F224207B5005A2252 /* ViewController.swift */; };
-		49BD1A63224207B5005A2252 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 49BD1A61224207B5005A2252 /* Main.storyboard */; };
-		49BD1A68224207B7005A2252 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 49BD1A66224207B7005A2252 /* LaunchScreen.storyboard */; };
 		81B605AD3C0955DC2C31EBCC /* Pods_tctiSH.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C9FFBC130DA1A3B7A450025B /* Pods_tctiSH.framework */; };
-		8D10CD6528CB830300B59F0A /* Picker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D10CD6428CB830300B59F0A /* Picker.swift */; };
 		8D2AC18E28C7EF2D005DB7D4 /* Atomics in Frameworks */ = {isa = PBXBuildFile; productRef = 8D2AC18D28C7EF2D005DB7D4 /* Atomics */; };
-		8D4939E228C3245D00F57421 /* Settings.bundle in Resources */ = {isa = PBXBuildFile; fileRef = 8D4939E128C3245D00F57421 /* Settings.bundle */; };
 		8D4939E428C33B0300F57421 /* empty.qcow in Resources */ = {isa = PBXBuildFile; fileRef = 8D4939E328C33B0300F57421 /* empty.qcow */; };
 		8D4939E728C770DD00F57421 /* qemu-x86_64-softmmu_jit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8D4939E528C770DD00F57421 /* qemu-x86_64-softmmu_jit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		8D4C77AA28C77D35002AF286 /* ConfigServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D4C77A928C77D35002AF286 /* ConfigServer.swift */; };
 		8DA7A63728C19A4900FDBD78 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 4959FFDA2447F971001F42C0 /* SwiftTerm */; };
-        8DD4FBBC28CA96E700691935 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8DD4FBBB28CA96E600691935 /* Assets.xcassets */; };
-		8DE8208628C167070035686B /* QEMU.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DE8208528C167070035686B /* QEMU.swift */; };
-		8DE8208E28C176310035686B /* qemu_launcher.c in Sources */ = {isa = PBXBuildFile; fileRef = 8DE8208D28C176310035686B /* qemu_launcher.c */; };
 		8DE8209028C180770035686B /* initrd.img in Resources */ = {isa = PBXBuildFile; fileRef = 8DE8208F28C180770035686B /* initrd.img */; };
 		8DE8209228C1808F0035686B /* bzImage in Resources */ = {isa = PBXBuildFile; fileRef = 8DE8209128C1808F0035686B /* bzImage */; };
 		8DF5F02A28C1BCC900FB1F1C /* qemu-x86_64-softmmu.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F02828C1BCC800FB1F1C /* qemu-x86_64-softmmu.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -51,9 +40,21 @@
 		8DF5F05128C1C16000FB1F1C /* kvmvapic.bin in Resources */ = {isa = PBXBuildFile; fileRef = 8DF5F04E28C1C16000FB1F1C /* kvmvapic.bin */; };
 		8DF5F05228C1C16000FB1F1C /* vgabios-stdvga.bin in Resources */ = {isa = PBXBuildFile; fileRef = 8DF5F04F28C1C16000FB1F1C /* vgabios-stdvga.bin */; };
 		8DF5F05428C1C18200FB1F1C /* efi-virtio.rom in Resources */ = {isa = PBXBuildFile; fileRef = 8DF5F05328C1C18200FB1F1C /* efi-virtio.rom */; };
-		8DF5F05B28C2815100FB1F1C /* Theming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DF5F05A28C2815100FB1F1C /* Theming.swift */; };
-		8DF5F05D28C281D100FB1F1C /* ColorLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DF5F05C28C281D100FB1F1C /* ColorLoader.swift */; };
+		AD7C1A0900000009005A2252 /* StikJIT.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AD7C1A0800000008005A2252 /* StikJIT.xcframework */; };
+		AD7C1A4000000040005A2252 /* StikJIT.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AD7C1A0800000008005A2252 /* StikJIT.xcframework */; };
+		AD7C1A4100000041005A2252 /* StikJIT.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = AD7C1A0800000008005A2252 /* StikJIT.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		DCF690CA305583AC0091B7D0 /* JITHelper.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = DCF690C3305583AC0091B7D0 /* JITHelper.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		DCF690C8305583AC0091B7D0 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 49BD1A52224207B4005A2252 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DCF690C2305583AC0091B7D0;
+			remoteInfo = JITHelper;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 		8DF5F02B28C1BCC900FB1F1C /* Embed Frameworks */ = {
@@ -62,6 +63,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
+				AD7C1A4100000041005A2252 /* StikJIT.xcframework in Embed Frameworks */,
 				8DF5F02A28C1BCC900FB1F1C /* qemu-x86_64-softmmu.framework in Embed Frameworks */,
 				8DF5F03C28C1BCEC00FB1F1C /* gthread-2.0.0.framework in Embed Frameworks */,
 				8DF5F04828C1BCF000FB1F1C /* gobject-2.0.0.framework in Embed Frameworks */,
@@ -78,27 +80,34 @@
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AD7C1A0B0000000B005A2252 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DCF690CB305583AC0091B7D0 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				DCF690CA305583AC0091B7D0 /* JITHelper.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		4936D22024512AF2005CEE27 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
 		49BD1A5A224207B5005A2252 /* tctiSH.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = tctiSH.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		49BD1A5D224207B5005A2252 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
-		49BD1A5F224207B5005A2252 /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewController.swift; sourceTree = "<group>"; };
-		49BD1A62224207B5005A2252 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
-		49BD1A67224207B7005A2252 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
-		49BD1A69224207B7005A2252 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		8D10CD6428CB830300B59F0A /* Picker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Picker.swift; sourceTree = "<group>"; };
-		8D4939E128C3245D00F57421 /* Settings.bundle */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.plug-in"; path = Settings.bundle; sourceTree = "<group>"; };
 		8D4939E328C33B0300F57421 /* empty.qcow */ = {isa = PBXFileReference; lastKnownFileType = file; name = empty.qcow; path = assets/empty.qcow; sourceTree = "<group>"; };
 		8D4939E528C770DD00F57421 /* qemu-x86_64-softmmu_jit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "qemu-x86_64-softmmu_jit.framework"; path = "sysroot-iOS-arm64/Frameworks/qemu-x86_64-softmmu_jit.framework"; sourceTree = "<group>"; };
-		8D4C77A928C77D35002AF286 /* ConfigServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigServer.swift; sourceTree = "<group>"; };
-        8DD4FBBB28CA96E600691935 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		8DE8208528C167070035686B /* QEMU.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QEMU.swift; sourceTree = "<group>"; };
 		8DE8208728C16AA70035686B /* libqemu-x86_64-softmmu.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libqemu-x86_64-softmmu.dylib"; path = "qemu-tcti/build/libqemu-x86_64-softmmu.dylib"; sourceTree = "<group>"; };
-		8DE8208B28C176310035686B /* tctiSH-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "tctiSH-Bridging-Header.h"; sourceTree = "<group>"; };
-		8DE8208C28C176310035686B /* qemu_launcher.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = qemu_launcher.h; sourceTree = "<group>"; };
-		8DE8208D28C176310035686B /* qemu_launcher.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = qemu_launcher.c; sourceTree = "<group>"; };
 		8DE8208F28C180770035686B /* initrd.img */ = {isa = PBXFileReference; lastKnownFileType = file; name = initrd.img; path = assets/initrd.img; sourceTree = "<group>"; };
 		8DE8209128C1808F0035686B /* bzImage */ = {isa = PBXFileReference; lastKnownFileType = file; name = bzImage; path = assets/bzImage; sourceTree = "<group>"; };
 		8DE8209628C19A280035686B /* libqemu-x86_64-softmmu.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libqemu-x86_64-softmmu.dylib"; path = "assets/sysroot-iOS-arm64/lib/libqemu-x86_64-softmmu.dylib"; sourceTree = "<group>"; };
@@ -124,19 +133,42 @@
 		8DF5F04E28C1C16000FB1F1C /* kvmvapic.bin */ = {isa = PBXFileReference; lastKnownFileType = archive.macbinary; name = kvmvapic.bin; path = "sysroot-iOS-arm64/share/qemu/kvmvapic.bin"; sourceTree = "<group>"; };
 		8DF5F04F28C1C16000FB1F1C /* vgabios-stdvga.bin */ = {isa = PBXFileReference; lastKnownFileType = archive.macbinary; name = "vgabios-stdvga.bin"; path = "sysroot-iOS-arm64/share/qemu/vgabios-stdvga.bin"; sourceTree = "<group>"; };
 		8DF5F05328C1C18200FB1F1C /* efi-virtio.rom */ = {isa = PBXFileReference; lastKnownFileType = file; name = "efi-virtio.rom"; path = "sysroot-iOS-arm64/share/qemu/efi-virtio.rom"; sourceTree = "<group>"; };
-		8DF5F05528C1D96100FB1F1C /* tctiSH.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = tctiSH.entitlements; sourceTree = "<group>"; };
-		8DF5F05A28C2815100FB1F1C /* Theming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theming.swift; sourceTree = "<group>"; };
-		8DF5F05C28C281D100FB1F1C /* ColorLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorLoader.swift; sourceTree = "<group>"; };
 		9A05E33B868D09494792FFFD /* Pods-tctiSH.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-tctiSH.debug.xcconfig"; path = "Target Support Files/Pods-tctiSH/Pods-tctiSH.debug.xcconfig"; sourceTree = "<group>"; };
+		AD7C1A0800000008005A2252 /* StikJIT.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = StikJIT.xcframework; path = "build-StikJIT/StikJIT.xcframework"; sourceTree = SOURCE_ROOT; };
 		B59ED421CAD9966D0A97855E /* Pods-tctiSH.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-tctiSH.release.xcconfig"; path = "Target Support Files/Pods-tctiSH/Pods-tctiSH.release.xcconfig"; sourceTree = "<group>"; };
 		C9FFBC130DA1A3B7A450025B /* Pods_tctiSH.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_tctiSH.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		DCF690C3305583AC0091B7D0 /* JITHelper.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = JITHelper.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		AD7C1A1000000010005A2252 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 49BD1A59224207B5005A2252 /* tctiSH */;
+		};
+		DCF690CE305583AC0091B7D0 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = DCF690C2305583AC0091B7D0 /* JITHelper */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		49BD1A5C224207B5005A2252 /* tctiSH */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (AD7C1A1000000010005A2252 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = tctiSH; sourceTree = "<group>"; };
+		AD7C1A2000000020005A2252 /* JITHelperProtocol */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = JITHelperProtocol; sourceTree = "<group>"; };
+		DCF690C4305583AC0091B7D0 /* JITHelper */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (DCF690CE305583AC0091B7D0 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = JITHelper; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		8DE8209528C199FB0035686B /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AD7C1A4000000040005A2252 /* StikJIT.xcframework in Frameworks */,
 				8DF5F03D28C1BCEC00FB1F1C /* iconv.2.framework in Frameworks */,
 				8DF5F04328C1BCEE00FB1F1C /* ffi.7.framework in Frameworks */,
 				8D2AC18E28C7EF2D005DB7D4 /* Atomics in Frameworks */,
@@ -150,6 +182,14 @@
 				8DF5F04528C1BCEF00FB1F1C /* charset.1.framework in Frameworks */,
 				8DF5F04128C1BCED00FB1F1C /* pixman-1.0.framework in Frameworks */,
 				81B605AD3C0955DC2C31EBCC /* Pods_tctiSH.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DCF690C0305583AC0091B7D0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AD7C1A0900000009005A2252 /* StikJIT.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -195,9 +235,12 @@
 				8DE8208F28C180770035686B /* initrd.img */,
 				8DEC8CE728C139B50017AC30 /* Packages */,
 				49BD1A5C224207B5005A2252 /* tctiSH */,
+				DCF690C4305583AC0091B7D0 /* JITHelper */,
+				AD7C1A2000000020005A2252 /* JITHelperProtocol */,
 				49BD1A5B224207B5005A2252 /* Products */,
 				49AE019F2410AB0A0051E902 /* Frameworks */,
 				8DEEF6D2645E52F7349738A7 /* Pods */,
+				DCD35F253055D7E300A9BE26 /* Recovered References */,
 			);
 			indentWidth = 4;
 			sourceTree = "<group>";
@@ -207,32 +250,9 @@
 			isa = PBXGroup;
 			children = (
 				49BD1A5A224207B5005A2252 /* tctiSH.app */,
+				DCF690C3305583AC0091B7D0 /* JITHelper.appex */,
 			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		49BD1A5C224207B5005A2252 /* tctiSH */ = {
-			isa = PBXGroup;
-			children = (
-                8DD4FBBB28CA96E600691935 /* Assets.xcassets */,
-				8DF5F05528C1D96100FB1F1C /* tctiSH.entitlements */,
-				49BD1A5D224207B5005A2252 /* AppDelegate.swift */,
-				49BD1A5F224207B5005A2252 /* ViewController.swift */,
-				49BD1A61224207B5005A2252 /* Main.storyboard */,
-				49BD1A66224207B7005A2252 /* LaunchScreen.storyboard */,
-				49BD1A69224207B7005A2252 /* Info.plist */,
-				4936D22024512AF2005CEE27 /* TerminalView.swift */,
-				8DE8208528C167070035686B /* QEMU.swift */,
-				8DE8208C28C176310035686B /* qemu_launcher.h */,
-				8DE8208D28C176310035686B /* qemu_launcher.c */,
-				8DE8208B28C176310035686B /* tctiSH-Bridging-Header.h */,
-				8DF5F05A28C2815100FB1F1C /* Theming.swift */,
-				8DF5F05C28C281D100FB1F1C /* ColorLoader.swift */,
-				8D4939E128C3245D00F57421 /* Settings.bundle */,
-				8D4C77A928C77D35002AF286 /* ConfigServer.swift */,
-				8D10CD6428CB830300B59F0A /* Picker.swift */,
-			);
-			path = tctiSH;
 			sourceTree = "<group>";
 		};
 		8DEC8CE728C139B50017AC30 /* Packages */ = {
@@ -253,6 +273,14 @@
 			path = Pods;
 			sourceTree = "<group>";
 		};
+		DCD35F253055D7E300A9BE26 /* Recovered References */ = {
+			isa = PBXGroup;
+			children = (
+				AD7C1A0800000008005A2252 /* StikJIT.xcframework */,
+			);
+			name = "Recovered References";
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -266,10 +294,16 @@
 				49BD1A58224207B5005A2252 /* Resources */,
 				67CB01EBDF83BB584F06E42D /* [CP] Embed Pods Frameworks */,
 				8DF5F02B28C1BCC900FB1F1C /* Embed Frameworks */,
+				DCF690CB305583AC0091B7D0 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				DCF690C9305583AC0091B7D0 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				49BD1A5C224207B5005A2252 /* tctiSH */,
+				AD7C1A2000000020005A2252 /* JITHelperProtocol */,
 			);
 			name = tctiSH;
 			packageProductDependencies = (
@@ -280,13 +314,35 @@
 			productReference = 49BD1A5A224207B5005A2252 /* tctiSH.app */;
 			productType = "com.apple.product-type.application";
 		};
+		DCF690C2305583AC0091B7D0 /* JITHelper */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DCF690CF305583AC0091B7D0 /* Build configuration list for PBXNativeTarget "JITHelper" */;
+			buildPhases = (
+				DCF690BF305583AC0091B7D0 /* Sources */,
+				DCF690C0305583AC0091B7D0 /* Frameworks */,
+				DCF690C1305583AC0091B7D0 /* Resources */,
+				AD7C1A0B0000000B005A2252 /* Embed Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				AD7C1A2000000020005A2252 /* JITHelperProtocol */,
+				DCF690C4305583AC0091B7D0 /* JITHelper */,
+			);
+			name = JITHelper;
+			productName = JITHelper;
+			productReference = DCF690C3305583AC0091B7D0 /* JITHelper.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
 		49BD1A52224207B4005A2252 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				LastSwiftUpdateCheck = 1130;
+				LastSwiftUpdateCheck = 2700;
 				LastUpgradeCheck = 1400;
 				ORGANIZATIONNAME = "Kate Temkin";
 				TargetAttributes = {
@@ -294,10 +350,13 @@
 						CreatedOnToolsVersion = 10.1;
 						LastSwiftMigration = 1400;
 					};
+					DCF690C2305583AC0091B7D0 = {
+						CreatedOnToolsVersion = 27.0;
+					};
 				};
 			};
 			buildConfigurationList = 49BD1A55224207B4005A2252 /* Build configuration list for PBXProject "tctiSH" */;
-			compatibilityVersion = "Xcode 9.3";
+			compatibilityVersion = "Xcode 16.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -314,6 +373,7 @@
 			projectRoot = "";
 			targets = (
 				49BD1A59224207B5005A2252 /* tctiSH */,
+				DCF690C2305583AC0091B7D0 /* JITHelper */,
 			);
 		};
 /* End PBXProject section */
@@ -327,14 +387,17 @@
 				8DF5F05428C1C18200FB1F1C /* efi-virtio.rom in Resources */,
 				8DF5F05028C1C16000FB1F1C /* linuxboot_dma.bin in Resources */,
 				8DF5F05128C1C16000FB1F1C /* kvmvapic.bin in Resources */,
-				8D4939E228C3245D00F57421 /* Settings.bundle in Resources */,
 				8DF5F05228C1C16000FB1F1C /* vgabios-stdvga.bin in Resources */,
 				8DF5F04C28C1C07D00FB1F1C /* bios-256k.bin in Resources */,
 				8DE8209228C1808F0035686B /* bzImage in Resources */,
 				8DE8209028C180770035686B /* initrd.img in Resources */,
-				49BD1A68224207B7005A2252 /* LaunchScreen.storyboard in Resources */,
-                8DD4FBBC28CA96E700691935 /* Assets.xcassets in Resources */,
-				49BD1A63224207B5005A2252 /* Main.storyboard in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DCF690C1305583AC0091B7D0 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -391,38 +454,25 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				8DE8208E28C176310035686B /* qemu_launcher.c in Sources */,
-				4936D22124512AF2005CEE27 /* TerminalView.swift in Sources */,
-				8D4C77AA28C77D35002AF286 /* ConfigServer.swift in Sources */,
-				8DF5F05B28C2815100FB1F1C /* Theming.swift in Sources */,
-				49BD1A60224207B5005A2252 /* ViewController.swift in Sources */,
-				8DF5F05D28C281D100FB1F1C /* ColorLoader.swift in Sources */,
-				49BD1A5E224207B5005A2252 /* AppDelegate.swift in Sources */,
-				8D10CD6528CB830300B59F0A /* Picker.swift in Sources */,
-				8DE8208628C167070035686B /* QEMU.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DCF690BF305583AC0091B7D0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
-/* Begin PBXVariantGroup section */
-		49BD1A61224207B5005A2252 /* Main.storyboard */ = {
-			isa = PBXVariantGroup;
-			children = (
-				49BD1A62224207B5005A2252 /* Base */,
-			);
-			name = Main.storyboard;
-			sourceTree = "<group>";
+/* Begin PBXTargetDependency section */
+		DCF690C9305583AC0091B7D0 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DCF690C2305583AC0091B7D0 /* JITHelper */;
+			targetProxy = DCF690C8305583AC0091B7D0 /* PBXContainerItemProxy */;
 		};
-		49BD1A66224207B7005A2252 /* LaunchScreen.storyboard */ = {
-			isa = PBXVariantGroup;
-			children = (
-				49BD1A67224207B7005A2252 /* Base */,
-			);
-			name = LaunchScreen.storyboard;
-			sourceTree = "<group>";
-		};
-/* End PBXVariantGroup section */
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		49BD1A75224207B7005A2252 /* Debug */ = {
@@ -477,7 +527,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 13.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 10.15;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -535,7 +585,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 13.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 10.15;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -562,11 +612,12 @@
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/sysroot-iOS-arm64/Frameworks",
+					"$(SRCROOT)/build-StikJIT",
 				);
 				INFOPLIST_FILE = "$(PRODUCT_NAME)/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = tctiSH;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -607,11 +658,12 @@
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/sysroot-iOS-arm64/Frameworks",
+					"$(SRCROOT)/build-StikJIT",
 				);
 				INFOPLIST_FILE = "$(PRODUCT_NAME)/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = tctiSH;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -636,6 +688,79 @@
 			};
 			name = Release;
 		};
+		DCF690CC305583AC0091B7D0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = SU8B32Z5KR;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				FRAMEWORK_SEARCH_PATHS = "$(SRCROOT)/build-StikJIT";
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = JITHelper/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = JITHelper;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Kate Temkin. All rights reserved.";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.ara.tctiSH.JITHelper;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		DCF690CD305583AC0091B7D0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = SU8B32Z5KR;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				FRAMEWORK_SEARCH_PATHS = "$(SRCROOT)/build-StikJIT";
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = JITHelper/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = JITHelper;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Kate Temkin. All rights reserved.";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.ara.tctiSH.JITHelper;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -653,6 +778,15 @@
 			buildConfigurations = (
 				49BD1A78224207B7005A2252 /* Debug */,
 				49BD1A79224207B7005A2252 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DCF690CF305583AC0091B7D0 /* Build configuration list for PBXNativeTarget "JITHelper" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DCF690CC305583AC0091B7D0 /* Debug */,
+				DCF690CD305583AC0091B7D0 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

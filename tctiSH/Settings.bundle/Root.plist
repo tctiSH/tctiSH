@@ -2,28 +2,15 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>Title</key>
-	<string>Kernel Settings</string>
-	<key>StringsTable</key>
-	<string>Root</string>
 	<key>PreferenceSpecifiers</key>
 	<array>
 		<dict>
-			<key>Type</key>
-			<string>PSMultiValueSpecifier</string>
-			<key>Title</key>
-			<string>Close/Resume Behavior</string>
+			<key>DefaultValue</key>
+			<string>persistent_boot</string>
 			<key>Key</key>
 			<string>resume_behavior</string>
-			<key>DefaultValue</key>
-			<string>Persist Linux State</string>
-			<key>Values</key>
-			<array>
-				<string>persistent_boot</string>
-				<string>recovery_boot</string>
-				<string>snapshot_boot</string>
-				<string>clean_boot</string>
-			</array>
+			<key>Title</key>
+			<string>Close/Resume Behavior</string>
 			<key>Titles</key>
 			<array>
 				<string>Persist Linux State</string>
@@ -31,39 +18,48 @@
 				<string>Boot From Snapshot</string>
 				<string>Clean Reboot</string>
 			</array>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSTextFieldSpecifier</string>
-			<key>Title</key>
-			<string>Boot Snapshot</string>
-			<key>Key</key>
-			<string>boot_snapshot</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSTextFieldSpecifier</string>
-			<key>Title</key>
-			<string>Disk Name</string>
-			<key>Key</key>
-			<string>disk_name</string>
-			<key>DefaultValue</key>
-			<string>disk</string>
-		</dict>
-		<dict>
 			<key>Type</key>
 			<string>PSMultiValueSpecifier</string>
+			<key>Values</key>
+			<array>
+				<string>persistent_boot</string>
+				<string>recovery_boot</string>
+				<string>snapshot_boot</string>
+				<string>clean_boot</string>
+			</array>
+		</dict>
+		<dict>
+			<key>Key</key>
+			<string>boot_snapshot</string>
 			<key>Title</key>
-			<string>JIT Mode</string>
+			<string>Boot Snapshot</string>
+			<key>Type</key>
+			<string>PSTextFieldSpecifier</string>
+		</dict>
+		<dict>
+			<key>DefaultValue</key>
+			<string>disk</string>
+			<key>Key</key>
+			<string>disk_name</string>
+			<key>Title</key>
+			<string>Disk Name</string>
+			<key>Type</key>
+			<string>PSTextFieldSpecifier</string>
+		</dict>
+		<dict>
+			<key>DefaultValue</key>
+			<string>jit_when_possible</string>
 			<key>Key</key>
 			<string>jit_mode</string>
-			<key>DefaultValue</key>
-			<string>JIT When Possible</string>
+			<key>Title</key>
+			<string>JIT Mode</string>
 			<key>Titles</key>
 			<array>
 				<string>JIT When Possible</string>
 				<string>Always Use TCTI</string>
 			</array>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
 			<key>Values</key>
 			<array>
 				<string>jit_when_possible</string>
@@ -71,14 +67,12 @@
 			</array>
 		</dict>
 		<dict>
-			<key>Type</key>
-			<string>PSMultiValueSpecifier</string>
-			<key>Title</key>
-			<string>Memory (requires restart)</string>
-			<key>Key</key>
-			<string>memory</string>
 			<key>DefaultValue</key>
 			<string>1G</string>
+			<key>Key</key>
+			<string>memory</string>
+			<key>Title</key>
+			<string>Memory (requires restart)</string>
 			<key>Titles</key>
 			<array>
 				<string>512M</string>
@@ -88,6 +82,8 @@
 				<string>4G (likely to OOM)</string>
 				<string>5G (silly; will crash)</string>
 			</array>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
 			<key>Values</key>
 			<array>
 				<string>512M</string>
@@ -99,20 +95,18 @@
 			</array>
 		</dict>
 		<dict>
-			<key>Type</key>
-			<string>PSGroupSpecifier</string>
 			<key>Title</key>
 			<string>Appearance</string>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
 		</dict>
 		<dict>
-			<key>Type</key>
-			<string>PSMultiValueSpecifier</string>
-			<key>Title</key>
-			<string>Font Size</string>
+			<key>DefaultValue</key>
+			<integer>14</integer>
 			<key>Key</key>
 			<string>font_size</string>
-			<key>DefaultValue</key>
-			<string>14</string>
+			<key>Title</key>
+			<string>Font Size</string>
 			<key>Titles</key>
 			<array>
 				<string>8</string>
@@ -127,6 +121,8 @@
 				<string>28</string>
 				<string>30</string>
 			</array>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
 			<key>Values</key>
 			<array>
 				<integer>8</integer>
@@ -143,23 +139,27 @@
 			</array>
 		</dict>
 		<dict>
-			<key>Type</key>
-			<string>PSMultiValueSpecifier</string>
-			<key>Title</key>
-			<string>Theme</string>
+			<key>DefaultValue</key>
+			<string>solarizedDark</string>
 			<key>Key</key>
 			<string>theme</string>
-			<key>DefaultValue</key>
-			<string>Solarized Dark</string>
+			<key>Title</key>
+			<string>Theme</string>
 			<key>Titles</key>
 			<array>
 				<string>Solarized Dark</string>
 			</array>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
 			<key>Values</key>
 			<array>
 				<string>solarizedDark</string>
 			</array>
 		</dict>
 	</array>
+	<key>StringsTable</key>
+	<string>Root</string>
+	<key>Title</key>
+	<string>Kernel Settings</string>
 </dict>
 </plist>

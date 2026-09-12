@@ -20,9 +20,50 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     /// Interval at which we check for an SSH connection.
     private static var sshPollingInterval : TimeInterval = 1.5
 
+    /// Whether an attempt is already in flight.
+    ///
+    /// The poll fires every 1.5s until `connected`, which is only set once an
+    /// attempt *succeeds*. Without this, a guest whose sshd takes longer than
+    /// that to come up gets a second `connect()` stacked on the first, and a
+    /// third on that. libssh2 is stateful and not re-entrant, and the result is
+    /// an authentication failure that looks like a wrong password.
+    ///
+    /// Long a source of flakiness, and intended to be fixed in the future.
+    private var connecting : Bool = false
+
+    /// How many attempts have failed since the last success.
+    ///
+    /// The first few failures are ordinary as the guest isn't listening yet, so
+    /// they're noted quietly. After that something is actually wrong, and
+    /// libssh2's own tracing gets turned on rather than waiting for someone to
+    /// think of rebuilding with it enabled.
+    private var failedAttempts : Int = 0
+
+    /// Failures to tolerate before assuming it isn't just a slow boot.
+    private static let quietFailures : Int = 3
+
     var shell: SSHShell?
     var authenticationChallenge: AuthenticationChallenge?
-    var connected : Bool = false
+
+    /// Posted once the SSH session is up and there's a shell to type at.
+    static let didConnect = Notification.Name("io.ara.tctish.terminalDidConnect")
+
+    /// Posted when the session has gone and we're going after it again.
+    ///
+    /// Reconnecting takes a few seconds and the terminal is dead throughout,
+    /// which looks exactly like a hang unless something says otherwise.
+    static let willReconnect = Notification.Name("io.ara.tctish.terminalWillReconnect")
+
+    /// Whether the SSH session is up.
+    ///
+    /// Announces the transition, so whoever is telling the user to wait can stop.
+    /// Only the first one: reconnecting after an unlock isn't news.
+    var connected : Bool = false {
+        didSet {
+            guard connected, !oldValue else { return }
+            NotificationCenter.default.post(name: TctiTermView.didConnect, object: self)
+        }
+    }
 
     var pipController : AVPictureInPictureController?
 
@@ -56,11 +97,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         // Using this over e.g. serial mode ensures we have an out-of-band
         // connection for e.g. terminal resizes to travel over, so SIGWINCH
         // works correctly.
-        shell = try? SSHShell(sshLibrary: Libssh2.self,
-                              host: "localhost",
-                              port: 10022,
-                              terminal: "xterm-256color")
-        shell?.log.enabled = TctiTermView.sshLoggingEnabled
+        makeShell()
 
         // Make sure the terminal looks the way it should before anything's displayed.
         setUpTheming()
@@ -70,8 +107,28 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         
     }
 
+    /// Builds a fresh SSH session.
+    ///
+    /// Always a new one. A session that failed part way through authenticating
+    /// can't be trusted to start again cleanly, so retries begin from scratch
+    /// rather than reusing whatever state the last attempt left behind.
+    private func makeShell() {
+        shell = try? SSHShell(sshLibrary: Libssh2.self,
+                              host: "localhost",
+                              port: 10022,
+                              environment: [],
+                              terminal: "xterm-256color")
+
+        shell?.log.enabled = TctiTermView.sshLoggingEnabled
+            || failedAttempts >= TctiTermView.quietFailures
+    }
+
     /// Starts the actual SSH terminal process.
     func start() {
+        // Whatever was polling before, this replaces it.
+        subscription?.cancel()
+        timer?.upstream.connect().cancel()
+
         // Set up a timer to periodically poll our VM until it's ready for connection.
         timer = Timer.publish(every: TctiTermView.sshPollingInterval, on: .main, in: .common).autoconnect()
         subscription = timer?.sink(receiveValue: { _ in
@@ -87,20 +144,24 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     /// Forces the SSH session to reconnect.
     func forceReconnect() {
 
-        // Force-recreate our SSH session...
-        shell = try? SSHShell(sshLibrary: Libssh2.self,
-                              host: "localhost",
-                              port: 10022,
-                              environment: [],
-                              terminal: "xterm-256color")
+        // We are, as of now, not connected. Saying so matters twice over: it's
+        // what lets `didConnect` fire again when we get back in, and it's what
+        // stops the poll below cancelling itself on the first tick.
+        connected = false
+        connecting = false
+        failedAttempts = 0
+        NotificationCenter.default.post(name: TctiTermView.willReconnect, object: self)
 
-        shell?.log.enabled = TctiTermView.sshLoggingEnabled
+        // Force-recreate our SSH session...
+        makeShell()
 
         // ... add a line-feed to ensure the cursor is in a valid drawing position, again...
         self.feed(text: "\r\n")
 
-        // ... and reconnect.
-        connect()
+        // ... and go after it, retrying rather than getting one attempt. A
+        // reconnect that quietly failed used to leave a dead terminal with
+        // nothing left to try it again.
+        start()
     }
 
     /// Callback notified each time a setting is changed.
@@ -188,7 +249,16 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
 
     func connect()
     {
+        // The guest usually isn't listening yet on the first few tries, which is
+        // expected and not worth reporting. What isn't expected is starting a
+        // second attempt over the top of the first.
+        guard !connecting else {
+            Log.network.note("ssh: still trying the last connection; not starting another")
+            return
+        }
+
         if let s = shell {
+            connecting = true
             setUpTheming()
             
             s.withCallback { [unowned self] (data: Data?, error: Data?) in
@@ -197,10 +267,31 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
             .connect()
             .authenticate(.byPassword(username: "root", password: "toor"))
             .open { [unowned self] (error) in
-                if error != nil {
-                    NSLog("\(error)")
-                    //self.feed(text: "[ERROR?] \(error)\n")
+                self.connecting = false
+
+                if let error {
+                    self.failedAttempts += 1
+
+                    let detail = "attempt \(self.failedAttempts) failed: \(error)"
+                    if self.failedAttempts < TctiTermView.quietFailures {
+                        // Expected while the guest is still coming up.
+                        Log.network.note("ssh: \(detail)")
+                    } else {
+                        Log.network.warn("ssh: \(detail)")
+                        if self.failedAttempts == TctiTermView.quietFailures {
+                            Log.network.warn("ssh: turning on libssh2 tracing for the next attempt")
+                        }
+                    }
+
+                    // Start the next attempt from a clean session; this one got
+                    // as far as it was going to.
+                    self.makeShell()
                 } else {
+                    if self.failedAttempts > 0 {
+                        Log.network.note("ssh: connected after \(self.failedAttempts) failed attempts")
+                    }
+                    self.failedAttempts = 0
+
                     // Mark us as no longer attempting boot.
                     self.connected = true
                     UserDefaults.standard.set(false, forKey: "attempting_boot")
@@ -230,7 +321,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
 
     /// Callback that occurs when the guest VM requests a terminal title change.
     public func setTerminalTitle(source: TerminalView, title: String) {
-        NSLog("TODO: set app title to include: \(title)")
+        Log.ui.note("terminal title is now \(title)")
     }
     
 

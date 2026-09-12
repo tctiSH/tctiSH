@@ -21,6 +21,7 @@
 #include <mach-o/loader.h>
 #include <mach-o/getsect.h>
 #include <sys/fcntl.h>
+#include <sys/sysctl.h>
 #include <sys/_types/_caddr_t.h>
 
 #include "qemu_launcher.h"
@@ -175,11 +176,19 @@ void run_background_qemu(const char* qemu_path,
                          const char* boot_image_name,
                          const char* memory_value,
                          const char* monitor_socket_path,
-                         bool is_jit)
+                         bool is_jit,
+                         bool bless_jit_regions)
 {
     pthread_t thread;
     pthread_attr_t qosAttribute;
-    
+
+    // Tell QEMU whether to hand its code buffer to an attached debugger.
+    //
+    // The app owns this decision, because the app is what arranges for the
+    // debugger and its script; QEMU trapping when no script is listening is
+    // fatal, and a script waiting for a trap that never comes hangs.
+    setenv("TCTISH_JIT_BLESS", bless_jit_regions ? "1" : "0", 1);
+
     struct qemu_args *args = calloc(1, sizeof(struct qemu_args));
 
     args->is_jit             = is_jit;
@@ -228,11 +237,8 @@ void run_background_qemu(const char* qemu_path,
 /// Returns true iff the process has a debugger attached.
 /// (Method from UTM.)
 static bool has_debugger_attached(void) {
-//    int flags;
-//    return !csops(getpid(), CS_OPS_STATUS, &flags, sizeof(flags)) && flags & CS_DEBUGGED;
-    
     int flags;
-    if (csops(getpid(), CS_OPS_STATUS, &flags, sizeof(flags) != 0)) {
+    if (csops(getpid(), CS_OPS_STATUS, &flags, sizeof(flags)) != 0) {
         return false;
     }
 
@@ -286,6 +292,37 @@ static bool enable_ptrace_hack(void) {
         
         return true;
     }
+}
+
+/// Returns true iff a debugger is attached to this process right now.
+///
+/// This is deliberately the same `P_TRACED` test QEMU makes before raising its
+/// blessing trap, so that the app waits on precisely the condition QEMU will go
+/// on to check. Anything else risks booting QEMU a moment too early, which
+/// silently produces a JIT region nobody ever blessed.
+bool jit_debugger_tracing(void) {
+    struct kinfo_proc info;
+    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid() };
+    size_t size = sizeof(info);
+
+    info.kp_proc.p_flag = 0;
+
+    if (sysctl(mib, 4, &info, &size, NULL, 0) == -1) {
+        return false;
+    }
+
+    return (info.kp_proc.p_flag & P_TRACED) != 0;
+}
+
+/// Returns true iff this process may make its own mappings executable.
+///
+/// Not interchangeable with `jit_debugger_tracing()`. `CS_DEBUGGED` is sticky:
+/// once any debugger has attached it stays set for the life of the process, so
+/// it survives the detach at the end of enablement. This is exactly what makes
+/// the ptrace hack useful, and exactly what makes it useless for detecting that
+/// a debugger has arrived.
+bool jit_may_map_executable(void) {
+    return has_debugger_attached();
 }
 
 bool set_up_jit(void) {

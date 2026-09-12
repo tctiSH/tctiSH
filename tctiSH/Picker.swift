@@ -27,7 +27,7 @@ class DirectoryPicker : NSObject, UIDocumentPickerDelegate  {
 
     /// Pops up a dialog that allows the user to select a directory.
     /// Returns [] on failure/cancel, or [<url>] on success.
-    public static func popUpModalDialog() -> [URL] {
+    public class func popUpModalDialog() -> [URL] {
 
         // Create a simple directory picker...
         let picker = DirectoryPicker()
@@ -38,16 +38,23 @@ class DirectoryPicker : NSObject, UIDocumentPickerDelegate  {
     }
 
 
+    /// The document types this picker offers; overridden by subclasses.
+    class var documentTypes: [String] { ["public.folder"] }
+
     /// Shows the active file picker, requesting user input.
     public func show() {
         DispatchQueue.main.async {
 
             // Set up a file picker to find a folder...
-            let documentPicker = UIDocumentPickerViewController(documentTypes: ["public.folder"], in: .open)
+            let documentPicker = UIDocumentPickerViewController(documentTypes: Self.documentTypes, in: .open)
             documentPicker.delegate = self
 
-            // ... and pop up that picker.
-            let viewController = ViewController.getCurrent()!
+            // ... and pop up that picker, if there's anything to pop it up
+            // from.
+            guard let viewController = ViewController.getCurrent() else {
+                self.handleDocumentPickerResult(urls: [])
+                return
+            }
             viewController.present(documentPicker, animated: true)
         }
     }
@@ -71,7 +78,7 @@ class DirectoryPicker : NSObject, UIDocumentPickerDelegate  {
     }
 
     /// Stores the result of a documentPicker event callback.
-    private func handleDocumentPickerResult(urls: [URL]) {
+    fileprivate func handleDocumentPickerResult(urls: [URL]) {
         selectionCondition.lock()
         defer { selectionCondition.unlock() }
 
@@ -88,5 +95,25 @@ class DirectoryPicker : NSObject, UIDocumentPickerDelegate  {
     /// Callback that occurs if the user cancels document picking.
     func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
         handleDocumentPickerResult(urls: [])
+    }
+}
+
+
+/// Picker for allowing the user to select a single pairing file.
+///
+/// Pairing files are plists, but they arrive with assorted names and extensions
+/// depending on how they were generated, so this accepts any file rather than
+/// filtering them out of the user's view.
+class PairingFilePicker : DirectoryPicker {
+
+    override class var documentTypes: [String] { ["public.item"] }
+
+    /// Pops up a dialog that allows the user to select a pairing file,
+    /// returning on failure/cancel, or [<url>] on success.
+    public override class func popUpModalDialog() -> [URL] {
+        let picker = PairingFilePicker()
+
+        picker.show()
+        return picker.getSelectedFiles() ?? []
     }
 }

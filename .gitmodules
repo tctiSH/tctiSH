@@ -4,3 +4,6 @@
 [submodule "third-party/SwiftTerm"]
 	path = third-party/SwiftTerm
 	url = https://github.com/tctiSH/SwiftTerm.git
+[submodule "third-party/StikJIT"]
+	path = third-party/StikJIT
+	url = https://github.com/StikDebug/StikJIT.git

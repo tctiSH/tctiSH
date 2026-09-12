@@ -37,7 +37,7 @@ public class QEMUInterface {
     var monitorSocketPath : String?
 
     /// A queue used for general monitor operations.
-    let monitorQueue = DispatchQueue(label: "com.ktemkin.ios.tctiSH.monitor")
+    let monitorQueue = DispatchQueue(label: "io.ara.ios.tctiSH.monitor")
 
     /// Start our background QEMU thread.
     func startQemuThread(forceRecoveryBoot: Bool = false) {
@@ -52,7 +52,7 @@ public class QEMUInterface {
         
         // ... get a disk to run with ...
         let diskPath = getPersistentStore().path
-        NSLog("Disk path: \(diskPath)")
+        Log.fs.note("disk path: \(diskPath)")
         
         // ... figure out which image we'll be restoring state from ...
         let bootImageName = getBootImageName(forceRecoveryBoot: forceRecoveryBoot)
@@ -69,8 +69,18 @@ public class QEMUInterface {
         // ... get a filename for our unix domain monitor-connection socket ...
         monitorSocketPath = getDatastoreURL("monitor", fileExtension: "socket").path
         
+        // Say what we're about to run. A hung VM looks identical whichever
+        // build and boot image produced it, and those are exactly the two things
+        // that determine whether it *can* boot -- a snapshot taken under one
+        // QEMU build is not necessarily loadable by the other.
+        Log.qemu.note("\(getAppropriateQemuFramework().lastPathComponent), "
+                    + "accel \(AppDelegate.usingJitHacks ? "tcg,split-wx=on" : "tcg"), "
+                    + "bless \(AppDelegate.blessJitRegions)")
+        Log.qemu.note("\(bootImageName.map { "resuming from '\($0)'" } ?? "cold boot"), "
+                    + "memory \(memoryValue)")
+
         // ... and start up the QEMU kernel, which will start paused.
-        run_background_qemu(qemuImage, kernelPath, initrdPath, bundlePrefix, diskPath, sharedFolder, bootImageName, memoryValue, monitorSocketPath, AppDelegate.usingJitHacks);
+        run_background_qemu(qemuImage, kernelPath, initrdPath, bundlePrefix, diskPath, sharedFolder, bootImageName, memoryValue, monitorSocketPath, AppDelegate.usingJitHacks, AppDelegate.blessJitRegions);
 
         // Mark the amount of memory we booted with, for next time.
         setLastMemoryValue(value: memoryValue)
@@ -320,7 +330,7 @@ public class QEMUInterface {
         case "clean_boot":
             return "instantboot"
         default:
-            NSLog("got invalid settings from settings pane! no boot mode \(String(describing: mode))")
+            Log.qemu.fail("no such boot mode \(String(describing: mode)) in the settings pane")
             exit(1);
         }
     }
@@ -483,27 +493,73 @@ public class QEMUInterface {
         setImageProperty(diskName: diskName, property: "resume_image", value: tag)
     }
 
-    /// Issue a QEMU managament protocol scheme command.
-    private func issueMonitorCommand(_ command: String) {
+    /// Issue a QEMU managament protocol scheme command, returning whether it
+    /// got as far as being written.
+    @discardableResult
+    private func issueMonitorCommand(_ command: String) -> Bool {
         let terminatedCommand = "\(command)\r\n"
         
         // Send our command ...
-        ensureMonitorConnection()
-        _ = try? monitorSocket?.write(from: terminatedCommand.data(using: .utf8)!)
+        guard ensureMonitorConnection(), let monitorSocket else { return false }
+        return (try? monitorSocket.write(from: terminatedCommand.data(using: .utf8)!)) != nil
     }
 
-    /// Ensures we have a connection to our VM over the QEMU management protocol.
-    private func ensureMonitorConnection() {
+    /// Ensures we have a connection to our VM over the QEMU management protocol,
+    /// returning whether there is one.
+    @discardableResult
+    private func ensureMonitorConnection() -> Bool {
         
         // If we already have a connection, we're done!
         if let monitorSocket = monitorSocket {
             if monitorSocket.isConnected {
-                return
+                return true
             }
         }
-        
+
+        guard let monitorSocketPath else { return false }
+
         // Create a connection to QEMU via QMP.
-        monitorSocket = try! Socket.create(family: .unix, type: .stream, proto: .unix)
-        try! monitorSocket!.connect(to: monitorSocketPath!)
+        guard let socket = try? Socket.create(family: .unix, type: .stream, proto: .unix) else {
+            Log.qemu.fail("could not create a monitor socket")
+            return false
+        }
+
+        do {
+            try socket.connect(to: monitorSocketPath)
+        } catch {
+            Log.qemu.warn("monitor is not listening at \(monitorSocketPath)")
+            return false
+        }
+
+        monitorSocket = socket
+        return true
+    }
+
+    /// Restarts the VM from scratch, without leaving the app.
+    ///
+    /// Resets the machine rather than the process. `-loadvm` only applies at
+    /// startup, so a reset boots the kernel cold. Restarting QEMU itself isn't
+    /// on offer: it runs on a thread inside this process, and telling it to
+    /// `quit` would take the app with it.
+    ///
+    /// Returns whether the monitor took the command. It won't if QEMU is wedged
+    /// rather than the guest, and there is nothing to be done about that from
+    /// in here.
+    @discardableResult
+    func requestRecoveryBoot() -> Bool {
+        Log.qemu.note("recovery boot requested; resetting the machine")
+
+        // Whatever happens next, the resumed session is gone -- so make sure a
+        // relaunch doesn't try to pick it up again.
+        UserDefaults.standard.set(true, forKey: "attempting_boot")
+
+        guard issueMonitorCommand("system_reset") else {
+            Log.qemu.fail("the monitor didn't take system_reset; QEMU itself is stuck")
+            return false
+        }
+
+        // Harmless if it's already running, and necessary if it isn't.
+        issueMonitorCommand("c")
+        return true
     }
 }

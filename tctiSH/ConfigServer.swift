@@ -10,8 +10,8 @@ import Atomics
 import Foundation
 import Socket
 
-/// Structure that describes a simple configuration message,
-/// as exchanged across our configuration channel.
+/// Structure that describes a simple configuration message, as exchanged across
+/// our configuration channel.
 struct ConfigurationMessage : Codable {
 
     /// The command being executed.
@@ -39,7 +39,7 @@ class ConfigServer {
     var connectedClients = [Int32: Socket]()
 
     /// A queue used to synchronize access to our sockets.
-    let clientLockQueue = DispatchQueue(label: "com.ktemkin.ios.tctiSH.configserver")
+    let clientLockQueue = DispatchQueue(label: "io.ara.tctiSH.configserver")
 
     /// Our interface to our QEMU kernel.
     /// Should only be accessed from our command loop.
@@ -194,9 +194,9 @@ class ConfigServer {
             case "open_folder":
                 handleOpenPath(message: message, from: client)
 
-            // Requests that we prepare a given device for mounting.
-            // Responds with the 'tag' used to mount the device with a `mount -t 9p` command.
-            // {"command": "prepare_mount", "value": "/tmp"}
+            // Requests that we prepare a given device for mounting. Responds
+            // with the 'tag' used to mount the device with a `mount -t 9p`
+            // command. {"command": "prepare_mount", "value": "/tmp"}
             case "prepare_mount":
                 handlePrepareMountCommand(message: message, from: client)
 
@@ -208,6 +208,11 @@ class ConfigServer {
             case "getcwd":
                 handleGetCWD(message: message, from: client)
 
+            // Requests that we pop up a file picker to import a pairing file,
+            // used by the JIT server to reach the device.
+            case "import_pairing_file":
+                handleImportPairingFile(message: message, from: client)
+
             // Respond to all other commands with, basically, "idk".
             default:
                 sendErrorResponse("command not recognized", to: client)
@@ -215,6 +220,29 @@ class ConfigServer {
 
         } catch let err {
             sendErrorResponse("error processing command: \(err)", to: client)
+        }
+    }
+
+    /// Imports a pairing file chosen by the user, for JIT enablement.
+    private func handleImportPairingFile(message: ConfigurationMessage, from: Client) {
+        let client = from
+
+        // No arguments; the user picks the file.
+        _ = message
+
+        switch JitPairingFile.importInteractively() {
+        case .imported:
+            sendResponse(command: "import_pairing_file", key: "path",
+                         value: JitPairingFile.url.path, to: client)
+
+        case .cancelled:
+            sendResponse(command: "import_pairing_file", key: "status",
+                         value: "cancelled", to: client)
+
+        case .failed(let reason):
+            // Previously reported as "cancelled", which told the user their own
+            // tap had failed rather than that the file couldn't be read.
+            sendErrorResponse("could not import pairing file: \(reason)", to: client)
         }
     }
 
@@ -400,7 +428,7 @@ class ConfigServer {
             try to.write(from: rawMessage)
             try to.write(from: "\n")
         } catch {
-            NSLog("failed to send message!")
+            Log.network.fail("config server: failed to send a message")
         }
     }
 
