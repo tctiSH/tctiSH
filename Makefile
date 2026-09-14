@@ -90,15 +90,10 @@ PYTHON_SOURCES := $(shell git ls-files '*.py' | grep -Ev '$(NOT_OURS)')
 NIX_SOURCES    := $(shell git ls-files '*.nix' | grep -Ev '$(NOT_OURS)')
 RUBY_SOURCES   := $(shell git ls-files 'Podfile' '*.rb' | grep -Ev '$(NOT_OURS)')
 
-# Four spaces, matching Xcode's editor and the existing scripts.
-#
-# The dialect is forced rather than taken from each shebang. build_dependencies.sh
-# says `#!/bin/sh` but uses `[[ ]]` and `${var//a/b}`, so shfmt's auto-detection
-# refuses to parse it. Correcting the shebang is not a formatting change: under
-# `/bin/sh` macOS runs bash in POSIX mode, where `echo` expands backslash
-# escapes, and version_check() depends on that -- `echo "$1\n$2" | sort -V`
-# silently becomes one line under a plain bash shebang.
-SHFMT_FLAGS := --language-dialect bash --indent 4 --case-indent
+# Four spaces, matching Xcode's editor and the existing scripts. The dialect comes
+# from each script's shebang, so a genuinely POSIX script would still be treated
+# as one.
+SHFMT_FLAGS := --indent 4 --case-indent
 
 .PHONY: format-swift
 format-swift: ## Format the Swift sources

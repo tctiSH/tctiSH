@@ -5,6 +5,5 @@
 #
 # Nothing that changes behaviour belongs in a commit listed here.
 
-# Add the hash of the first `make format` run over the whole tree once it is
-# committed -- it rewrites most of the Swift, all of the C, and Kate's original
-# style throughout.
+# Add code formatting to the repo
+6c3660fd0f020a4ea891f048e9c61d193778e10c

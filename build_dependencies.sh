@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Based off of https://github.com/szanni/ios-autotools/blob/master/iconfigure
 # Lifted from UTM.
 #
@@ -18,9 +18,9 @@
 set -e
 
 # Printing coloured lines
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-NC='\033[0m'
+GREEN=$'\033[0;32m'
+RED=$'\033[0;31m'
+NC=$'\033[0m'
 
 # Knobs
 IOS_SDKMINVER="11.0"
@@ -37,7 +37,7 @@ command -v realpath >/dev/null 2>&1 || realpath() {
 }
 
 version_check() {
-    [ "$1" = "$(echo "$1\n$2" | sort -V | head -n1)" ]
+    [ "$1" = "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" ]
 }
 
 usage() {
@@ -78,15 +78,15 @@ check_env() {
         exit 1
     }
     command -v msgfmt >/dev/null 2>&1 || {
-        echo >&2 "${RED}You must install 'gettext' on your host machine.\n\t'msgfmt' needs to be in your \$PATH as well.${NC}"
+        printf >&2 '%b\n' "${RED}You must install 'gettext' on your host machine.\n\t'msgfmt' needs to be in your \$PATH as well.${NC}"
         exit 1
     }
     command -v glib-mkenums >/dev/null 2>&1 || {
-        echo >&2 "${RED}You must install 'glib-utils' on your host machine.\n\t'glib-mkenums' needs to be in your \$PATH as well.${NC}"
+        printf >&2 '%b\n' "${RED}You must install 'glib-utils' on your host machine.\n\t'glib-mkenums' needs to be in your \$PATH as well.${NC}"
         exit 1
     }
     command -v gpg-error-config >/dev/null 2>&1 || {
-        echo >&2 "${RED}You must install 'libgpg-error' on your host machine.\n\t'gpg-error-config' needs to be in your \$PATH as well.${NC}"
+        printf >&2 '%b\n' "${RED}You must install 'libgpg-error' on your host machine.\n\t'gpg-error-config' needs to be in your \$PATH as well.${NC}"
         exit 1
     }
     command -v xcrun >/dev/null 2>&1 || {
@@ -426,7 +426,12 @@ build_qemu_tcti() {
     mkdir -p "$QEMU_DIR"
     cd "$QEMU_DIR"
     echo "${GREEN}Configuring QEMU...${NC}"
-    ../configure --prefix="$PREFIX" --host="$CHOST" --cross-prefix="" --with-coroutine=libucontext $@
+    # QEMU's configure defaults objcc to a bare `clang` and lets meson resolve it from $PATH, even
+    # though every other binary it writes into the cross file is a full Xcode path. Pass it
+    # explicitly so the ObjC probe cannot be captured by whatever clang happens to come first --
+    # a nix one links against the macOS SDK and fails against our iOS target.
+    ../configure --prefix="$PREFIX" --host="$CHOST" --cross-prefix="" --with-coroutine=libucontext \
+        --objcc="$OBJCC" $@
     echo "${GREEN}Building QEMU...${NC}"
     ninja
     echo "${GREEN}Installing QEMU...${NC}"
@@ -456,7 +461,12 @@ build_qemu_jit() {
     mkdir -p "$QEMU_DIR"
     cd "$QEMU_DIR"
     echo "${GREEN}Configuring QEMU-JIT...${NC}"
-    ../configure --prefix="$PREFIX" --host="$CHOST" --cross-prefix="" --with-coroutine=libucontext $@
+    # QEMU's configure defaults objcc to a bare `clang` and lets meson resolve it from $PATH, even
+    # though every other binary it writes into the cross file is a full Xcode path. Pass it
+    # explicitly so the ObjC probe cannot be captured by whatever clang happens to come first --
+    # a nix one links against the macOS SDK and fails against our iOS target.
+    ../configure --prefix="$PREFIX" --host="$CHOST" --cross-prefix="" --with-coroutine=libucontext \
+        --objcc="$OBJCC" $@
     echo "${GREEN}Building QEMU-JIT...${NC}"
     ninja
     echo "${GREEN}Copying single library...${NC}"
