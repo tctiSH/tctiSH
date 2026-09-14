@@ -1,0 +1,146 @@
+{
+  "fill" : {
+    "automatic-gradient" : "display-p3:0.20112,0.46153,0.94594,1.00000"
+  },
+  "groups" : [
+    {
+      "blur-material" : null,
+      "layers" : [
+        {
+          "fill" : {
+            "solid" : "extended-gray:0.00000,1.00000"
+          },
+          "glass" : false,
+          "hidden" : false,
+          "image-name" : "Prompt.svg",
+          "name" : "Prompt",
+          "opacity-specializations" : [
+            {
+              "value" : 0.7
+            },
+            {
+              "appearance" : "tinted",
+              "value" : 1
+            }
+          ],
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              -0.0056313245000296774,
+              35.34483337437956
+            ]
+          }
+        }
+      ],
+      "name" : "Prompt",
+      "position" : {
+        "scale" : 1.3,
+        "translation-in-points" : [
+          0,
+          0
+        ]
+      },
+      "shadow" : {
+        "kind" : "layer-color",
+        "opacity" : 0.3
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    },
+    {
+      "blur-material" : 0.5,
+      "hidden" : false,
+      "layers" : [
+        {
+          "fill-specializations" : [
+            {
+              "appearance" : "tinted",
+              "value" : {
+                "solid" : "extended-gray:0.25000,1.00000"
+              }
+            }
+          ],
+          "glass" : false,
+          "image-name" : "Window Controls.svg",
+          "name" : "Window Controls",
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              -168.0026050596,
+              -157.56687625000004
+            ]
+          }
+        },
+        {
+          "image-name" : "Simple Main Window.svg",
+          "name" : "Simple Main Window"
+        }
+      ],
+      "name" : "Main Window V2",
+      "position" : {
+        "scale" : 1.2,
+        "translation-in-points" : [
+          0,
+          0
+        ]
+      },
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.3
+      }
+    },
+    {
+      "blur-material" : null,
+      "hidden" : false,
+      "layers" : [
+        {
+          "image-name" : "Mini Window.svg",
+          "name" : "Window 1",
+          "opacity" : 0.8,
+          "position" : {
+            "scale" : 1.4,
+            "translation-in-points" : [
+              192,
+              252
+            ]
+          }
+        },
+        {
+          "image-name" : "Mini Window.svg",
+          "name" : "Window 2",
+          "opacity" : 0.8,
+          "position" : {
+            "scale" : 1.4,
+            "translation-in-points" : [
+              -192,
+              -251.99992999999995
+            ]
+          }
+        }
+      ],
+      "lighting" : "individual",
+      "name" : "Mini Windows",
+      "shadow" : {
+        "kind" : "layer-color",
+        "opacity" : 0.5
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.4
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}

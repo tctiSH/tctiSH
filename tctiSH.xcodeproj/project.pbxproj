@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 71;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -141,14 +141,14 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		AD7C1A1000000010005A2252 /* Exceptions for "tctiSH" folder in "tctiSH" target */ = {
+		AD7C1A1000000010005A2252 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
 			target = 49BD1A59224207B5005A2252 /* tctiSH */;
 		};
-		DCF690CE305583AC0091B7D0 /* Exceptions for "JITHelper" folder in "JITHelper" target */ = {
+		DCF690CE305583AC0091B7D0 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -158,41 +158,9 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		49BD1A5C224207B5005A2252 /* tctiSH */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				AD7C1A1000000010005A2252 /* Exceptions for "tctiSH" folder in "tctiSH" target */,
-			);
-			explicitFileTypes = {
-			};
-			explicitFolders = (
-			);
-			path = tctiSH;
-			sourceTree = "<group>";
-		};
-		AD7C1A2000000020005A2252 /* JITHelperProtocol */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
-			explicitFileTypes = {
-			};
-			explicitFolders = (
-			);
-			path = JITHelperProtocol;
-			sourceTree = "<group>";
-		};
-		DCF690C4305583AC0091B7D0 /* JITHelper */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				DCF690CE305583AC0091B7D0 /* Exceptions for "JITHelper" folder in "JITHelper" target */,
-			);
-			explicitFileTypes = {
-			};
-			explicitFolders = (
-			);
-			path = JITHelper;
-			sourceTree = "<group>";
-		};
+		49BD1A5C224207B5005A2252 /* tctiSH */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (AD7C1A1000000010005A2252 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = tctiSH; sourceTree = "<group>"; };
+		AD7C1A2000000020005A2252 /* JITHelperProtocol */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = JITHelperProtocol; sourceTree = "<group>"; };
+		DCF690C4305583AC0091B7D0 /* JITHelper */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (DCF690CE305583AC0091B7D0 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = JITHelper; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -397,7 +365,7 @@
 			);
 			mainGroup = 49BD1A51224207B4005A2252;
 			packageReferences = (
-				498667032575F1FD006BFFA0 /* XCRemoteSwiftPackageReference "SwiftSH.binaries" */,
+				498667032575F1FD006BFFA0 /* XCRemoteSwiftPackageReference "SwiftSH" */,
 				8D2AC18C28C7EF2D005DB7D4 /* XCRemoteSwiftPackageReference "swift-atomics" */,
 			);
 			productRefGroup = 49BD1A5B224207B5005A2252 /* Products */;
@@ -466,9 +434,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-tctiSH/Pods-tctiSH-frameworks-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Embed Pods Frameworks";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-tctiSH/Pods-tctiSH-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -630,7 +602,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 9A05E33B868D09494792FFFD /* Pods-tctiSH.debug.xcconfig */;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = tctiSH;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = tctiSH/tctiSH.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
@@ -676,7 +648,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = B59ED421CAD9966D0A97855E /* Pods-tctiSH.release.xcconfig */;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = tctiSH;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = tctiSH/tctiSH.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
@@ -822,7 +794,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		498667032575F1FD006BFFA0 /* XCRemoteSwiftPackageReference "SwiftSH.binaries" */ = {
+		498667032575F1FD006BFFA0 /* XCRemoteSwiftPackageReference "SwiftSH" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/migueldeicaza/SwiftSH.binaries";
 			requirement = {

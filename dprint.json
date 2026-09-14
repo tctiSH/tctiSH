@@ -36,7 +36,8 @@
     // Guest-side build scripts and their notes; their own world.
     "assets/**",
 
-    // Xcode writes these, and rewrites them on the next asset edit.
+    // Xcode and Icon Composer write these, and rewrite them on the next asset edit.
+    "**/*.icon/**",
     "**/*.xcassets/**",
     "**/*.xcworkspace/**",
     "**/*.xcodeproj/**",

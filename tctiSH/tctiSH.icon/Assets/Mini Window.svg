@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="100%" height="100%" viewBox="0 0 300 220" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:serif="http://www.serif.com/" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;">
+    <g transform="matrix(1,0,0,1,-1200,-980)">
+        <g id="Mini-Window" serif:id="Mini Window" transform="matrix(0.9375,0,0,0.956522,309.375,157.391)">
+            <path d="M1270,902.39L1270,1047.61C1270,1071.01 1250.62,1090 1226.75,1090L993.25,1090C969.38,1090 950,1071.01 950,1047.61L950,902.39C950,878.994 969.38,860 993.25,860L1226.75,860C1250.62,860 1270,878.994 1270,902.39Z" style="fill:rgb(251,235,236);"/>
+        </g>
+    </g>
+</svg>
