@@ -64,10 +64,11 @@ final class StatusPresenter {
         } else {
             guard let parent else { return }
 
-            let pill = StatusPill.show(in: parent,
-                                         title: item.message,
-                                         over: backdrop,
-                                         topOffset: offset(forRow: pills.count))
+            let pill = StatusPill.show(
+                in: parent,
+                title: item.message,
+                over: backdrop,
+                topOffset: offset(forRow: pills.count))
             pill.setState(item.state, animated: false)
             pill.tint = item.tint ?? .label
             pill.onTap = item.onTap
@@ -136,8 +137,10 @@ final class StatusPresenter {
             entry.pill.topConstraint.constant = offset(forRow: row)
         }
 
-        UIView.animate(withDuration: 0.25, delay: 0,
-                       usingSpringWithDamping: 0.85, initialSpringVelocity: 0) {
+        UIView.animate(
+            withDuration: 0.25, delay: 0,
+            usingSpringWithDamping: 0.85, initialSpringVelocity: 0
+        ) {
             parent.layoutIfNeeded()
         }
     }

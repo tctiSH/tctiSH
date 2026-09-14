@@ -42,8 +42,10 @@ final class FileDownloader: NSObject, URLSessionDownloadDelegate {
     /// whenever the response is gzipped, since the decompressed length isn't
     /// known in advance. Whether that's worth drawing a bar for is the caller's
     /// decision, not this type's.
-    func download(_ url: URL, to destination: URL,
-                  progress: @escaping (_ written: Int64, _ expected: Int64) -> Void) throws {
+    func download(
+        _ url: URL, to destination: URL,
+        progress: @escaping (_ written: Int64, _ expected: Int64) -> Void
+    ) throws {
         let done = DispatchSemaphore(value: 0)
 
         self.destination = destination
@@ -63,17 +65,21 @@ final class FileDownloader: NSObject, URLSessionDownloadDelegate {
         if let failure { throw failure }
     }
 
-    func urlSession(_ session: URLSession,
-                    downloadTask: URLSessionDownloadTask,
-                    didWriteData bytesWritten: Int64,
-                    totalBytesWritten: Int64,
-                    totalBytesExpectedToWrite: Int64) {
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
         onProgress?(totalBytesWritten, totalBytesExpectedToWrite)
     }
 
-    func urlSession(_ session: URLSession,
-                    downloadTask: URLSessionDownloadTask,
-                    didFinishDownloadingTo location: URL) {
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
         // The temporary file is deleted the moment this returns, so the move
         // has to happen here and not in didCompleteWithError.
         do {
@@ -91,8 +97,9 @@ final class FileDownloader: NSObject, URLSessionDownloadDelegate {
             }
 
             let manager = FileManager.default
-            try manager.createDirectory(at: destination.deletingLastPathComponent(),
-                                        withIntermediateDirectories: true)
+            try manager.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
             if manager.fileExists(atPath: destination.path) {
                 try manager.removeItem(at: destination)
             }
@@ -102,9 +109,11 @@ final class FileDownloader: NSObject, URLSessionDownloadDelegate {
         }
     }
 
-    func urlSession(_ session: URLSession,
-                    task: URLSessionTask,
-                    didCompleteWithError error: Error?) {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didCompleteWithError error: Error?
+    ) {
         if let error { failure = error }
         done?.signal()
     }
@@ -112,7 +121,9 @@ final class FileDownloader: NSObject, URLSessionDownloadDelegate {
     enum DownloadError: LocalizedError {
         case message(String)
         var errorDescription: String? {
-            switch self { case .message(let text): return text }
+            switch self {
+            case .message(let text): return text
+            }
         }
     }
 }

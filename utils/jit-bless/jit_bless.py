@@ -85,9 +85,11 @@ def log_to_file(message):
 
 def make_logger(emit):
     """Wraps an output function so everything it prints is also recorded."""
+
     def log(message):
         log_to_file(message)
         emit(message)
+
     return log
 
 
@@ -135,8 +137,10 @@ def bless_region(process, address, length, log):
         return True
 
     pages = (length - 1) // JIT_PAGE_SIZE + 1
-    log("jit-bless: blessing 0x%x + 0x%x (%d pages of %dK)"
-        % (address, length, pages, JIT_PAGE_SIZE // 1024))
+    log(
+        "jit-bless: blessing 0x%x + 0x%x (%d pages of %dK)"
+        % (address, length, pages, JIT_PAGE_SIZE // 1024)
+    )
 
     started = time.monotonic()
     interval = max(pages // PROGRESS_UPDATES, 1)
@@ -147,14 +151,18 @@ def bless_region(process, address, length, log):
         written = process.WriteMemory(page_address, bytes([BRK_IMMEDIATE]), error)
 
         if not error.Success() or written != 1:
-            log("jit-bless: FAILED writing page %d at 0x%x: %s"
-                % (page, page_address, error.GetCString()))
+            log(
+                "jit-bless: FAILED writing page %d at 0x%x: %s"
+                % (page, page_address, error.GetCString())
+            )
             return False
 
         if page and page % interval == 0:
             elapsed = time.monotonic() - started
-            log("jit-bless:   %d/%d pages (%.0fs elapsed, ~%.0fs left)"
-                % (page, pages, elapsed, elapsed * (pages - page) / page))
+            log(
+                "jit-bless:   %d/%d pages (%.0fs elapsed, ~%.0fs left)"
+                % (page, pages, elapsed, elapsed * (pages - page) / page)
+            )
 
     log("jit-bless: blessed %d pages in %.1fs" % (pages, time.monotonic() - started))
     return True
@@ -200,8 +208,8 @@ def jit_bless_command(debugger, command, exe_ctx, result, internal_dict):
 
     if pending_region(frame, process) is None:
         result.SetError(
-            "jit-bless: not stopped at a brk #0x%x -- pc is 0x%x"
-            % (BRK_IMMEDIATE, frame.GetPC()))
+            "jit-bless: not stopped at a brk #0x%x -- pc is 0x%x" % (BRK_IMMEDIATE, frame.GetPC())
+        )
         return
 
     if not handle_trap(frame, process, log):
@@ -279,17 +287,22 @@ def arm_stop_hook(debugger):
     if already_armed(debugger):
         return True
 
-    return run_quietly(debugger, "target stop-hook add -P %s.BlessStopHook -s %s"
-                                 % (__name__, JIT_MODULE)) is not None
+    return (
+        run_quietly(
+            debugger, "target stop-hook add -P %s.BlessStopHook -s %s" % (__name__, JIT_MODULE)
+        )
+        is not None
+    )
 
 
 def __lldb_init_module(debugger, internal_dict):
-    run_quietly(debugger,
-                "command script add -f %s.jit_bless_command -o jit-bless" % __name__)
+    run_quietly(debugger, "command script add -f %s.jit_bless_command -o jit-bless" % __name__)
 
     # Speak only when something is wrong. This module is imported from
     # ~/.lldbinit-Xcode, so anything printed here lands in the console of every
     # project on the machine, and anything logged creates LOG_PATH for them too.
     if not arm_stop_hook(debugger):
-        print("jit-bless: could not register the stop hook; brk #0x%x will halt "
-              "the process instead of being answered" % BRK_IMMEDIATE)
+        print(
+            "jit-bless: could not register the stop hook; brk #0x%x will halt "
+            "the process instead of being answered" % BRK_IMMEDIATE
+        )

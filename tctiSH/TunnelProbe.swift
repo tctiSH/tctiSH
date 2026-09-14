@@ -57,9 +57,10 @@ enum TunnelProbe {
 
         for interface in sequence(first: first, next: { $0.pointee.ifa_next }) {
             guard let socketAddress = interface.pointee.ifa_addr,
-                  socketAddress.pointee.sa_family == UInt8(AF_INET),
-                  (interface.pointee.ifa_flags & UInt32(IFF_UP)) != 0,
-                  let rawName = interface.pointee.ifa_name else {
+                socketAddress.pointee.sa_family == UInt8(AF_INET),
+                (interface.pointee.ifa_flags & UInt32(IFF_UP)) != 0,
+                let rawName = interface.pointee.ifa_name
+            else {
                 continue
             }
 
@@ -67,9 +68,12 @@ enum TunnelProbe {
             guard name.hasPrefix("utun") else { continue }
 
             var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-            guard getnameinfo(socketAddress, socklen_t(socketAddress.pointee.sa_len),
-                              &host, socklen_t(host.count),
-                              nil, 0, NI_NUMERICHOST) == 0 else {
+            guard
+                getnameinfo(
+                    socketAddress, socklen_t(socketAddress.pointee.sa_len),
+                    &host, socklen_t(host.count),
+                    nil, 0, NI_NUMERICHOST) == 0
+            else {
                 continue
             }
 
@@ -80,9 +84,11 @@ enum TunnelProbe {
     }
 
     /// Probes the tunnel endpoint, blocking until it answers or `timeout` elapses.
-    static func probe(address: String = defaultAddress,
-                      port: UInt16 = defaultPort,
-                      timeout: TimeInterval = defaultTimeout) -> TunnelProbeResult {
+    static func probe(
+        address: String = defaultAddress,
+        port: UInt16 = defaultPort,
+        timeout: TimeInterval = defaultTimeout
+    ) -> TunnelProbeResult {
         let started = DispatchTime.now()
         func elapsed() -> TimeInterval {
             let ns = DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds
@@ -90,7 +96,8 @@ enum TunnelProbe {
         }
 
         guard !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let endpointPort = NWEndpoint.Port(rawValue: port) else {
+            let endpointPort = NWEndpoint.Port(rawValue: port)
+        else {
             return .unavailable(reason: "invalid endpoint \(address):\(port)", elapsed: elapsed())
         }
 
@@ -98,7 +105,8 @@ enum TunnelProbe {
         let semaphore = DispatchSemaphore(value: 0)
         let queue = DispatchQueue(label: "io.ara.ios.tctiSH.tunnel-probe")
 
-        let connection = NWConnection(host: NWEndpoint.Host(address), port: endpointPort, using: .tcp)
+        let connection = NWConnection(
+            host: NWEndpoint.Host(address), port: endpointPort, using: .tcp)
         connection.stateUpdateHandler = { state in
             switch state {
             case .ready:
@@ -112,7 +120,9 @@ enum TunnelProbe {
             // the default interface and the SYNs are simply dropped -- but handle
             // it anyway for the cases where the network does say no.
             case .waiting(let error):
-                if outcome.finish(reason: "waiting: \(error.localizedDescription)") { semaphore.signal() }
+                if outcome.finish(reason: "waiting: \(error.localizedDescription)") {
+                    semaphore.signal()
+                }
 
             default:
                 break
@@ -143,7 +153,8 @@ enum TunnelProbe {
 
         // Log what we found either way: the endpoint's subnet turned out not to
         // match the address we're assigned, so this is how we learn the layout.
-        let summary = tunnels.isEmpty
+        let summary =
+            tunnels.isEmpty
             ? "none"
             : tunnels.map { "\($0.name)=\($0.address)" }.joined(separator: " ")
         Log.network.note("tunnel: utun interfaces: \(summary)")
@@ -156,12 +167,16 @@ enum TunnelProbe {
 
         switch result {
         case .available(let elapsed):
-            Log.network.note(String(format: "tunnel: %@:%u reachable in %.1fms",
-                               defaultAddress, UInt32(defaultPort), elapsed * 1000))
+            Log.network.note(
+                String(
+                    format: "tunnel: %@:%u reachable in %.1fms",
+                    defaultAddress, UInt32(defaultPort), elapsed * 1000))
 
         case .unavailable(let reason, let elapsed):
-            Log.network.note(String(format: "tunnel: %@:%u unreachable after %.1fms (%@)",
-                               defaultAddress, UInt32(defaultPort), elapsed * 1000, reason))
+            Log.network.note(
+                String(
+                    format: "tunnel: %@:%u unreachable after %.1fms (%@)",
+                    defaultAddress, UInt32(defaultPort), elapsed * 1000, reason))
         }
 
         return result

@@ -29,16 +29,10 @@ bool jit_debugger_tracing(void);
 bool jit_may_map_executable(void);
 
 /// Runs QEMU in a background thread, providing our shell.
-void run_background_qemu(const char *qemu_path,
-                         const char *kernel_path,
-                         const char *initrd_path,
-                         const char *bios_path,
-                         const char *disk_path,
-                         const char *shared_folder_path,
-                         const char *boot_image_name,
-                         const char *memory_value,
-                         const char *monitor_socket_path,
-                         bool is_jit,
+void run_background_qemu(const char *qemu_path, const char *kernel_path, const char *initrd_path,
+                         const char *bios_path, const char *disk_path,
+                         const char *shared_folder_path, const char *boot_image_name,
+                         const char *memory_value, const char *monitor_socket_path, bool is_jit,
                          bool bless_jit_regions);
 
 #endif /* qemu_launcher_h */

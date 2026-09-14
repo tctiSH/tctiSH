@@ -28,10 +28,10 @@ class ViewController: UIViewController {
     private var hasOfferedPairingFile = false
 
     /// Stores the most recently used terminal; for singleton-style fetches.
-    private static var currentTerminal : TctiTermView?
+    private static var currentTerminal: TctiTermView?
 
     /// Stores the most recently used terminal's view controller; for singleton-style fetches.
-    private static var currentTerminalController : UIViewController?
+    private static var currentTerminalController: UIViewController?
 
     /// Fetches the most recently created TctiTermView.
     /// Call only from the primary UI thread.
@@ -53,8 +53,8 @@ class ViewController: UIViewController {
         super.viewDidLoad()
 
         // Start up our terminal emulator, which will display our actual terminal.
-        let currentTerminal = TctiTermView(frame: makeFrame (keyboardDelta: 0))
-        
+        let currentTerminal = TctiTermView(frame: makeFrame(keyboardDelta: 0))
+
         tv = currentTerminal
         view.addSubview(currentTerminal)
 
@@ -62,13 +62,11 @@ class ViewController: UIViewController {
         ViewController.currentTerminal = currentTerminal
         ViewController.currentTerminalController = self
 
-
         // If we're doing a recovery boot by user choice, provide a message letting the
         // user know that this will take a hot moment.
         if UserDefaults.standard.string(forKey: "resume_behavior") == "recovery_boot" {
             currentTerminal.feed(text: "(Recovery booting; startup will take a bit.)\r\n\r\n")
         }
-
 
         // If this is our first boot, create the image we'll use for resuming.
         else if AppDelegate.isFirstBoot {
@@ -106,7 +104,7 @@ class ViewController: UIViewController {
             // We could squish in spacer controls; but these do the same thing and don't muck up the
             // position math SwiftTerm does later.
             for _ in 0...25 {
-                tv.feed(text:"\n")
+                tv.feed(text: "\n")
             }
 
         }
@@ -128,7 +126,6 @@ class ViewController: UIViewController {
         observeJitPreparation()
     }
 
-
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
 
@@ -137,7 +134,6 @@ class ViewController: UIViewController {
         // -- and the symptom is simply that the alert never appears.
         offerPairingFileIfWanted()
     }
-
 
     // MARK: - JIT status
 
@@ -188,10 +184,12 @@ class ViewController: UIViewController {
 
     /// Puts the boot pill up as a spinner, and starts the clock on it.
     private func showBootProgress(message: String) {
-        status?.present(.init(key: Self.bootStatusKey,
-                              message: message,
-                              state: .indeterminate,
-                              duration: nil))
+        status?.present(
+            .init(
+                key: Self.bootStatusKey,
+                message: message,
+                state: .indeterminate,
+                duration: nil))
 
         bootStallWatch?.cancel()
 
@@ -209,25 +207,28 @@ class ViewController: UIViewController {
     private func bootLooksStalled() {
         Log.qemu.warn("no shell after \(Int(Self.bootStallDeadline))s; offering a recovery boot")
 
-        status?.present(.init(key: Self.bootStatusKey,
-                              message: "Tap to recover",
-                              state: .failed,
-                              duration: nil,
-                              tint: .systemRed,
-                              onTap: { [weak self] in self?.offerRecoveryBoot() }))
+        status?.present(
+            .init(
+                key: Self.bootStatusKey,
+                message: "Tap to recover",
+                state: .failed,
+                duration: nil,
+                tint: .systemRed,
+                onTap: { [weak self] in self?.offerRecoveryBoot() }))
     }
 
     private func offerRecoveryBoot() {
         let alert = UIAlertController(
             title: "Recovery boot?",
             message: "Linux hasn't come up. A recovery boot starts it again from "
-                   + "scratch, which usually fixes it -- but anything in the "
-                   + "resumed session is lost.",
+                + "scratch, which usually fixes it -- but anything in the "
+                + "resumed session is lost.",
             preferredStyle: .alert)
 
-        alert.addAction(UIAlertAction(title: "Yes", style: .destructive) { [weak self] _ in
-            self?.performRecoveryBoot()
-        })
+        alert.addAction(
+            UIAlertAction(title: "Yes", style: .destructive) { [weak self] _ in
+                self?.performRecoveryBoot()
+            })
 
         alert.addAction(UIAlertAction(title: "No", style: .cancel))
 
@@ -240,11 +241,13 @@ class ViewController: UIViewController {
         guard qemu?.requestRecoveryBoot() == true else {
             // QEMU itself isn't answering, so there's nothing further to try
             // from in here. Relaunching will recovery-boot on its own.
-            status?.present(.init(key: Self.bootStatusKey,
-                                  message: "Reopen the app",
-                                  state: .failed,
-                                  duration: nil,
-                                  tint: .systemRed))
+            status?.present(
+                .init(
+                    key: Self.bootStatusKey,
+                    message: "Reopen the app",
+                    state: .failed,
+                    duration: nil,
+                    tint: .systemRed))
             return
         }
 
@@ -283,10 +286,12 @@ class ViewController: UIViewController {
             Log.jit.note("running without JIT: \(reason.logDescription)")
         }
 
-        status?.present(.init(key: "jit",
-                              message: outcome.status.message,
-                              state: .symbol(outcome.status.symbol),
-                              duration: 5))
+        status?.present(
+            .init(
+                key: "jit",
+                message: outcome.status.message,
+                state: .symbol(outcome.status.symbol),
+                duration: 5))
     }
 
     /// Shows and updates the progress pill as background preparation runs.
@@ -307,18 +312,22 @@ class ViewController: UIViewController {
             break
 
         case .running(let message, let fraction):
-            status?.present(.init(key: "prepare",
-                                  message: message,
-                                  state: fraction.map { .progress($0) } ?? .indeterminate,
-                                  duration: nil))
+            status?.present(
+                .init(
+                    key: "prepare",
+                    message: message,
+                    state: fraction.map { .progress($0) } ?? .indeterminate,
+                    duration: nil))
 
         case .finished(let succeeded, let message):
             // Held for a moment rather than vanishing the instant the work ends:
             // whoever glanced away would otherwise never learn how it went.
-            status?.present(.init(key: "prepare",
-                                  message: message,
-                                  state: succeeded ? .succeeded : .failed,
-                                  duration: 3))
+            status?.present(
+                .init(
+                    key: "prepare",
+                    message: message,
+                    state: succeeded ? .succeeded : .failed,
+                    duration: 3))
         }
     }
 
@@ -334,57 +343,57 @@ class ViewController: UIViewController {
         let alert = UIAlertController(
             title: "Enable JIT?",
             message: "tctiSH can run much faster with a debugger's help, but it "
-                   + "needs a pairing file for this device. Importing one now "
-                   + "will speed up the next launch.",
+                + "needs a pairing file for this device. Importing one now "
+                + "will speed up the next launch.",
             preferredStyle: .alert)
 
-        alert.addAction(UIAlertAction(title: "Choose File", style: .default) { _ in
-            // `importInteractively()` blocks until the user picks, so it cannot
-            // run on the main thread -- the picker it waits on is presented
-            // from there.
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result = JitPairingFile.importInteractively()
+        alert.addAction(
+            UIAlertAction(title: "Choose File", style: .default) { _ in
+                // `importInteractively()` blocks until the user picks, so it cannot
+                // run on the main thread -- the picker it waits on is presented
+                // from there.
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let result = JitPairingFile.importInteractively()
 
-                DispatchQueue.main.async {
-                    switch result {
-                    case .imported:
-                        // Says so itself: preparation starts and puts up its own
-                        // pill within the second.
-                        JitEnablement.pairingFileArrived()
+                    DispatchQueue.main.async {
+                        switch result {
+                        case .imported:
+                            // Says so itself: preparation starts and puts up its own
+                            // pill within the second.
+                            JitEnablement.pairingFileArrived()
 
-                    case .cancelled:
-                        // Deliberate, so no comment. Asking again this launch
-                        // would just be nagging; the next one will offer.
-                        break
+                        case .cancelled:
+                            // Deliberate, so no comment. Asking again this launch
+                            // would just be nagging; the next one will offer.
+                            break
 
-                    case .failed:
-                        self.status?.present(.init(key: "pairing",
-                                                   message: "Couldn't read that file",
-                                                   state: .symbol("exclamationmark.triangle.fill"),
-                                                   duration: 5))
+                        case .failed:
+                            self.status?.present(
+                                .init(
+                                    key: "pairing",
+                                    message: "Couldn't read that file",
+                                    state: .symbol("exclamationmark.triangle.fill"),
+                                    duration: 5))
+                        }
                     }
                 }
-            }
-        })
+            })
 
         alert.addAction(UIAlertAction(title: "Not Now", style: .cancel))
 
         present(alert, animated: true)
     }
 
-
-
-
-    func makeFrame (keyboardDelta: CGFloat, _ fn: String = #function, _ ln: Int = #line) -> CGRect
-    {
-        return CGRect (x: view.safeAreaInsets.left + padding,
-                       y: view.safeAreaInsets.top + padding,
-                       width: view.frame.width - view.safeAreaInsets.left - view.safeAreaInsets.right - (padding * 2),
-                       height: view.frame.height - view.safeAreaInsets.top - keyboardDelta - (padding * 2))
+    func makeFrame(keyboardDelta: CGFloat, _ fn: String = #function, _ ln: Int = #line) -> CGRect {
+        return CGRect(
+            x: view.safeAreaInsets.left + padding,
+            y: view.safeAreaInsets.top + padding,
+            width: view.frame.width - view.safeAreaInsets.left - view.safeAreaInsets.right
+                - (padding * 2),
+            height: view.frame.height - view.safeAreaInsets.top - keyboardDelta - (padding * 2))
     }
-    
-    func setupKeyboardMonitor ()
-    {
+
+    func setupKeyboardMonitor() {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(keyboardWillShow),
@@ -396,28 +405,31 @@ class ViewController: UIViewController {
             name: UIWindow.keyboardWillHideNotification,
             object: nil)
     }
-    
+
     @objc private func keyboardWillShow(_ notification: NSNotification) {
-        guard let keyboardValue = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue else { return }
-        
+        guard
+            let keyboardValue = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey]
+                as? NSValue
+        else { return }
+
         let keyboardScreenEndFrame = keyboardValue.cgRectValue
         let keyboardViewEndFrame = view.convert(keyboardScreenEndFrame, from: view.window)
         keyboardDelta = keyboardViewEndFrame.height
         tv.frame = makeFrame(keyboardDelta: keyboardViewEndFrame.height)
     }
-    
-    
-    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
-        tv.frame = CGRect (origin: tv.frame.origin, size: size)
+
+    override func viewWillTransition(
+        to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator
+    ) {
+        tv.frame = CGRect(origin: tv.frame.origin, size: size)
     }
-    
+
     @objc private func keyboardWillHide(_ notification: NSNotification) {
         keyboardDelta = 0
         tv.frame = makeFrame(keyboardDelta: 0)
     }
-    
+
     override func viewWillLayoutSubviews() {
-        tv.frame = makeFrame (keyboardDelta: keyboardDelta)
+        tv.frame = makeFrame(keyboardDelta: keyboardDelta)
     }
 }
-

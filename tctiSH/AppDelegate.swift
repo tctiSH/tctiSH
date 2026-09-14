@@ -11,11 +11,11 @@ import AVKit
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
     var qemu: QEMUInterface?
-    var configServer : ConfigServer?
-    var saving : Bool = false
+    var configServer: ConfigServer?
+    var saving: Bool = false
 
     /// The controller used to support Picture in Picture.
-    var pipController : AVPictureInPictureController?
+    var pipController: AVPictureInPictureController?
 
     // Global application state.
     // FIXME: move these to a nice, clean singleton
@@ -30,9 +30,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     static var isFirstBoot = false
     static var memoryValueChanged = false
 
-    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+    ) -> Bool {
 
-        let default_images : [String: [String:String]] = [:]
+        let default_images: [String: [String: String]] = [:]
 
         // Register our default values; which will be used for any unset values.
         UserDefaults.standard.register(defaults: [
@@ -55,8 +58,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         // Mark ourselves as attempting a boot.
         UserDefaults.standard.set(true, forKey: "attempting_boot")
-        
-        // Settle how we're going to run and arrange it. 
+
+        // Settle how we're going to run and arrange it.
 
         // This has to happen _before_ QEMU exists: it reads `usingJitHacks` and
         // `blessJitRegions` as it starts, and only asks for its code buffer to
@@ -69,13 +72,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Figure out if our memory limit has changed, and thus we'll need to print a message.
         // This lets the user know to expect a delay, when appropriate.
         AppDelegate.memoryValueChanged = qemu!.memoryValueChanged()
-        
+
         self.bootQemu()
 
         return true
     }
-    
-    
+
     func bootQemu() {
         // To minimize startup time, start our kernel before anything else.
         qemu!.startQemuThread(forceRecoveryBoot: AppDelegate.forceRecoveryBoot)
@@ -84,8 +86,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Finally, before starting, spawn our background configuration server.
         configServer = ConfigServer(qemuInterface: qemu!, listenImmediately: true)
     }
-    
-    
+
     /// Saves VM state as the app leaves the foreground.
     ///
     /// Called by `SceneDelegate`: under the scene life cycle UIKit delivers
@@ -97,7 +98,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         if backgroundToPip() {
             Log.ui.note("switched to picture in picture")
-            return();
+            return ();
         }
 
         let application = UIApplication.shared
@@ -107,7 +108,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         qemu?.performBackgroundSave()
         application.endBackgroundTask(taskIdentifier)
         saving = false
-
 
         Log.ui.note("backgrounded")
     }
@@ -140,7 +140,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         return false
     }
 
-
     func applicationProtectedDataWillBecomeUnavailable(_ application: UIApplication) {
         Log.ui.note("device locked; protected data is going away")
         qemu?.stopHostChannels()
@@ -155,6 +154,4 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         ViewController.getCurrentTerminal()?.forceReconnect()
     }
 
-
 }
-

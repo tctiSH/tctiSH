@@ -91,34 +91,41 @@ final class StatusPill: UIView {
     /// background, in practice) and decides whether it dresses light or dark.
     /// `topOffset` is where it sits in the stack; see `StatusPresenter`.
     @discardableResult
-    static func show(in parent: UIView, title: String, over backdrop: UIColor,
-                     topOffset: CGFloat = Metric.margin) -> StatusPill {
+    static func show(
+        in parent: UIView, title: String, over backdrop: UIColor,
+        topOffset: CGFloat = Metric.margin
+    ) -> StatusPill {
         let pill = StatusPill(title: title)
         pill.overrideUserInterfaceStyle = style(toSitOn: backdrop)
         pill.translatesAutoresizingMaskIntoConstraints = false
         parent.addSubview(pill)
 
-        let top = pill.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor,
-                                            constant: topOffset)
+        let top = pill.topAnchor.constraint(
+            equalTo: parent.safeAreaLayoutGuide.topAnchor,
+            constant: topOffset)
         pill.topConstraint = top
 
         NSLayoutConstraint.activate([
             top,
-            pill.trailingAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.trailingAnchor,
-                                           constant: -Metric.margin),
+            pill.trailingAnchor.constraint(
+                equalTo: parent.safeAreaLayoutGuide.trailingAnchor,
+                constant: -Metric.margin),
             pill.heightAnchor.constraint(equalToConstant: Metric.height),
 
             // Never let a long message crowd the terminal out.
-            pill.leadingAnchor.constraint(greaterThanOrEqualTo: parent.safeAreaLayoutGuide.leadingAnchor,
-                                          constant: Metric.margin),
+            pill.leadingAnchor.constraint(
+                greaterThanOrEqualTo: parent.safeAreaLayoutGuide.leadingAnchor,
+                constant: Metric.margin),
         ])
 
         pill.alpha = 0
         pill.transform = CGAffineTransform(translationX: 0, y: -10).scaledBy(x: 0.92, y: 0.92)
         parent.layoutIfNeeded()
 
-        UIView.animate(withDuration: 0.35, delay: 0,
-                       usingSpringWithDamping: 0.8, initialSpringVelocity: 0) {
+        UIView.animate(
+            withDuration: 0.35, delay: 0,
+            usingSpringWithDamping: 0.8, initialSpringVelocity: 0
+        ) {
             pill.alpha = 1
             pill.transform = .identity
         }
@@ -173,13 +180,15 @@ final class StatusPill: UIView {
             background.leadingAnchor.constraint(equalTo: leadingAnchor),
             background.trailingAnchor.constraint(equalTo: trailingAnchor),
 
-            label.leadingAnchor.constraint(equalTo: background.contentView.leadingAnchor,
-                                           constant: Metric.leadingInset),
+            label.leadingAnchor.constraint(
+                equalTo: background.contentView.leadingAnchor,
+                constant: Metric.leadingInset),
             label.centerYAnchor.constraint(equalTo: background.contentView.centerYAnchor),
 
             dial.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: Metric.spacing),
-            dial.trailingAnchor.constraint(equalTo: background.contentView.trailingAnchor,
-                                           constant: -Metric.trailingInset),
+            dial.trailingAnchor.constraint(
+                equalTo: background.contentView.trailingAnchor,
+                constant: -Metric.trailingInset),
             dial.centerYAnchor.constraint(equalTo: background.contentView.centerYAnchor),
             dial.widthAnchor.constraint(equalToConstant: Metric.dial),
             dial.heightAnchor.constraint(equalToConstant: Metric.dial),
@@ -247,9 +256,10 @@ final class StatusPill: UIView {
     /// Sets what the indicator shows.
     func setState(_ state: State, animated: Bool = true) {
         if case .symbol(let name) = state {
-            symbolView.image = UIImage(systemName: name,
-                                       withConfiguration: UIImage.SymbolConfiguration(
-                                           pointSize: 14, weight: .semibold))
+            symbolView.image = UIImage(
+                systemName: name,
+                withConfiguration: UIImage.SymbolConfiguration(
+                    pointSize: 14, weight: .semibold))
             symbolView.isHidden = false
             dial.isHidden = true
             accessibilityValue = nil
@@ -310,11 +320,14 @@ final class StatusPill: UIView {
         guard let onTap else { return }
 
         // A little acknowledgement, since a capsule has no pressed state.
-        UIView.animate(withDuration: 0.08, animations: {
-            self.transform = CGAffineTransform(scaleX: 0.94, y: 0.94)
-        }, completion: { _ in
-            UIView.animate(withDuration: 0.18) { self.transform = .identity }
-        })
+        UIView.animate(
+            withDuration: 0.08,
+            animations: {
+                self.transform = CGAffineTransform(scaleX: 0.94, y: 0.94)
+            },
+            completion: { _ in
+                UIView.animate(withDuration: 0.18) { self.transform = .identity }
+            })
 
         onTap()
     }
@@ -440,9 +453,11 @@ private final class ProgressDial: UIView {
 
         // Starting at -pi/2 puts the seam at twelve o'clock, so the ring fills
         // from the top the way a clock face would.
-        let ring = UIBezierPath(arcCenter: centre, radius: radius,
-                                startAngle: -.pi / 2, endAngle: .pi * 1.5,
-                                clockwise: true).cgPath
+        let ring = UIBezierPath(
+            arcCenter: centre, radius: radius,
+            startAngle: -.pi / 2, endAngle: .pi * 1.5,
+            clockwise: true
+        ).cgPath
         track.path = ring
         arc.path = ring
         spinner.path = ring
@@ -524,9 +539,10 @@ private final class ProgressDial: UIView {
 
     private func drawMark(animated: Bool) {
         let side = min(bounds.width, bounds.height)
-        mark.path = markPath(for: state,
-                             centre: CGPoint(x: bounds.midX, y: bounds.midY),
-                             side: side)
+        mark.path = markPath(
+            for: state,
+            centre: CGPoint(x: bounds.midX, y: bounds.midY),
+            side: side)
         mark.isHidden = false
 
         guard animated else {

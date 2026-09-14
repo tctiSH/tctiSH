@@ -1,0 +1,63 @@
+{
+  "json": {
+    "commentLine.forceSpaceAfterSlashes": true,
+    "lineWidth": 100,
+    "trailingCommas": "jsonc",
+    "useTabs": false
+  },
+  "markdown": {
+    "emphasisKind": "underscores",
+    "lineWidth": 100,
+    "newLineKind": "lf",
+    "strongKind": "asterisks",
+    "tags": {
+      "markdown": "md"
+    },
+    "textWrap": "always"
+  },
+  "toml": {
+    "cargo.applyConventions": true,
+    "comment.forceLeadingSpace": true,
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "yaml": {
+    "indentWidth": 2,
+    "lineBreak": "lf",
+    "printWidth": 100
+  },
+  "excludes": [
+    // Submodules and vendored code. Reformatting any of these would either be
+    // lost on the next update or turn a future rebase into a merge conflict.
+    "qemu-tcti/**",
+    "third-party/**",
+    "Pods/**",
+
+    // Guest-side build scripts and their notes; their own world.
+    "assets/**",
+
+    // Xcode writes these, and rewrites them on the next asset edit.
+    "**/*.xcassets/**",
+    "**/*.xcworkspace/**",
+    "**/*.xcodeproj/**",
+
+    // Reformatting a patch breaks it: context lines are literal.
+    "patches/**",
+
+    // Build output and lockfiles.
+    "build-*/**",
+    "sysroot-*/**",
+    "Cargo.lock",
+    "Podfile.lock",
+    "flake.lock",
+
+    // Local-only working notes; never committed, so never reformatted.
+    "tmp/**"
+  ],
+  "plugins": [
+    "https://plugins.dprint.dev/g-plane/pretty_yaml-v0.6.0.wasm",
+    "https://plugins.dprint.dev/json-0.23.0.wasm",
+    "https://plugins.dprint.dev/markdown-0.22.1.wasm",
+    "https://plugins.dprint.dev/toml-0.7.0.wasm"
+  ]
+}

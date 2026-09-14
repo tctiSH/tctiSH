@@ -53,8 +53,9 @@ class JITHelperService: NSObject, NSExtensionRequestHandling {
             reply.txmPresent = StikJIT.isTXMPresent
 
             let started = Date()
-            note("pid \(getpid()), \(Self.availableMemory()) available, "
-                 + "TXM \(Self.describe(reply.txmPresent))")
+            note(
+                "pid \(getpid()), \(Self.availableMemory()) available, "
+                    + "TXM \(Self.describe(reply.txmPresent))")
 
             if let request {
                 note("operation: \(request.operation.rawValue)")
@@ -67,28 +68,30 @@ class JITHelperService: NSObject, NSExtensionRequestHandling {
             reply.elapsed = Date().timeIntervalSince(started)
             reply.report = report
 
-            note("\(reply.outcome.rawValue) in \(Self.describe(reply.elapsed)), "
-                 + "\(Self.availableMemory()) available")
+            note(
+                "\(reply.outcome.rawValue) in \(Self.describe(reply.elapsed)), "
+                    + "\(Self.availableMemory()) available")
 
             self.complete(context, reply: reply)
         }
     }
 
-    private func perform(_ request: JITHelper.Request,
-                         into reply: inout JITHelper.Reply,
-                         note: @escaping (String) -> Void) {
+    private func perform(
+        _ request: JITHelper.Request,
+        into reply: inout JITHelper.Reply,
+        note: @escaping (String) -> Void
+    ) {
         switch request.operation {
         case .enable:
-            enable(pairingData: request.pairingData,
-                   targetPID: request.targetPID,
-                   into: &reply,
-                   note: note)
+            enable(
+                pairingData: request.pairingData,
+                targetPID: request.targetPID,
+                into: &reply,
+                note: note)
         }
     }
 
     // MARK: - Operations
-
-
 
     /// Attaches the debugger and answers QEMU's blessing trap.
     ///
@@ -100,10 +103,12 @@ class JITHelperService: NSObject, NSExtensionRequestHandling {
     /// The host **must not** issue this unless it is going to boot QEMU under
     /// TCG expecting to be able to JIT. If this is not done, the script will
     /// wait forever and hang the app.
-    private func enable(pairingData: Data?,
-                        targetPID: pid_t?,
-                        into reply: inout JITHelper.Reply,
-                        note: @escaping (String) -> Void) {
+    private func enable(
+        pairingData: Data?,
+        targetPID: pid_t?,
+        into reply: inout JITHelper.Reply,
+        note: @escaping (String) -> Void
+    ) {
         guard let pairingData else {
             reply.detail = "no pairing file, so JIT cannot be enabled"
             note(reply.detail)
@@ -121,7 +126,7 @@ class JITHelperService: NSObject, NSExtensionRequestHandling {
                 // Ask before attaching. `enableJIT` would happily prepare the
                 // device for us, but preparing means downloading and mounting a
                 // developer disk image: minutes of work, finishing long after
-                // the host stopped waiting and booted without JIT. 
+                // the host stopped waiting and booted without JIT.
                 let mounted = try StikJIT.isDDIMounted(pairingFile: pairingFile)
                 reply.ddiMounted = mounted
 
@@ -141,8 +146,9 @@ class JITHelperService: NSObject, NSExtensionRequestHandling {
                         // mounted, which the check above just confirmed, so it
                         // should get no further than that.
                         if case .downloadingDDI = stage {
-                            note("  WARNING: downloading the DDI from inside enable, "
-                                 + "having just been told it was mounted.")
+                            note(
+                                "  WARNING: downloading the DDI from inside enable, "
+                                    + "having just been told it was mounted.")
                         }
                     },
                     progress: { note("  \($0)") })

@@ -13,5 +13,5 @@ serde_json = "1.0.85"
 sys-mount = { version = "1.5.1", default-features = false }
 
 [profile.release]
-strip=true
-lto=true
+strip = true
+lto = true

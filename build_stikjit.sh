@@ -39,11 +39,11 @@ NC='\033[0m'
 # the older devices we're least likely to be holding. Takes the lowest target in
 # the project, since the framework has to be loadable by the oldest thing that
 # embeds it.
-project_deployment_target () {
+project_deployment_target() {
     grep -oE 'IPHONEOS_DEPLOYMENT_TARGET = [0-9]+(\.[0-9]+)?;' \
-        "$BASEDIR/tctiSH.xcodeproj/project.pbxproj" 2>/dev/null \
-        | sed -E 's/.* = ([0-9.]+);/\1/' \
-        | sort -V | head -1
+        "$BASEDIR/tctiSH.xcodeproj/project.pbxproj" 2>/dev/null |
+        sed -E 's/.* = ([0-9.]+);/\1/' |
+        sort -V | head -1
 }
 
 DEPLOYMENT_TARGET="${STIKJIT_DEPLOYMENT_TARGET:-$(project_deployment_target || true)}"
@@ -54,7 +54,7 @@ if [ -z "$DEPLOYMENT_TARGET" ]; then
     exit 1
 fi
 
-check_env () {
+check_env() {
     if [ ! -d "$SOURCE_DIR" ]; then
         echo -e "${RED}No StikJIT source at $SOURCE_DIR.${NC}" >&2
         echo "Initialise the submodule, or point STIKJIT_SOURCE at a checkout." >&2
@@ -80,7 +80,7 @@ check_env
 # did is undone, so patches always apply to pristine source and never stack.
 # rsync skips what hasn't changed, which matters -- the vendored Rust library is
 # 92MB of the 94MB here.
-stage_source () {
+stage_source() {
     mkdir -p "$WORK_DIR"
     rsync -a --delete --exclude '.git' "$SOURCE_DIR"/ "$WORK_DIR"/
 }
@@ -93,13 +93,13 @@ stage_source () {
 # which is gitignored, and git apply treats a gitignored path as none of its
 # business: it prints "Skipped patch" and **exits 0**. A patch that reports
 # success and changes nothing is worse than one that fails outright.
-apply_patches () {
+apply_patches() {
     local patch_file name
     for patch_file in "$BASEDIR"/patches/stikjit-*.patch; do
         [ -e "$patch_file" ] || return 0
         name="$(basename "$patch_file")"
 
-        if ! patch -p1 -d "$WORK_DIR" --forward < "$patch_file"; then
+        if ! patch -p1 -d "$WORK_DIR" --forward <"$patch_file"; then
             echo -e "${RED}Failed to apply $name.${NC}" >&2
             echo "The submodule has probably moved on; the patch needs rebasing." >&2
             exit 1
@@ -107,7 +107,7 @@ apply_patches () {
 
         # Belt and braces, having just been caught by a silent no-op: reversing
         # it has to be possible, which it only is if it went in.
-        if ! patch -p1 -d "$WORK_DIR" --reverse --dry-run --force < "$patch_file" >/dev/null 2>&1; then
+        if ! patch -p1 -d "$WORK_DIR" --reverse --dry-run --force <"$patch_file" >/dev/null 2>&1; then
             echo -e "${RED}$name reported success but isn't present.${NC}" >&2
             exit 1
         fi

@@ -10,7 +10,7 @@ import Foundation
 /// The request/response vocabulary spoken across the extension boundary.
 ///
 /// This file is compiled into *both* targets so we have one definition shared
-/// by both protocol paricipants. 
+/// by both protocol paricipants.
 ///
 /// Everything crossing the boundary travels as an `NSExtensionItem.userInfo`
 /// dictionary, so everything here has to be property-list representable.
@@ -58,7 +58,8 @@ enum JITHelper {
         /// Recovers a request, or nil if this isn't one we understand.
         init?(userInfo: [AnyHashable: Any]?) {
             guard let raw = userInfo?[Key.operation] as? String,
-                  let operation = Operation(rawValue: raw) else {
+                let operation = Operation(rawValue: raw)
+            else {
                 return nil
             }
 
@@ -112,8 +113,9 @@ enum JITHelper {
         /// Recovers a reply from what came back over the extension request.
         init?(replyItems: [Any]?) {
             guard let info = (replyItems?.first as? NSExtensionItem)?.userInfo,
-                  let raw = info[Key.outcome] as? String,
-                  let outcome = Outcome(rawValue: raw) else {
+                let raw = info[Key.outcome] as? String,
+                let outcome = Outcome(rawValue: raw)
+            else {
                 return nil
             }
 

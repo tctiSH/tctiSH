@@ -30,20 +30,19 @@
 #define PATH_MAX     (1024)
 
 // Helpers.
-#define ARRAY_SIZE(array) \
-    (sizeof(array) / sizeof(array[0]))
+#define ARRAY_SIZE(array) (sizeof(array) / sizeof(array[0]))
 
 // External functionality for JIT hacks.
-extern int csops(pid_t pid, unsigned int ops, void * useraddr, size_t usersize);
+extern int csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersize);
 extern boolean_t exc_server(mach_msg_header_t *, mach_msg_header_t *);
 extern int ptrace(int request, pid_t pid, caddr_t addr, int data);
 
-#define    CS_OPS_STATUS             0  /* return status */
-#define    CS_KILL          0x00000200  /* kill process if it becomes invalid */
-#define    CS_DEBUGGED      0x10000000  /* process is currently or has previously been debugged and allowed to run with invalid pages */
-#define    PT_TRACE_ME               0  /* child declares it's being traced */
-#define    PT_SIGEXC                12  /* signals as exceptions for current_proc */
-
+#define CS_OPS_STATUS 0          /* return status */
+#define CS_KILL       0x00000200 /* kill process if it becomes invalid */
+/* process is currently or has previously been debugged and allowed to run with invalid pages */
+#define CS_DEBUGGED 0x10000000
+#define PT_TRACE_ME 0  /* child declares it's being traced */
+#define PT_SIGEXC   12 /* signals as exceptions for current_proc */
 
 //
 // QEMU internals that we'll use.
@@ -68,7 +67,7 @@ struct qemu_args {
 };
 
 /// Core thread that runs our background QEMU.
-static void* qemu_thread(void *raw_args) {
+static void *qemu_thread(void *raw_args) {
     struct qemu_args *args = raw_args;
 
     void *qemu_dll;
@@ -78,18 +77,20 @@ static void* qemu_thread(void *raw_args) {
 
     // Provide our QEMU command line and environment...
     char *envp[] = { NULL };
+
+    // clang-format off
     char *argv[] = {
         "qemu-system",
-        
+
         // Tell QEMU where any option ROMS it might want are hiding.
         "-L", args->bios_dir,
-        
+
         // We're a terminal; we don't display anything.
         "-display", "none",
-        
+
         // Guest memory.
         "-m", args->memory_value,
-        
+
         // Networking.
         //
         // Debug note: one can remove the 127.0.0.1 from the above string to make SSH'ing the VM possible
@@ -99,25 +100,25 @@ static void* qemu_thread(void *raw_args) {
 
         // Provide our host RNG to our guest; to speed up entropy generation.
         "-device", "virtio-rng-pci",
-        
+
         // Provide the disk we'll be working with.
         "-device", "virtio-blk-pci,id=disk1,drive=drive1",
         "-drive", args->disk_args,
-        
+
         // Select our kernel and ramdisk.
         "-kernel", args->kernel_filename,
         "-initrd", args->initrd_filename,
-        
+
         // Kernel command line; tells our image how to handle disk images.
         // This variant selects the provided qcow disk file.
         "-append", "tcti_disk=file",
 
         // Provide a few cores.
         "-smp", "cpus=4",
-        
+
         // Monitor conection for tctiSH.
         "-monitor", args->monitor_channel_args,
-        
+
         // Monitor conection in-guest tools.
         "-monitor", "tcp:localhost:10045,server,wait=off",
 
@@ -131,6 +132,7 @@ static void* qemu_thread(void *raw_args) {
         // These _must_ be last.
         "-loadvm", args->boot_image_name
     };
+    // clang-format on
 
     int argc = ARRAY_SIZE(argv);
     if (args->boot_image_name == NULL) {
@@ -150,7 +152,7 @@ static void* qemu_thread(void *raw_args) {
     qemu_init(argc, (const char **)argv, (const char **)envp);
     qemu_main_loop();
     qemu_cleanup();
-    
+
     // Clean up the memory allcoated for this thread.
     free(args->bios_dir);
     free(args->kernel_filename);
@@ -162,23 +164,16 @@ static void* qemu_thread(void *raw_args) {
         free(args->boot_image_name);
     }
     free(args);
-    
+
     return NULL;
 }
 
 /// Spawns a backgroudn thread that runs QEMU.
-void run_background_qemu(const char* qemu_path,
-                         const char* kernel_path,
-                         const char* initrd_path,
-                         const char* bios_path,
-                         const char* disk_path,
-                         const char* shared_folder_path,
-                         const char* boot_image_name,
-                         const char* memory_value,
-                         const char* monitor_socket_path,
-                         bool is_jit,
-                         bool bless_jit_regions)
-{
+void run_background_qemu(const char *qemu_path, const char *kernel_path, const char *initrd_path,
+                         const char *bios_path, const char *disk_path,
+                         const char *shared_folder_path, const char *boot_image_name,
+                         const char *memory_value, const char *monitor_socket_path, bool is_jit,
+                         bool bless_jit_regions) {
     pthread_t thread;
     pthread_attr_t qosAttribute;
 
@@ -191,28 +186,28 @@ void run_background_qemu(const char* qemu_path,
 
     struct qemu_args *args = calloc(1, sizeof(struct qemu_args));
 
-    args->is_jit             = is_jit;
-    args->qemu_image         = calloc(PATH_MAX, sizeof(char));
-    args->kernel_filename    = calloc(PATH_MAX, sizeof(char));
-    args->initrd_filename    = calloc(PATH_MAX, sizeof(char));
-    args->bios_dir           = calloc(PATH_MAX, sizeof(char));
-    args->memory_value       = calloc(PATH_MAX, sizeof(char));
+    args->is_jit = is_jit;
+    args->qemu_image = calloc(PATH_MAX, sizeof(char));
+    args->kernel_filename = calloc(PATH_MAX, sizeof(char));
+    args->initrd_filename = calloc(PATH_MAX, sizeof(char));
+    args->bios_dir = calloc(PATH_MAX, sizeof(char));
+    args->memory_value = calloc(PATH_MAX, sizeof(char));
     if (boot_image_name) {
         args->boot_image_name = calloc(PATH_MAX, sizeof(char));
     }
 
     // Create our disk argument.
-    args->disk_args  = calloc(ARGUMENT_MAX, sizeof(char));
-    snprintf(args->disk_args, ARGUMENT_MAX, "media=disk,id=drive1,if=none,file=%s,discard=unmap,detect-zeroes=unmap",
-             disk_path);
+    args->disk_args = calloc(ARGUMENT_MAX, sizeof(char));
+    snprintf(args->disk_args, ARGUMENT_MAX,
+             "media=disk,id=drive1,if=none,file=%s,discard=unmap,detect-zeroes=unmap", disk_path);
 
     // Create our shared-folder argument.
-    args->shared_folder_args  = calloc(ARGUMENT_MAX, sizeof(char));
+    args->shared_folder_args = calloc(ARGUMENT_MAX, sizeof(char));
     snprintf(args->shared_folder_args, ARGUMENT_MAX, "local,path=%s,security_model=none,id=fsdev0",
              shared_folder_path);
 
     // Create our monitor argument.
-    args->monitor_channel_args  = calloc(ARGUMENT_MAX, sizeof(char));
+    args->monitor_channel_args = calloc(ARGUMENT_MAX, sizeof(char));
     snprintf(args->monitor_channel_args, ARGUMENT_MAX, "unix:%s,server,nowait",
              monitor_socket_path);
 
@@ -253,7 +248,6 @@ static void *exception_handler(void *argument) {
     return NULL;
 }
 
-
 /// Attempts to enable JIT via a ptrace-based debugger.
 /// (Method from UTM.)
 static bool enable_ptrace_hack(void) {
@@ -268,7 +262,7 @@ static bool enable_ptrace_hack(void) {
         if (ptrace(PT_TRACE_ME, 0, NULL, 0) < 0) {
             return false;
         }
-        
+
         // ptracing ourselves confuses the kernel and will cause bad things to
         // happen to the system (hangs…) if an exception or signal occurs. Setup
         // some "safety nets" so we can cause the process to exit in a somewhat sane
@@ -286,10 +280,11 @@ static bool enable_ptrace_hack(void) {
         mach_port_t port = MACH_PORT_NULL;
         mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &port);
         mach_port_insert_right(mach_task_self(), port, port, MACH_MSG_TYPE_MAKE_SEND);
-        task_set_exception_ports(mach_task_self(), EXC_MASK_SOFTWARE, port, EXCEPTION_DEFAULT, THREAD_STATE_NONE);
+        task_set_exception_ports(mach_task_self(), EXC_MASK_SOFTWARE, port, EXCEPTION_DEFAULT,
+                                 THREAD_STATE_NONE);
         pthread_t thread;
         pthread_create(&thread, NULL, exception_handler, (void *)&port);
-        
+
         return true;
     }
 }

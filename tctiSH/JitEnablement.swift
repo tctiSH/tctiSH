@@ -147,33 +147,33 @@ enum JitEnablement {
             return .interpreted(.disabledInSettings)
         }
 
-#if targetEnvironment(macCatalyst)
-        // Catalyst gets JIT from its entitlements. Nothing to arrange, and
-        // nothing to bless.
-        return .ptrace
-#else
-        let txm = TxmPresence.current
-        Log.jit.note("TXM \(txm.description)")
+        #if targetEnvironment(macCatalyst)
+            // Catalyst gets JIT from its entitlements. Nothing to arrange, and
+            // nothing to bless.
+            return .ptrace
+        #else
+            let txm = TxmPresence.current
+            Log.jit.note("TXM \(txm.description)")
 
-        switch txm {
-        case .absent:
-            // The pre-TXM world, unchanged: a process that believes it is being
-            // debugged may map its own pages executable, and no second process
-            // need be involved at all.
-            return set_up_jit()
-                ? .ptrace
-                : .interpreted(.ptraceRefused)
+            switch txm {
+            case .absent:
+                // The pre-TXM world, unchanged: a process that believes it is being
+                // debugged may map its own pages executable, and no second process
+                // need be involved at all.
+                return set_up_jit()
+                    ? .ptrace
+                    : .interpreted(.ptraceRefused)
 
-        case .unknown:
-            // StikJIT refuses to guess here, and guessing wrong is expensive in
-            // both directions -- a trap nobody answers, or a debugger waiting on
-            // a trap that never comes. Decline in step with it.
-            return .interpreted(.txmUnknown)
+            case .unknown:
+                // StikJIT refuses to guess here, and guessing wrong is expensive in
+                // both directions -- a trap nobody answers, or a debugger waiting on
+                // a trap that never comes. Decline in step with it.
+                return .interpreted(.txmUnknown)
 
-        case .present:
-            return enableUnderTxm()
-        }
-#endif
+            case .present:
+                return enableUnderTxm()
+            }
+        #endif
     }
 
     /// The TXM path: JIT is only possible with help from another process.
@@ -237,8 +237,10 @@ enum JitEnablement {
             return .interpreted(.attachTimedOut)
         }
 
-        Log.jit.note(String(format: "debugger attached after %.2fs",
-                           Date().timeIntervalSince(started)))
+        Log.jit.note(
+            String(
+                format: "debugger attached after %.2fs",
+                Date().timeIntervalSince(started)))
         return .blessed
     }
 

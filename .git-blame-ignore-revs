@@ -1,0 +1,10 @@
+# Commits that only moved whitespace around, and which `git blame` should step
+# straight past. GitHub honours this file automatically; locally it needs
+#
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# Nothing that changes behaviour belongs in a commit listed here.
+
+# Add the hash of the first `make format` run over the whole tree once it is
+# committed -- it rewrites most of the Swift, all of the C, and Kate's original
+# style throughout.

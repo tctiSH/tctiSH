@@ -3,11 +3,11 @@
 # Lifted from UTM.
 #
 # Copyright (c) 2014, Angelo Haller
-# 
+#
 # Permission to use, copy, modify, and/or distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
 # copyright notice and this permission notice appear in all copies.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
 # WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
 # MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
@@ -40,7 +40,7 @@ version_check() {
     [ "$1" = "$(echo "$1\n$2" | sort -V | head -n1)" ]
 }
 
-usage () {
+usage() {
     echo "Usage: [VARIABLE...] $(basename $0) [-d] [-r]"
     echo ""
     echo "  -d, --download   Force re-download of source even if already downloaded."
@@ -56,25 +56,58 @@ usage () {
     exit 1
 }
 
-python_module_test () {
+python_module_test() {
     python3 -c "import $1"
 }
 
-check_env () {
-    command -v python3 >/dev/null 2>&1 || { echo >&2 "${RED}You must install 'python3' on your host machine.${NC}"; exit 1; }
-    python_module_test six >/dev/null 2>&1 || { echo >&2 "${RED}'six' not found in your Python 3 installation.${NC}"; exit 1; }
-    python_module_test pyparsing >/dev/null 2>&1 || { echo >&2 "${RED}'pyparsing' not found in your Python 3 installation.${NC}"; exit 1; }
-    command -v meson >/dev/null 2>&1 || { echo >&2 "${RED}You must install 'meson' on your host machine.${NC}"; exit 1; }
-    command -v msgfmt >/dev/null 2>&1 || { echo >&2 "${RED}You must install 'gettext' on your host machine.\n\t'msgfmt' needs to be in your \$PATH as well.${NC}"; exit 1; }
-    command -v glib-mkenums >/dev/null 2>&1 || { echo >&2 "${RED}You must install 'glib-utils' on your host machine.\n\t'glib-mkenums' needs to be in your \$PATH as well.${NC}"; exit 1; }
-    command -v gpg-error-config >/dev/null 2>&1 || { echo >&2 "${RED}You must install 'libgpg-error' on your host machine.\n\t'gpg-error-config' needs to be in your \$PATH as well.${NC}"; exit 1; }
-    command -v xcrun >/dev/null 2>&1 || { echo >&2 "${RED}'xcrun' is not found. Make sure you are running on OSX."; exit 1; }
-    command -v otool >/dev/null 2>&1 || { echo >&2 "${RED}'otool' is not found. Make sure you are running on OSX."; exit 1; }
-    command -v install_name_tool >/dev/null 2>&1 || { echo >&2 "${RED}'install_name_tool' is not found. Make sure you are running on OSX."; exit 1; }
-    version_check "2.4" "$(bison -V | head -1 | awk '{ print $NF }')" || { echo >&2 "${RED}'bison' >= 2.4 is required. Did you install from Homebrew and updated your \$PATH variable?"; exit 1; }
+check_env() {
+    command -v python3 >/dev/null 2>&1 || {
+        echo >&2 "${RED}You must install 'python3' on your host machine.${NC}"
+        exit 1
+    }
+    python_module_test six >/dev/null 2>&1 || {
+        echo >&2 "${RED}'six' not found in your Python 3 installation.${NC}"
+        exit 1
+    }
+    python_module_test pyparsing >/dev/null 2>&1 || {
+        echo >&2 "${RED}'pyparsing' not found in your Python 3 installation.${NC}"
+        exit 1
+    }
+    command -v meson >/dev/null 2>&1 || {
+        echo >&2 "${RED}You must install 'meson' on your host machine.${NC}"
+        exit 1
+    }
+    command -v msgfmt >/dev/null 2>&1 || {
+        echo >&2 "${RED}You must install 'gettext' on your host machine.\n\t'msgfmt' needs to be in your \$PATH as well.${NC}"
+        exit 1
+    }
+    command -v glib-mkenums >/dev/null 2>&1 || {
+        echo >&2 "${RED}You must install 'glib-utils' on your host machine.\n\t'glib-mkenums' needs to be in your \$PATH as well.${NC}"
+        exit 1
+    }
+    command -v gpg-error-config >/dev/null 2>&1 || {
+        echo >&2 "${RED}You must install 'libgpg-error' on your host machine.\n\t'gpg-error-config' needs to be in your \$PATH as well.${NC}"
+        exit 1
+    }
+    command -v xcrun >/dev/null 2>&1 || {
+        echo >&2 "${RED}'xcrun' is not found. Make sure you are running on OSX."
+        exit 1
+    }
+    command -v otool >/dev/null 2>&1 || {
+        echo >&2 "${RED}'otool' is not found. Make sure you are running on OSX."
+        exit 1
+    }
+    command -v install_name_tool >/dev/null 2>&1 || {
+        echo >&2 "${RED}'install_name_tool' is not found. Make sure you are running on OSX."
+        exit 1
+    }
+    version_check "2.4" "$(bison -V | head -1 | awk '{ print $NF }')" || {
+        echo >&2 "${RED}'bison' >= 2.4 is required. Did you install from Homebrew and updated your \$PATH variable?"
+        exit 1
+    }
 }
 
-download () {
+download() {
     URL=$1
     FILE="$(basename $URL)"
     NAME="${FILE%.tar.*}"
@@ -97,7 +130,7 @@ download () {
     tar -xf "$TARGET" -C "$BUILD_DIR"
     if [ -f "$PATCH" ]; then
         echo "${GREEN}Patching ${NAME}...${NC}"
-        patch -d "$DIR" -p1 < "$PATCH"
+        patch -d "$DIR" -p1 <"$PATCH"
     fi
     if [ -d "$DATA" ]; then
         echo "${GREEN}Patching data ${NAME}...${NC}"
@@ -105,7 +138,7 @@ download () {
     fi
 }
 
-download () {
+download() {
     URL=$1
     FILE="$(basename $URL)"
     NAME="${FILE%.tar.*}"
@@ -128,7 +161,7 @@ download () {
     tar -xf "$TARGET" -C "$BUILD_DIR"
     if [ -f "$PATCH" ]; then
         echo "${GREEN}Patching ${NAME}...${NC}"
-        patch -d "$DIR" -p1 < "$PATCH"
+        patch -d "$DIR" -p1 <"$PATCH"
     fi
     if [ -d "$DATA" ]; then
         echo "${GREEN}Patching data ${NAME}...${NC}"
@@ -136,7 +169,7 @@ download () {
     fi
 }
 
-clone () {
+clone() {
     REPO="$1"
     COMMIT="$2"
     NAME="$(basename $REPO)"
@@ -154,10 +187,10 @@ clone () {
     git -C "$DIR" checkout "$COMMIT"
 }
 
-download_all () {
+download_all() {
     [ -d "$BUILD_DIR" ] || mkdir -p "$BUILD_DIR"
-	download $PKG_CONFIG_SRC
-	download $GLIB_SRC
+    download $PKG_CONFIG_SRC
+    download $GLIB_SRC
     download $ICONV_SRC
     download $PIXMAN_SRC
 }
@@ -180,7 +213,7 @@ copy_private_headers() {
     cp -L -r "$IOKIT_HEADERS_PATH" "$OUTPUT_INCLUDES/IOKit"
     rm "$OUTPUT_INCLUDES/IOKit/storage/IOMedia.h"
     # patch headers
-	echo $OUTPUT_INCLUDES
+    echo $OUTPUT_INCLUDES
     LC_ALL=C sed -i -e 's/#if KERNEL_USER32/#if 0/g' $(find "$OUTPUT_INCLUDES/IOKit" -type f)
     LC_ALL=C sed -i -e 's/#if !KERNEL_USER32/#if 1/g' $(find "$OUTPUT_INCLUDES/IOKit" -type f)
     LC_ALL=C sed -i -e 's/#if KERNEL/#if 0/g' $(find "$OUTPUT_INCLUDES/IOKit" -type f)
@@ -196,52 +229,52 @@ meson_quote() {
 
 generate_meson_cross() {
     cross="$1"
-    echo "# Automatically generated - do not modify" > $cross
-    echo "[properties]" >> $cross
-    echo "needs_exe_wrapper = true" >> $cross
-    echo "[built-in options]" >> $cross
-    echo "c_args = [${CFLAGS:+$(meson_quote $CFLAGS)}]" >> $cross
-    echo "cpp_args = [${CXXFLAGS:+$(meson_quote $CXXFLAGS)}]" >> $cross
-    echo "c_link_args = [${LDFLAGS:+$(meson_quote $LDFLAGS)}]" >> $cross
-    echo "cpp_link_args = [${LDFLAGS:+$(meson_quote $LDFLAGS)}]" >> $cross
-    echo "[binaries]" >> $cross
-    echo "c = [$(meson_quote $CC)]" >> $cross
-    echo "cpp = [$(meson_quote $CXX)]" >> $cross
-    echo "objc = [$(meson_quote $OBJCC)]" >> $cross
-    echo "ar = [$(meson_quote $AR)]" >> $cross
-    echo "nm = [$(meson_quote $NM)]" >> $cross
-    echo "pkgconfig = ['$PREFIX/host/bin/pkg-config']" >> $cross
-    echo "ranlib = [$(meson_quote $RANLIB)]" >> $cross
-    echo "strip = [$(meson_quote $STRIP), '-x']" >> $cross
-    echo "python = ['$(which python3)']" >> $cross
-    echo "[host_machine]" >> $cross
+    echo "# Automatically generated - do not modify" >$cross
+    echo "[properties]" >>$cross
+    echo "needs_exe_wrapper = true" >>$cross
+    echo "[built-in options]" >>$cross
+    echo "c_args = [${CFLAGS:+$(meson_quote $CFLAGS)}]" >>$cross
+    echo "cpp_args = [${CXXFLAGS:+$(meson_quote $CXXFLAGS)}]" >>$cross
+    echo "c_link_args = [${LDFLAGS:+$(meson_quote $LDFLAGS)}]" >>$cross
+    echo "cpp_link_args = [${LDFLAGS:+$(meson_quote $LDFLAGS)}]" >>$cross
+    echo "[binaries]" >>$cross
+    echo "c = [$(meson_quote $CC)]" >>$cross
+    echo "cpp = [$(meson_quote $CXX)]" >>$cross
+    echo "objc = [$(meson_quote $OBJCC)]" >>$cross
+    echo "ar = [$(meson_quote $AR)]" >>$cross
+    echo "nm = [$(meson_quote $NM)]" >>$cross
+    echo "pkgconfig = ['$PREFIX/host/bin/pkg-config']" >>$cross
+    echo "ranlib = [$(meson_quote $RANLIB)]" >>$cross
+    echo "strip = [$(meson_quote $STRIP), '-x']" >>$cross
+    echo "python = ['$(which python3)']" >>$cross
+    echo "[host_machine]" >>$cross
     case $PLATFORM in
-    ios* )
-        echo "system = 'ios'" >> $cross
-        ;;
-    macos )
-        echo "system = 'darwin'" >> $cross
-        ;;
+        ios*)
+            echo "system = 'ios'" >>$cross
+            ;;
+        macos)
+            echo "system = 'darwin'" >>$cross
+            ;;
     esac
     case "$ARCH" in
-    armv7 | armv7s )
-        echo "cpu_family = 'arm'" >> $cross
-        ;;
-    arm64 )
-        echo "cpu_family = 'aarch64'" >> $cross
-        ;;
-    i386 )
-        echo "cpu_family = 'x86'" >> $cross
-        ;;
-    x86_64 )
-        echo "cpu_family = 'x86_64'" >> $cross
-        ;;
-    *)
-        echo "cpu_family = '$ARCH'" >> $cross
-        ;;
+        armv7 | armv7s)
+            echo "cpu_family = 'arm'" >>$cross
+            ;;
+        arm64)
+            echo "cpu_family = 'aarch64'" >>$cross
+            ;;
+        i386)
+            echo "cpu_family = 'x86'" >>$cross
+            ;;
+        x86_64)
+            echo "cpu_family = 'x86_64'" >>$cross
+            ;;
+        *)
+            echo "cpu_family = '$ARCH'" >>$cross
+            ;;
     esac
-    echo "cpu = '$ARCH'" >> $cross
-    echo "endian = 'little'" >> $cross
+    echo "cpu = '$ARCH'" >>$cross
+    echo "endian = 'little'" >>$cross
 }
 
 # Prevent contamination from host pkg-config files by building our own
@@ -292,51 +325,51 @@ build_openssl() {
     TOOLCHAIN_PATH="$(dirname $(xcrun --sdk $SDK -find clang))"
     PATH="$PATH:$TOOLCHAIN_PATH"
     CROSS_TOP="$(xcrun --sdk $SDK --show-sdk-platform-path)/Developer" # for openssl
-    CROSS_SDK="$SDKNAME$SDKVERSION.sdk" # for openssl
+    CROSS_SDK="$SDKNAME$SDKVERSION.sdk"                                # for openssl
     export CROSS_TOP
     export CROSS_SDK
     export PATH
     case $ARCH in
-    armv7 | armv7s )
-        OPENSSL_CROSS=iphoneos-cross
-        ;;
-    arm64 )
-        OPENSSL_CROSS=ios64-cross
-        ;;
-    i386 )
-        OPENSSL_CROSS=darwin-i386-cc
-        ;;
-    x86_64 )
-        OPENSSL_CROSS=darwin64-x86_64-cc
-        ;;
-    esac
-    case $PLATFORM in
-    ios | ios-tci )
-        case $ARCH in
-        armv7 | armv7s )
+        armv7 | armv7s)
             OPENSSL_CROSS=iphoneos-cross
             ;;
-        arm64 )
+        arm64)
             OPENSSL_CROSS=ios64-cross
             ;;
-        i386 | x86_64 )
-            OPENSSL_CROSS=iossimulator64-cross
-            ;;
-        esac
-        ;;
-    macos )
-        case $ARCH in
-        arm64 )
-            OPENSSL_CROSS=darwin64-arm64-cc
-            ;;
-        i386 )
+        i386)
             OPENSSL_CROSS=darwin-i386-cc
             ;;
-        x86_64 )
+        x86_64)
             OPENSSL_CROSS=darwin64-x86_64-cc
             ;;
-        esac
-        ;;
+    esac
+    case $PLATFORM in
+        ios | ios-tci)
+            case $ARCH in
+                armv7 | armv7s)
+                    OPENSSL_CROSS=iphoneos-cross
+                    ;;
+                arm64)
+                    OPENSSL_CROSS=ios64-cross
+                    ;;
+                i386 | x86_64)
+                    OPENSSL_CROSS=iossimulator64-cross
+                    ;;
+            esac
+            ;;
+        macos)
+            case $ARCH in
+                arm64)
+                    OPENSSL_CROSS=darwin64-arm64-cc
+                    ;;
+                i386)
+                    OPENSSL_CROSS=darwin-i386-cc
+                    ;;
+                x86_64)
+                    OPENSSL_CROSS=darwin64-x86_64-cc
+                    ;;
+            esac
+            ;;
     esac
     if [ -z "$OPENSSL_CROSS" ]; then
         echo "${RED}Unsupported configuration for OpenSSL $PLATFORM, $ARCH${NC}"
@@ -355,7 +388,7 @@ build_openssl() {
     cd "$pwd"
 }
 
-build () {
+build() {
     URL=$1
     shift 1
     FILE="$(basename $URL)"
@@ -375,9 +408,8 @@ build () {
     cd "$pwd"
 }
 
-
-build_qemu_tcti () {
-	NAME="QEMU_TCTI"
+build_qemu_tcti() {
+    NAME="QEMU_TCTI"
     QEMU_DIR="$BASEDIR/qemu-tcti/qemu_tcti"
 
     QEMU_CFLAGS="$CFLAGS"
@@ -391,7 +423,7 @@ build_qemu_tcti () {
     LDFLAGS=
 
     pwd="$(pwd)"
-	mkdir -p "$QEMU_DIR"
+    mkdir -p "$QEMU_DIR"
     cd "$QEMU_DIR"
     echo "${GREEN}Configuring QEMU...${NC}"
     ../configure --prefix="$PREFIX" --host="$CHOST" --cross-prefix="" --with-coroutine=libucontext $@
@@ -406,8 +438,8 @@ build_qemu_tcti () {
     LDFLAGS="$QEMU_LDFLAGS"
 }
 
-build_qemu_jit () {
-	NAME="QEMU_JIT"
+build_qemu_jit() {
+    NAME="QEMU_JIT"
     QEMU_DIR="$BASEDIR/qemu-tcti/qemu_jit"
 
     QEMU_CFLAGS="$CFLAGS"
@@ -421,32 +453,31 @@ build_qemu_jit () {
     LDFLAGS=
 
     pwd="$(pwd)"
-	mkdir -p "$QEMU_DIR"
+    mkdir -p "$QEMU_DIR"
     cd "$QEMU_DIR"
     echo "${GREEN}Configuring QEMU-JIT...${NC}"
     ../configure --prefix="$PREFIX" --host="$CHOST" --cross-prefix="" --with-coroutine=libucontext $@
     echo "${GREEN}Building QEMU-JIT...${NC}"
     ninja
-	echo "${GREEN}Copying single library...${NC}"
-	echo cp "libqemu-x86_64-softmmu.dylib" "$PREFIX/lib/libqemu-x86_64-softmmu_jit.dylib"
-	cp "libqemu-x86_64-softmmu.dylib" "$PREFIX/lib/libqemu-x86_64-softmmu_jit.dylib"
+    echo "${GREEN}Copying single library...${NC}"
+    echo cp "libqemu-x86_64-softmmu.dylib" "$PREFIX/lib/libqemu-x86_64-softmmu_jit.dylib"
+    cp "libqemu-x86_64-softmmu.dylib" "$PREFIX/lib/libqemu-x86_64-softmmu_jit.dylib"
 
-	cd "$pwd"
+    cd "$pwd"
     CFLAGS="$QEMU_CFLAGS"
     CXXFLAGS="$QEMU_CXXFLAGS"
     LDFLAGS="$QEMU_LDFLAGS"
 }
 
-
-meson_build () {
+meson_build() {
     SRCDIR="$1"
     shift 1
     FILE="$(basename $SRCDIR)"
     NAME="${FILE%.tar.*}"
     case $SRCDIR in
-    http* | ftp* )
-        SRCDIR="$BUILD_DIR/$NAME"
-        ;;
+        http* | ftp*)
+            SRCDIR="$BUILD_DIR/$NAME"
+            ;;
     esac
     MESON_CROSS="$(realpath "$BUILD_DIR")/meson.cross"
     if [ ! -f "$MESON_CROSS" ]; then
@@ -467,7 +498,7 @@ meson_build () {
     cd "$pwd"
 }
 
-build_angle () {
+build_angle() {
     OLD_PATH=$PATH
     export PATH="$(realpath "$BUILD_DIR/depot_tools.git"):$OLD_PATH"
     pwd="$(pwd)"
@@ -475,32 +506,32 @@ build_angle () {
     DEPOT_TOOLS_UPDATE=0 python3 scripts/bootstrap.py
     DEPOT_TOOLS_UPDATE=0 gclient sync
     case $PLATFORM in
-    ios* )
-        TARGET_OS="ios"
-        IOS_BUILD_ARGS="ios_enable_code_signing=false ios_deployment_target=\"$IOS_SDKMINVER\""
-        if [ "$PLATFORM" == "ios_simulator" ]; then
-            IOS_BUILD_ARGS="$IOS_BUILD_ARGS target_environment=\"simulator\""
-        else
-            IOS_BUILD_ARGS="$IOS_BUILD_ARGS target_environment=\"device\""
-        fi
-        ;;
-    macos )
-        TARGET_OS="mac"
-        ;;
+        ios*)
+            TARGET_OS="ios"
+            IOS_BUILD_ARGS="ios_enable_code_signing=false ios_deployment_target=\"$IOS_SDKMINVER\""
+            if [ "$PLATFORM" == "ios_simulator" ]; then
+                IOS_BUILD_ARGS="$IOS_BUILD_ARGS target_environment=\"simulator\""
+            else
+                IOS_BUILD_ARGS="$IOS_BUILD_ARGS target_environment=\"device\""
+            fi
+            ;;
+        macos)
+            TARGET_OS="mac"
+            ;;
     esac
     case $ARCH in
-    armv7 | armv7s )
-        TARGET_CPU="arm"
-        ;;
-    arm64 )
-        TARGET_CPU="arm64"
-        ;;
-    i386 )
-        TARGET_CPU="x86"
-        ;;
-    x86_64 )
-        TARGET_CPU="x64"
-        ;;
+        armv7 | armv7s)
+            TARGET_CPU="arm"
+            ;;
+        arm64)
+            TARGET_CPU="arm64"
+            ;;
+        i386)
+            TARGET_CPU="x86"
+            ;;
+        x86_64)
+            TARGET_CPU="x64"
+            ;;
     esac
     # FIXME: remove this hack when SwiftShader is fixed
     sed -i.old 's/"-Wloop-analysis"/"-Wloop-analysis", "-Wno-deprecated-declarations"/g' "build/config/compiler/BUILD.gn"
@@ -523,13 +554,13 @@ build_angle () {
     export PATH=$OLD_PATH
 }
 
-build_qemu_dependencies () {
+build_qemu_dependencies() {
     build $ICONV_SRC
     meson_build $GLIB_SRC -Dtests=false
     build $PIXMAN_SRC
 }
 
-fixup () {
+fixup() {
     FILE=$1
     BASE=$(basename "$FILE")
     BASEFILENAME=${BASE%.*}
@@ -564,8 +595,7 @@ fixup () {
     fi
     newname="@rpath/$FRAMEWORKNAME/$LIBNAME"
     install_name_tool -id "$newname" "$NEWFILE"
-    for g in $LIST
-    do
+    for g in $LIST; do
         base=$(basename "$g")
         basefilename=${base%.*}
         libname=${basefilename#lib*}
@@ -582,17 +612,15 @@ fixup () {
     IFS=$OLDIFS
 }
 
-fixup_all () {
+fixup_all() {
     OLDIFS=$IFS
     IFS=$'\n'
     FILES=$(find "$SYSROOT_DIR/lib" -type f -maxdepth 1 -name "*.dylib")
-    for f in $FILES
-    do
+    for f in $FILES; do
         fixup $f || true
     done
     IFS=$OLDIFS
 }
-
 
 # parse args
 ARCH=
@@ -602,15 +630,15 @@ REDOWNLOAD=
 PLATFORM_FAMILY_NAME=
 while [ "x$1" != "x" ]; do
     case $1 in
-    -d | --download )
-        REDOWNLOAD=y
-        ;;
-    -r | --rebuild )
-        REBUILD=y
-        ;;
-    * )
-        usage
-        ;;
+        -d | --download)
+            REDOWNLOAD=y
+            ;;
+        -r | --rebuild)
+            REBUILD=y
+            ;;
+        *)
+            usage
+            ;;
     esac
     shift
 done
@@ -623,7 +651,7 @@ CHOST=$CPU-apple-darwin
 export CHOST
 
 if [ -z "$SDKMINVER" ]; then
-	SDKMINVER="$IOS_SDKMINVER"
+    SDKMINVER="$IOS_SDKMINVER"
 fi
 SDK=iphoneos
 CFLAGS_MINVER="-miphoneos-version-min=$SDKMINVER"
@@ -634,7 +662,7 @@ PLATFORM_FAMILY_NAME="$PLATFORM_FAMILY_PREFIX"
 
 # QEMU build flags. Looong.
 QEMU_PLATFORM_BUILD_FLAGS="--disable-debug-info --enable-shared-lib --disable-hvf --disable-cocoa"
-QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-slirp-smbd --disable-curl --disable-lzo" 
+QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-slirp-smbd --disable-curl --disable-lzo"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-gnutls --disable-vnc --disable-gcrypt"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-nettle --disable-virglrenderer --disable-libusb"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-libssh --disable-zstd --enable-slirp=git"
@@ -670,7 +698,7 @@ if [ ! -z "$SDKVERSION" ]; then
     SDKROOT=$(xcrun --sdk $SDK --show-sdk-platform-path)"/Developer/SDKs/$SDKNAME$SDKVERSION.sdk"
 else
     SDKVERSION=$(xcrun --sdk $SDK --show-sdk-version) # current version
-    SDKROOT=$(xcrun --sdk $SDK --show-sdk-path) # current version
+    SDKROOT=$(xcrun --sdk $SDK --show-sdk-path)       # current version
 fi
 
 if [ -z "$SDKMINVER" ]; then

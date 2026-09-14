@@ -10,20 +10,19 @@ import UIKit
 import Foundation
 
 /// Picker for allowing the user to select a single directory.
-class DirectoryPicker : NSObject, UIDocumentPickerDelegate  {
+class DirectoryPicker: NSObject, UIDocumentPickerDelegate {
 
     /// The result of our selection; the URLs picked.
     /// Protected by selectionCondition.lock().
-    private var selectedURLs : [URL]?
+    private var selectedURLs: [URL]?
 
     /// CV that indicates when selection is complete.
-    private var selectionCondition : NSCondition
+    private var selectionCondition: NSCondition
 
     public override init() {
         selectionCondition = NSCondition()
         super.init()
     }
-
 
     /// Pops up a dialog that allows the user to select a directory.
     /// Returns [] on failure/cancel, or [<url>] on success.
@@ -37,7 +36,6 @@ class DirectoryPicker : NSObject, UIDocumentPickerDelegate  {
         return picker.getSelectedFiles() ?? []
     }
 
-
     /// The document types this picker offers; overridden by subclasses.
     class var documentTypes: [String] { ["public.folder"] }
 
@@ -46,7 +44,8 @@ class DirectoryPicker : NSObject, UIDocumentPickerDelegate  {
         DispatchQueue.main.async {
 
             // Set up a file picker to find a folder...
-            let documentPicker = UIDocumentPickerViewController(documentTypes: Self.documentTypes, in: .open)
+            let documentPicker = UIDocumentPickerViewController(
+                documentTypes: Self.documentTypes, in: .open)
             documentPicker.delegate = self
 
             // ... and pop up that picker, if there's anything to pop it up
@@ -88,7 +87,9 @@ class DirectoryPicker : NSObject, UIDocumentPickerDelegate  {
     }
 
     /// Callback that occurs when the user has picked a document.
-    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+    func documentPicker(
+        _ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]
+    ) {
         handleDocumentPickerResult(urls: urls)
     }
 
@@ -98,13 +99,12 @@ class DirectoryPicker : NSObject, UIDocumentPickerDelegate  {
     }
 }
 
-
 /// Picker for allowing the user to select a single pairing file.
 ///
 /// Pairing files are plists, but they arrive with assorted names and extensions
 /// depending on how they were generated, so this accepts any file rather than
 /// filtering them out of the user's view.
-class PairingFilePicker : DirectoryPicker {
+class PairingFilePicker: DirectoryPicker {
 
     override class var documentTypes: [String] { ["public.item"] }
 

@@ -12,25 +12,24 @@ import Socket
 
 /// Structure that describes a simple configuration message, as exchanged across
 /// our configuration channel.
-struct ConfigurationMessage : Codable {
+struct ConfigurationMessage: Codable {
 
     /// The command being executed.
-    var command : String
+    var command: String
 
     /// The key associated with the data, if any.
-    var key : String?
+    var key: String?
 
     /// The datum associated with the command, if any.
-    var value : String?
+    var value: String?
 }
-
 
 /// Small server that provides a configuration backend to the tctiSH client.
 class ConfigServer {
     typealias Client = Socket
 
     /// The port on which we listen for configuration messages.
-    private static let configurationPort : Int = 10050
+    private static let configurationPort: Int = 10050
 
     /// Maximum length we'll allow in a message payload.
     private static let maxMessageLength = 4096
@@ -43,20 +42,20 @@ class ConfigServer {
 
     /// Our interface to our QEMU kernel.
     /// Should only be accessed from our command loop.
-    private var qemu : QEMUInterface
+    private var qemu: QEMUInterface
 
     /// The thread that's running our command-loop.
-    private var thread : Thread?
+    private var thread: Thread?
 
     /// Flag that's used to indicate when we should stop.
-    private var stopping : ManagedAtomic<Bool>
-    private var stopped : ManagedAtomic<Bool>
+    private var stopping: ManagedAtomic<Bool>
+    private var stopped: ManagedAtomic<Bool>
 
     /// Brings up a server and starts it listening.
     init(qemuInterface: QEMUInterface, listenImmediately: Bool = false) {
         self.qemu = qemuInterface
         self.stopping = ManagedAtomic<Bool>(false)
-        self.stopped  = ManagedAtomic<Bool>(false)
+        self.stopped = ManagedAtomic<Bool>(false)
 
         if (listenImmediately) {
             listen()
@@ -124,7 +123,6 @@ class ConfigServer {
         self.listen()
     }
 
-
     /// Handles any communications with a connected client.
     private func handleClient(client: Socket) {
         var clientAlive = true
@@ -169,7 +167,6 @@ class ConfigServer {
             }
         }
     }
-
 
     /// Handles an incoming message from our client.
     private func handleMessage(rawMessage: Data, from: Client) {
@@ -232,12 +229,14 @@ class ConfigServer {
 
         switch JitPairingFile.importInteractively() {
         case .imported:
-            sendResponse(command: "import_pairing_file", key: "path",
-                         value: JitPairingFile.url.path, to: client)
+            sendResponse(
+                command: "import_pairing_file", key: "path",
+                value: JitPairingFile.url.path, to: client)
 
         case .cancelled:
-            sendResponse(command: "import_pairing_file", key: "status",
-                         value: "cancelled", to: client)
+            sendResponse(
+                command: "import_pairing_file", key: "status",
+                value: "cancelled", to: client)
 
         case .failed(let reason):
             // Previously reported as "cancelled", which told the user their own
@@ -247,7 +246,9 @@ class ConfigServer {
     }
 
     /// Fetches a "folder picker" result for our client.
-    private func handleChoosePath(message: ConfigurationMessage, from: Client, openSecurityContext: Bool = false) {
+    private func handleChoosePath(
+        message: ConfigurationMessage, from: Client, openSecurityContext: Bool = false
+    ) {
         let client = from
 
         // No arguments, for now.
@@ -304,13 +305,13 @@ class ConfigServer {
             let encodedBookmark = bookmarkData.base64EncodedString()
 
             // ... and return it to the caller.
-            sendResponse(command: "open_folder", key: "bookmark", value: encodedBookmark, to: client)
+            sendResponse(
+                command: "open_folder", key: "bookmark", value: encodedBookmark, to: client)
 
         } catch let err {
             sendErrorResponse("failed to create bookmark: \(err)", to: client)
         }
     }
-
 
     /// Command that sets up the QEMU side of a host-side mount.
     private func handlePrepareMountCommand(message: ConfigurationMessage, from: Client) {
@@ -332,7 +333,8 @@ class ConfigServer {
                 if let bookmarkData = bookmarkData {
 
                     // ... and use it to re-mount the image.
-                    let mount_result = qemu.mount(bookmarkData: bookmarkData, predefinedTag: message.key!)
+                    let mount_result = qemu.mount(
+                        bookmarkData: bookmarkData, predefinedTag: message.key!)
                     if let mount_result = mount_result {
                         tag = mount_result
                     } else {
@@ -350,7 +352,8 @@ class ConfigServer {
             }
 
             // ... and send the generated tag back to the host.
-            let response = ConfigurationMessage(command: "prepare_mount.response", key: "tag", value: tag)
+            let response = ConfigurationMessage(
+                command: "prepare_mount.response", key: "tag", value: tag)
             sendMessage(response, to: client)
         } else {
             sendErrorResponse("invalid argument to a mount command", to: client)
@@ -400,24 +403,27 @@ class ConfigServer {
         sendResponse(command: "getcwd", key: "unknown", value: "", to: client)
     }
 
-
     /// Indicates something was wrong with a received command.
     private func sendErrorResponse(_ message: String, to: Client) {
         sendMessage(ConfigurationMessage(command: "response", key: "error", value: message), to: to)
     }
 
     /// Sends a simple message across our communications channel.
-    private func sendAckResponse(command: String,to: Client) {
-        sendMessage(ConfigurationMessage(command: "\(command).response", key: "ack", value: "ok"), to: to)
+    private func sendAckResponse(command: String, to: Client) {
+        sendMessage(
+            ConfigurationMessage(command: "\(command).response", key: "ack", value: "ok"), to: to)
     }
 
     /// Sends a simple message across our communications channel.
-    private func sendResponse(command: String, key: String? = nil, value: String? = nil, to: Client) {
-        sendMessage(ConfigurationMessage(command: "\(command).response", key: key, value: value), to: to)
+    private func sendResponse(command: String, key: String? = nil, value: String? = nil, to: Client)
+    {
+        sendMessage(
+            ConfigurationMessage(command: "\(command).response", key: key, value: value), to: to)
     }
 
     /// Sends a simple message across our communications channel.
-    private func sendMessage(command: String, key: String? = nil, value: String? = nil, to: Client) {
+    private func sendMessage(command: String, key: String? = nil, value: String? = nil, to: Client)
+    {
         sendMessage(ConfigurationMessage(command: command, key: key, value: value), to: to)
     }
 

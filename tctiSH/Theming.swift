@@ -38,13 +38,13 @@ private let xrdbSolarizedDark = """
     """
 
 class DefaultThemes {
-   
+
     //
     // Internal, private themeing.
     //
-    
-    
+
     /// Default, Solarized Dark theme.
-    public static let solzariedDark = ThemeColor.fromXrdb (title: "Solarized Dark", xrdb: xrdbSolarizedDark)!
-    
+    public static let solzariedDark = ThemeColor.fromXrdb(
+        title: "Solarized Dark", xrdb: xrdbSolarizedDark)!
+
 }

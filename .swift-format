@@ -1,0 +1,41 @@
+{
+  "version": 1,
+
+  // Xcode's own editor indents Swift with four spaces, and the existing code
+  // follows it. swift-format defaults to two, which would reindent every file
+  // for no reason other than disagreeing with the IDE.
+  "indentation": { "spaces": 4 },
+  "tabWidth": 4,
+
+  // 100 columns everywhere; see rustfmt.toml, .clang-format and dprint.json.
+  "lineLength": 100,
+
+  "maximumBlankLines": 1,
+  "respectsExistingLineBreaks": true,
+  "spacesBeforeEndOfLineComments": 2,
+
+  // Leave trailing commas as written. The alternative rewrites argument lists
+  // that are already fine.
+  "multilineTrailingCommaBehavior": "keptAsWritten",
+
+  "rules": {
+    // Off: this codebase deliberately writes `return` in single-expression
+    // closures and computed properties for readability.
+    "OmitExplicitReturns": false,
+
+    // Off: force-unwraps and force-trys are used knowingly at a handful of
+    // startup paths where failure is unrecoverable anyway.
+    "NeverForceUnwrap": false,
+    "NeverUseForceTry": false,
+
+    // Off: `@objc` bridging and CoreFoundation interop produce implicitly
+    // unwrapped optionals we do not control.
+    "NeverUseImplicitlyUnwrappedOptionals": false,
+
+    // Off: these are lint opinions about prose, not formatting, and they fire
+    // on documentation that reads perfectly well.
+    "BeginDocumentationCommentWithOneLineSummary": false,
+    "AllPublicDeclarationsHaveDocumentation": false,
+    "ValidateDocumentationComments": false
+  }
+}

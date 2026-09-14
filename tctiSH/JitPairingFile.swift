@@ -17,9 +17,11 @@ enum JitPairingFile {
 
     /// `Documents/StikJIT/pairingFile.plist`.
     static var url: URL {
-        let documents = FileManager.default.urls(for: .documentDirectory,
-                                                 in: .userDomainMask)[0]
-        return documents
+        let documents = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask)[0]
+        return
+            documents
             .appendingPathComponent("StikJIT", isDirectory: true)
             .appendingPathComponent("pairingFile.plist")
     }
@@ -83,8 +85,9 @@ enum JitPairingFile {
         let manager = FileManager.default
         let destination = url
 
-        try manager.createDirectory(at: destination.deletingLastPathComponent(),
-                                    withIntermediateDirectories: true)
+        try manager.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true)
 
         let data = try Data(contentsOf: source)
         try data.write(to: destination, options: .atomic)

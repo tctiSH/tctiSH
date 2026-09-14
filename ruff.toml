@@ -1,0 +1,7 @@
+# Only one Python file today: utils/jit-bless/jit_bless.py, which is loaded by
+# Xcode's LLDB rather than run standalone.
+line-length = 100
+indent-width = 4
+
+[format]
+quote-style = "double"

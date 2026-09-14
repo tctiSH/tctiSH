@@ -30,11 +30,10 @@ NS_ASSUME_NONNULL_BEGIN
 /// the IPC and no separate XPC connection is needed.
 ///
 /// `completion` is called exactly once, on an unspecified queue.
-+ (void)launchWithPayload:(NSDictionary * _Nullable)payload
++ (void)launchWithPayload:(NSDictionary *_Nullable)payload
                   timeout:(NSTimeInterval)timeout
-               completion:(void (^)(pid_t helperPid,
-                                    NSArray * _Nullable replyItems,
-                                    NSError * _Nullable error))completion;
+               completion:(void (^)(pid_t helperPid, NSArray *_Nullable replyItems,
+                                    NSError *_Nullable error))completion;
 
 @end
 

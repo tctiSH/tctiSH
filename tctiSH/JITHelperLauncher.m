@@ -20,23 +20,23 @@ static os_log_t JITHelperLog(void) {
 }
 
 /// Error domain for launch failures that aren't NSExtension's own.
-static NSString * const JITHelperLauncherErrorDomain = @"io.ara.tctiSH.JITHelperLauncher";
+static NSString *const JITHelperLauncherErrorDomain = @"io.ara.tctiSH.JITHelperLauncher";
 
 typedef NS_ENUM(NSInteger, JITHelperLauncherError) {
     JITHelperLauncherErrorUnavailable = 1,  ///< NSExtension isn't there any more.
     JITHelperLauncherErrorNoExtension = 2,  ///< The helper couldn't be resolved.
-    JITHelperLauncherErrorTimedOut    = 3,  ///< It never came back.
+    JITHelperLauncherErrorTimedOut = 3,     ///< It never came back.
 };
 
 /// The private `NSExtension` API, split in two because the class methods are
 /// reached by casting the Class object.
 @protocol JITNSExtensionClass <NSObject>
 - (id _Nullable)extensionWithIdentifier:(NSString *)identifier
-                                  error:(NSError * _Nullable * _Nullable)error;
+                                  error:(NSError *_Nullable *_Nullable)error;
 @end
 
 @protocol JITNSExtensionInstance <NSObject>
-- (void)beginExtensionRequestWithInputItems:(NSArray * _Nullable)items
+- (void)beginExtensionRequestWithInputItems:(NSArray *_Nullable)items
                                  completion:(void (^)(NSUUID *requestIdentifier))completion;
 - (int)pidForRequestIdentifier:(NSUUID *)requestIdentifier;
 - (void)setRequestCompletionBlock:(void (^)(NSUUID *requestIdentifier,
@@ -52,9 +52,9 @@ typedef NS_ENUM(NSInteger, JITHelperLauncherError) {
     return [hostIdentifier stringByAppendingString:@".JITHelper"];
 }
 
-+ (void)launchWithPayload:(NSDictionary * _Nullable)payload
++ (void)launchWithPayload:(NSDictionary *_Nullable)payload
                   timeout:(NSTimeInterval)timeout
-               completion:(void (^)(pid_t, NSArray * _Nullable, NSError * _Nullable))completion {
+               completion:(void (^)(pid_t, NSArray *_Nullable, NSError *_Nullable))completion {
 
     // Only ever call the caller back once, whichever of the completion, the
     // interruption or the timeout gets there first.
@@ -82,10 +82,13 @@ typedef NS_ENUM(NSInteger, JITHelperLauncherError) {
 
     Class extensionClass = NSClassFromString(@"NSExtension");
     if (extensionClass == nil) {
-        finish(0, nil, [NSError errorWithDomain:JITHelperLauncherErrorDomain
-                                           code:JITHelperLauncherErrorUnavailable
-                                       userInfo:@{NSLocalizedDescriptionKey:
-                                                      @"NSExtension is unavailable on this OS"}]);
+        finish(0, nil,
+               [NSError
+                   errorWithDomain:JITHelperLauncherErrorDomain
+                              code:JITHelperLauncherErrorUnavailable
+                          userInfo:@{
+                              NSLocalizedDescriptionKey: @"NSExtension is unavailable on this OS"
+                          }]);
         return;
     }
 
@@ -93,13 +96,16 @@ typedef NS_ENUM(NSInteger, JITHelperLauncherError) {
     NSError *resolveError = nil;
     id<JITNSExtensionInstance> extension =
         [(id<JITNSExtensionClass>)extensionClass extensionWithIdentifier:identifier
-                                                                  error:&resolveError];
+                                                                   error:&resolveError];
 
     if (extension == nil) {
-        NSError *error = resolveError ?: [NSError errorWithDomain:JITHelperLauncherErrorDomain
-                                                             code:JITHelperLauncherErrorNoExtension
-                                                         userInfo:@{NSLocalizedDescriptionKey:
-                                                                        @"could not resolve the helper extension"}];
+        NSError *error = resolveError
+                             ?: [NSError errorWithDomain:JITHelperLauncherErrorDomain
+                                                    code:JITHelperLauncherErrorNoExtension
+                                                userInfo:@{
+                                                    NSLocalizedDescriptionKey:
+                                                        @"could not resolve the helper extension"
+                                                }];
         finish(0, nil, error);
         return;
     }
@@ -113,10 +119,11 @@ typedef NS_ENUM(NSInteger, JITHelperLauncherError) {
     }];
 
     [extension setRequestInterruptionBlock:^(NSUUID *requestIdentifier) {
-        finish(helperPid, nil, [NSError errorWithDomain:JITHelperLauncherErrorDomain
-                                                  code:JITHelperLauncherErrorNoExtension
-                                              userInfo:@{NSLocalizedDescriptionKey:
-                                                             @"the helper was interrupted"}]);
+        finish(helperPid, nil,
+               [NSError
+                   errorWithDomain:JITHelperLauncherErrorDomain
+                              code:JITHelperLauncherErrorNoExtension
+                          userInfo:@{ NSLocalizedDescriptionKey: @"the helper was interrupted" }]);
     }];
 
     NSArray *inputItems = @[];
@@ -126,20 +133,26 @@ typedef NS_ENUM(NSInteger, JITHelperLauncherError) {
         inputItems = @[item];
     }
 
-    [extension beginExtensionRequestWithInputItems:inputItems
-                                        completion:^(NSUUID *requestIdentifier) {
-        helperPid = [extension pidForRequestIdentifier:requestIdentifier];
-        os_log(JITHelperLog(), "host: request %{public}@ running as pid %{public}d",
-               requestIdentifier.UUIDString, helperPid);
-    }];
+    [extension
+        beginExtensionRequestWithInputItems:inputItems
+                                 completion:^(NSUUID *requestIdentifier) {
+                                     helperPid =
+                                         [extension pidForRequestIdentifier:requestIdentifier];
+                                     os_log(JITHelperLog(),
+                                            "host: request %{public}@ running as pid %{public}d",
+                                            requestIdentifier.UUIDString, helperPid);
+                                 }];
 
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * NSEC_PER_SEC)),
-                   dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        finish(helperPid, nil, [NSError errorWithDomain:JITHelperLauncherErrorDomain
-                                                  code:JITHelperLauncherErrorTimedOut
-                                              userInfo:@{NSLocalizedDescriptionKey:
-                                                             @"the helper did not respond"}]);
-    });
+    dispatch_after(
+        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * NSEC_PER_SEC)),
+        dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            finish(
+                helperPid, nil,
+                [NSError
+                    errorWithDomain:JITHelperLauncherErrorDomain
+                               code:JITHelperLauncherErrorTimedOut
+                           userInfo:@{ NSLocalizedDescriptionKey: @"the helper did not respond" }]);
+        });
 }
 
 @end

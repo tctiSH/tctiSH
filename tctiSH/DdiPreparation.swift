@@ -28,7 +28,7 @@ enum DdiPreparation {
     /// has to follow; a stale URL shows up as a download that 404s.
     private static let catalogue = URL(
         string: "https://github.com/doronz88/DeveloperDiskImage/raw/refs/heads/main"
-              + "/PersonalizedImages/Xcode_iOS_DDI_Personalized")!
+            + "/PersonalizedImages/Xcode_iOS_DDI_Personalized")!
 
     private static func downloads(for paths: DDIPaths) -> [(name: String, destination: String)] {
         [
@@ -115,9 +115,10 @@ enum DdiPreparation {
 
         return [paths.manifestPath, paths.imagePath, paths.trustcachePath].allSatisfy { path in
             guard manager.isReadableFile(atPath: path),
-                  let attributes = try? manager.attributesOfItem(atPath: path),
-                  attributes[.type] as? FileAttributeType == .typeRegular,
-                  let size = attributes[.size] as? NSNumber else {
+                let attributes = try? manager.attributesOfItem(atPath: path),
+                attributes[.type] as? FileAttributeType == .typeRegular,
+                let size = attributes[.size] as? NSNumber
+            else {
                 return false
             }
             return size.int64Value > 0
@@ -144,13 +145,16 @@ enum DdiPreparation {
 
             Log.network.note("ddi: fetching \(name)")
 
-            try downloader.download(catalogue.appendingPathComponent(name),
-                                    to: URL(fileURLWithPath: file.destination)) { written, expected in
+            try downloader.download(
+                catalogue.appendingPathComponent(name),
+                to: URL(fileURLWithPath: file.destination)
+            ) { written, expected in
                 if !announced {
                     announced = true
-                    Log.network.note("ddi:   \(name) is "
-                                + (expected > 0 ? "\(expected) bytes" : "of unknown length")
-                                + (expected >= worthABar ? "" : "; spinning rather than drawing a bar"))
+                    Log.network.note(
+                        "ddi:   \(name) is "
+                            + (expected > 0 ? "\(expected) bytes" : "of unknown length")
+                            + (expected >= worthABar ? "" : "; spinning rather than drawing a bar"))
                 }
 
                 guard expected >= worthABar else { return }

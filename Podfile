@@ -1,5 +1,5 @@
 # One number, used both for the platform and for the pin at the bottom.
-DEPLOYMENT_TARGET = '18.0'
+DEPLOYMENT_TARGET = "18.0"
 
 platform :ios, DEPLOYMENT_TARGET
 
@@ -11,9 +11,9 @@ platform :ios, DEPLOYMENT_TARGET
 #
 # This has to run from the Podfile body rather than a `pre_install` hook: by the
 # time hooks run the analyser has already tried, and failed, to open the project.
-require 'xcodeproj'
+require "xcodeproj"
 
-project_path = 'tctiSH.xcodeproj/project.pbxproj'
+project_path = "tctiSH.xcodeproj/project.pbxproj"
 contents = File.read(project_path)
 if (found = contents[/^\tobjectVersion = (\d+);/, 1])
   known = Xcodeproj::Constants::COMPATIBILITY_VERSION_BY_OBJECT_VERSION.key?(found.to_i)
@@ -23,13 +23,12 @@ if (found = contents[/^\tobjectVersion = (\d+);/, 1])
   end
 end
 
-target 'tctiSH' do
+target "tctiSH" do
   use_frameworks!
 
   # Pods for tctiSH
-  pod 'SwiftSH', :git => 'https://github.com/Frugghi/SwiftSH.git', :branch => 'master'
-  pod 'BlueSocket'
-
+  pod "SwiftSH", :git => "https://github.com/Frugghi/SwiftSH.git", :branch => "master"
+  pod "BlueSocket"
 end
 
 # Both pods declare deployment targets far below ours -- SwiftSH 8.0, BlueSocket
@@ -39,7 +38,7 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
-      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = DEPLOYMENT_TARGET
+      config.build_settings["IPHONEOS_DEPLOYMENT_TARGET"] = DEPLOYMENT_TARGET
     end
   end
 end

@@ -18,10 +18,10 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 NC='\033[0m'
 
-# The devshell provides no Rust, so this wants a global cargo with the musl
-# target added -- `rustup target add x86_64-unknown-linux-musl`. See
-# tmp/plans/tctictl.md; the intention is to move it into the flake once Rust is
-# there for other reasons.
+# The devshell provides Rust with the musl target, and points cargo at rustc's
+# bundled lld for it -- Apple's `ld` cannot link the target. Run this through
+# `nix develop --command`, or as `make tctictl`, rather than expecting a global
+# cargo to have had `rustup target add` run against it.
 command -v cargo >/dev/null 2>&1 || {
     echo -e "${RED}'cargo' not found.${NC}" >&2
     exit 1

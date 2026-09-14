@@ -13,12 +13,11 @@ import SwiftTerm
 import SwiftSH
 import Combine
 
-
 /// Termainal view that behaves like an Xterm into our linux environment.
 public class TctiTermView: TerminalView, TerminalViewDelegate {
 
     /// Interval at which we check for an SSH connection.
-    private static var sshPollingInterval : TimeInterval = 1.5
+    private static var sshPollingInterval: TimeInterval = 1.5
 
     /// Whether an attempt is already in flight.
     ///
@@ -29,7 +28,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     /// an authentication failure that looks like a wrong password.
     ///
     /// Long a source of flakiness, and intended to be fixed in the future.
-    private var connecting : Bool = false
+    private var connecting: Bool = false
 
     /// How many attempts have failed since the last success.
     ///
@@ -37,10 +36,10 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     /// they're noted quietly. After that something is actually wrong, and
     /// libssh2's own tracing gets turned on rather than waiting for someone to
     /// think of rebuilding with it enabled.
-    private var failedAttempts : Int = 0
+    private var failedAttempts: Int = 0
 
     /// Failures to tolerate before assuming it isn't just a slow boot.
-    private static let quietFailures : Int = 3
+    private static let quietFailures: Int = 3
 
     var shell: SSHShell?
     var authenticationChallenge: AuthenticationChallenge?
@@ -58,38 +57,38 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     ///
     /// Announces the transition, so whoever is telling the user to wait can stop.
     /// Only the first one: reconnecting after an unlock isn't news.
-    var connected : Bool = false {
+    var connected: Bool = false {
         didSet {
             guard connected, !oldValue else { return }
             NotificationCenter.default.post(name: TctiTermView.didConnect, object: self)
         }
     }
 
-    var pipController : AVPictureInPictureController?
-
+    var pipController: AVPictureInPictureController?
 
     /// The current working directory, if one is known/available.
-    private var _cwd : String?
-    public var cwd : String? {
+    private var _cwd: String?
+    public var cwd: String? {
         get {
             return _cwd
         }
     }
 
     /// Set to true to enable SSH logging.
-    private static var sshLoggingEnabled : Bool = false
+    private static var sshLoggingEnabled: Bool = false
 
     /// Timer that is used to poll for connections if our connection drops.
     private var timer: Publishers.Autoconnect<Timer.TimerPublisher>? = nil
     private var subscription: AnyCancellable? = nil
 
-    public override init (frame: CGRect)
-    {
-        super.init (frame: frame, font: UIFont(name: "Menlo-Regular", size: 14))
+    public override init(frame: CGRect) {
+        super.init(frame: frame, font: UIFont(name: "Menlo-Regular", size: 14))
         self.terminalDelegate = self
 
         // Handle settings changes.
-        NotificationCenter.default.addObserver(self, selector: #selector(TctiTermView.applySettings), name: UserDefaults.didChangeNotification, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(TctiTermView.applySettings),
+            name: UserDefaults.didChangeNotification, object: nil)
         applySettings()
 
         // Create the SSH provider we'll use to connect to our instance.
@@ -104,7 +103,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
 
         // TODO: figure out if this should be automatic?
         start()
-        
+
     }
 
     /// Builds a fresh SSH session.
@@ -113,13 +112,15 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     /// can't be trusted to start again cleanly, so retries begin from scratch
     /// rather than reusing whatever state the last attempt left behind.
     private func makeShell() {
-        shell = try? SSHShell(sshLibrary: Libssh2.self,
-                              host: "localhost",
-                              port: 10022,
-                              environment: [],
-                              terminal: "xterm-256color")
+        shell = try? SSHShell(
+            sshLibrary: Libssh2.self,
+            host: "localhost",
+            port: 10022,
+            environment: [],
+            terminal: "xterm-256color")
 
-        shell?.log.enabled = TctiTermView.sshLoggingEnabled
+        shell?.log.enabled =
+            TctiTermView.sshLoggingEnabled
             || failedAttempts >= TctiTermView.quietFailures
     }
 
@@ -130,7 +131,8 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         timer?.upstream.connect().cancel()
 
         // Set up a timer to periodically poll our VM until it's ready for connection.
-        timer = Timer.publish(every: TctiTermView.sshPollingInterval, on: .main, in: .common).autoconnect()
+        timer = Timer.publish(every: TctiTermView.sshPollingInterval, on: .main, in: .common)
+            .autoconnect()
         subscription = timer?.sink(receiveValue: { _ in
             if self.connected {
                 self.timer?.upstream.connect().cancel()
@@ -168,63 +170,62 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     @objc
     func applySettings() {
         let std = UserDefaults.standard
-        
+
         // Font size.
-        var new_size = CGFloat(std.integer(forKey:"font_size"))
+        var new_size = CGFloat(std.integer(forKey: "font_size"))
         if new_size == 0 {
             new_size = self.font.pointSize
         }
         if new_size != self.font.pointSize {
             self.font = UIFont(name: self.font.fontName, size: new_size) ?? self.font
         }
-        
+
         // TODO: apply themes, here
-        
+
     }
-    
+
     func clear() {
-        
+
         /// Sequence used to clear our terminal.
-        let terminalClearSequence : ArraySlice<UInt8> = [27, 91, 72, 27, 91, 74]
+        let terminalClearSequence: ArraySlice<UInt8> = [27, 91, 72, 27, 91, 74]
         self.feed(byteArray: terminalClearSequence)
-        
+
     }
-    
+
     /// Sets up use of the user's theme.
     func setUpTheming() {
         // FIXME: have this be user-specifiable
         let theme = DefaultThemes.solzariedDark
         self.installColors(theme.ansi)
-        
+
         let t = getTerminal()
-        
+
         t.foregroundColor = theme.foreground
         t.backgroundColor = theme.background
-        
+
         self.nativeBackgroundColor = makeUIColor(theme.background)
         self.nativeForegroundColor = makeUIColor(theme.foreground)
         self.layer.backgroundColor = makeUIColor(theme.background).cgColor
-        self.layer.borderColor     = self.layer.backgroundColor
-        self.layer.shadowColor     = self.layer.backgroundColor
-        self.backgroundColor       = self.nativeBackgroundColor
-        
-        self.selectedTextBackgroundColor = makeUIColor (theme.selectionColor)
-        self.caretColor = makeUIColor (theme.cursor)
+        self.layer.borderColor = self.layer.backgroundColor
+        self.layer.shadowColor = self.layer.backgroundColor
+        self.backgroundColor = self.nativeBackgroundColor
+
+        self.selectedTextBackgroundColor = makeUIColor(theme.selectionColor)
+        self.caretColor = makeUIColor(theme.cursor)
     }
-    
-    
+
     // Helper that converts a SwiftTerm color into a UI color.
-    private func makeUIColor(_ color: SwiftTerm.Color) -> UIColor
-    {
-        UIColor (red: CGFloat (color.red) / 65535.0,
-                 green: CGFloat (color.green) / 65535.0,
-                 blue: CGFloat (color.blue) / 65535.0,
-                 alpha: 1.0)
+    private func makeUIColor(_ color: SwiftTerm.Color) -> UIColor {
+        UIColor(
+            red: CGFloat(color.red) / 65535.0,
+            green: CGFloat(color.green) / 65535.0,
+            blue: CGFloat(color.blue) / 65535.0,
+            alpha: 1.0)
     }
-    
+
     func sshEventCallback(data: Data?, error: Data?) {
         if let d = data {
-            let sliced = Array(d) [0...]
+            let sliced = Array(d)[0...]
 
             // We chunk the processing of data, as the SSH library might have
             // received a lot of data, and we do not want the terminal to
@@ -236,19 +237,17 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
 
             while next < last {
 
-                let end = min (next+blocksize, last)
-                let chunk = sliced [next..<end]
+                let end = min(next + blocksize, last)
+                let chunk = sliced[next..<end]
 
                 self.feed(byteArray: chunk)
                 next = end
             }
         }
 
-        
     }
 
-    func connect()
-    {
+    func connect() {
         // The guest usually isn't listening yet on the first few tries, which is
         // expected and not worth reporting. What isn't expected is starting a
         // second attempt over the top of the first.
@@ -260,7 +259,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         if let s = shell {
             connecting = true
             setUpTheming()
-            
+
             s.withCallback { [unowned self] (data: Data?, error: Data?) in
                 sshEventCallback(data: data, error: error)
             }
@@ -288,7 +287,8 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
                     self.makeShell()
                 } else {
                     if self.failedAttempts > 0 {
-                        Log.network.note("ssh: connected after \(self.failedAttempts) failed attempts")
+                        Log.network.note(
+                            "ssh: connected after \(self.failedAttempts) failed attempts")
                     }
                     self.failedAttempts = 0
 
@@ -298,7 +298,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
 
                     // Inform the SSH server of our new size, so it can resize its PTY.
                     let t = self.getTerminal()
-                    _ = s.setTerminalSize(width: UInt (t.cols), height: UInt (t.rows))
+                    _ = s.setTerminalSize(width: UInt(t.cols), height: UInt(t.rows))
 
                     // Finally, update the terminal to display the new connection.
                     t.updateFullScreen()
@@ -318,12 +318,10 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         // Nothing to do here, yet.
     }
 
-
     /// Callback that occurs when the guest VM requests a terminal title change.
     public func setTerminalTitle(source: TerminalView, title: String) {
         Log.ui.note("terminal title is now \(title)")
     }
-    
 
     /// Callback that occurs when the terminal's effective area has changed.
     public func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
@@ -332,12 +330,11 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         _ = shell?.setTerminalSize(width: UInt(newCols), height: UInt(newRows))
     }
 
-
     /// Function usd to send data across our SSH connection.
     public func send(source: TerminalView, data: ArraySlice<UInt8>) {
-        shell?.write(Data (data)) { err in
+        shell?.write(Data(data)) { err in
             if let e = err {
-                print ("Error sending \(e)")
+                print("Error sending \(e)")
             }
         }
     }
@@ -358,12 +355,11 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     }
 
     /// Callback that occurs when the user clicks on a URL or link in the tctiSH scrollback.
-    public func requestOpenLink (source: TerminalView, link: String, params: [String:String])
-    {
+    public func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
         if let fixedup = link.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
             if let url = NSURLComponents(string: fixedup) {
                 if let nested = url.url {
-                    UIApplication.shared.open (nested)
+                    UIApplication.shared.open(nested)
                 }
             }
         }

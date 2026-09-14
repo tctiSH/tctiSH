@@ -1,0 +1,54 @@
+# Formatting for the C and Objective-C sources under tctiSH/.
+#
+# LLVM as the base rather than Google, because Google's Objective-C style
+# indents by two and this code indents by four -- as does Xcode's editor.
+---
+BasedOnStyle: LLVM
+
+ColumnLimit: 100
+IndentWidth: 4
+ContinuationIndentWidth: 4
+TabWidth: 4
+UseTab: Never
+
+# The sources are about four to one in favour of `char *argv[]` over
+# `NSString * const foo`, so this is the side that moves the fewest of them.
+PointerAlignment: Right
+
+# Leave existing block comments alone. Reflowing them to the column limit turns
+# a long trailing `/* ... */` into a backslash-continued mess for no gain, and
+# the text is mostly inherited from UTM and XNU anyway.
+ReflowComments: false
+
+# Objective-C method calls read far better one keyword argument per line than
+# packed to the column limit.
+ObjCBinPackProtocolList: Never
+ObjCBlockIndentWidth: 4
+ObjCSpaceAfterProperty: true
+ObjCSpaceBeforeProtocolList: true
+
+# `@{ key : value }` is Google's Objective-C style; this code writes
+# `@{key: value}`, which is Apple's.
+SpacesInContainerLiterals: false
+
+AlignConsecutiveMacros: Consecutive
+
+# Deliberately off. It reads well over the `args->` block in qemu_launcher.c,
+# but clang-format has no notion of a "related run" -- it also pads out any two
+# adjacent statements that happen to both contain an `=`, which in the
+# Objective-C produced things like `NSLock *lock          = ...`.
+AlignConsecutiveAssignments: None
+
+# Two spaces before a trailing comment, matching .swift-format.
+SpacesBeforeTrailingComments: 2
+
+# Never split a string literal to make it fit. These are QEMU command-line
+# fragments and log messages; a break in the middle of `192.168.100.0/24` is
+# correct C and a trap for the next reader.
+BreakStringLiterals: false
+
+# `{ NULL }` rather than `{NULL}`, which is what the existing initialisers use.
+Cpp11BracedListStyle: false
+AllowShortFunctionsOnASingleLine: None
+IndentCaseLabels: true
+SortIncludes: Never
