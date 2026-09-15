@@ -466,7 +466,7 @@ public class QEMUInterface {
     private func setImageProperty(diskName: String, property: String, value: String) {
 
         // Get the current image-store...
-        var imageStore =
+        let imageStore =
             UserDefaults.standard.dictionary(forKey: "images") as? [String: [String: String]]
         var images = imageStore ?? [:]
 

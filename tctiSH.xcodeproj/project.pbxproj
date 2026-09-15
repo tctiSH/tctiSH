@@ -107,16 +107,10 @@
 		49BD1A5A224207B5005A2252 /* tctiSH.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = tctiSH.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8D4939E328C33B0300F57421 /* empty.qcow */ = {isa = PBXFileReference; lastKnownFileType = file; name = empty.qcow; path = assets/empty.qcow; sourceTree = "<group>"; };
 		8D4939E528C770DD00F57421 /* qemu-x86_64-softmmu_jit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "qemu-x86_64-softmmu_jit.framework"; path = "sysroot-iOS-arm64/Frameworks/qemu-x86_64-softmmu_jit.framework"; sourceTree = "<group>"; };
-		8DE8208728C16AA70035686B /* libqemu-x86_64-softmmu.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libqemu-x86_64-softmmu.dylib"; path = "qemu-tcti/build/libqemu-x86_64-softmmu.dylib"; sourceTree = "<group>"; };
 		8DE8208F28C180770035686B /* initrd.img */ = {isa = PBXFileReference; lastKnownFileType = file; name = initrd.img; path = assets/initrd.img; sourceTree = "<group>"; };
 		8DE8209128C1808F0035686B /* bzImage */ = {isa = PBXFileReference; lastKnownFileType = file; name = bzImage; path = assets/bzImage; sourceTree = "<group>"; };
-		8DE8209628C19A280035686B /* libqemu-x86_64-softmmu.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libqemu-x86_64-softmmu.dylib"; path = "assets/sysroot-iOS-arm64/lib/libqemu-x86_64-softmmu.dylib"; sourceTree = "<group>"; };
 		8DEC8CE828C139B60017AC30 /* third-party */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "third-party"; sourceTree = "<group>"; };
 		8DEC8CE928C139C10017AC30 /* SwiftTerm */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = SwiftTerm; path = "third-party/SwiftTerm"; sourceTree = "<group>"; };
-		8DF5F01B28C1A31B00FB1F1C /* libpixman-1.0.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libpixman-1.0.dylib"; path = "assets/sysroot-iOS-arm64/lib/libpixman-1.0.dylib"; sourceTree = "<group>"; };
-		8DF5F01E28C1A34F00FB1F1C /* libpng16.16.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libpng16.16.dylib; path = "assets/sysroot-iOS-arm64/lib/libpng16.16.dylib"; sourceTree = "<group>"; };
-		8DF5F02128C1A37100FB1F1C /* libjpeg.62.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libjpeg.62.dylib; path = "assets/sysroot-iOS-arm64/lib/libjpeg.62.dylib"; sourceTree = "<group>"; };
-		8DF5F02428C1AB1200FB1F1C /* libzstd.1.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libzstd.1.dylib; path = "assets/sysroot-iOS-arm64/lib/libzstd.1.dylib"; sourceTree = "<group>"; };
 		8DF5F02828C1BCC800FB1F1C /* qemu-x86_64-softmmu.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "qemu-x86_64-softmmu.framework"; path = "sysroot-iOS-arm64/Frameworks/qemu-x86_64-softmmu.framework"; sourceTree = "<group>"; };
 		8DF5F02D28C1BCEA00FB1F1C /* gmodule-2.0.0.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "gmodule-2.0.0.framework"; path = "sysroot-iOS-arm64/Frameworks/gmodule-2.0.0.framework"; sourceTree = "<group>"; };
 		8DF5F02E28C1BCEA00FB1F1C /* glib-2.0.0.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "glib-2.0.0.framework"; path = "sysroot-iOS-arm64/Frameworks/glib-2.0.0.framework"; sourceTree = "<group>"; };
@@ -211,12 +205,6 @@
 				8DF5F03128C1BCEA00FB1F1C /* intl.framework */,
 				8DF5F03228C1BCEB00FB1F1C /* pixman-1.0.framework */,
 				8DF5F02828C1BCC800FB1F1C /* qemu-x86_64-softmmu.framework */,
-				8DF5F02428C1AB1200FB1F1C /* libzstd.1.dylib */,
-				8DF5F02128C1A37100FB1F1C /* libjpeg.62.dylib */,
-				8DF5F01E28C1A34F00FB1F1C /* libpng16.16.dylib */,
-				8DF5F01B28C1A31B00FB1F1C /* libpixman-1.0.dylib */,
-				8DE8208728C16AA70035686B /* libqemu-x86_64-softmmu.dylib */,
-				8DE8209628C19A280035686B /* libqemu-x86_64-softmmu.dylib */,
 				C9FFBC130DA1A3B7A450025B /* Pods_tctiSH.framework */,
 			);
 			name = Frameworks;
@@ -622,11 +610,6 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				LIBRARY_SEARCH_PATHS = (
-					"$(inherited)",
-					"$(PROJECT_DIR)/qemu-tcti/build",
-					"$(PROJECT_DIR)/assets/sysroot-iOS-arm64/lib",
-				);
 				OTHER_CFLAGS = "";
 				"OTHER_CFLAGS[arch=*]" = "-DDEBUG_QEMU";
 				PRODUCT_BUNDLE_IDENTIFIER = io.ara.tctiSH;
@@ -667,11 +650,6 @@
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
-				);
-				LIBRARY_SEARCH_PATHS = (
-					"$(inherited)",
-					"$(PROJECT_DIR)/qemu-tcti/build",
-					"$(PROJECT_DIR)/assets/sysroot-iOS-arm64/lib",
 				);
 				OTHER_CFLAGS = "";
 				PRODUCT_BUNDLE_IDENTIFIER = io.ara.tctiSH;

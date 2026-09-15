@@ -8,6 +8,7 @@
 
 import UIKit
 import Foundation
+import UniformTypeIdentifiers
 
 /// Picker for allowing the user to select a single directory.
 class DirectoryPicker: NSObject, UIDocumentPickerDelegate {
@@ -36,16 +37,20 @@ class DirectoryPicker: NSObject, UIDocumentPickerDelegate {
         return picker.getSelectedFiles() ?? []
     }
 
-    /// The document types this picker offers; overridden by subclasses.
-    class var documentTypes: [String] { ["public.folder"] }
+    /// The content types this picker offers; overridden by subclasses.
+    class var contentTypes: [UTType] { [.folder] }
 
     /// Shows the active file picker, requesting user input.
     public func show() {
         DispatchQueue.main.async {
 
             // Set up a file picker to find a folder...
+            //
+            // `asCopy: false` is what makes this open in place rather than
+            // duplicating the selection into our container, which is the whole
+            // point: the user picks a directory to share with the guest.
             let documentPicker = UIDocumentPickerViewController(
-                documentTypes: Self.documentTypes, in: .open)
+                forOpeningContentTypes: Self.contentTypes, asCopy: false)
             documentPicker.delegate = self
 
             // ... and pop up that picker, if there's anything to pop it up
@@ -106,7 +111,7 @@ class DirectoryPicker: NSObject, UIDocumentPickerDelegate {
 /// filtering them out of the user's view.
 class PairingFilePicker: DirectoryPicker {
 
-    override class var documentTypes: [String] { ["public.item"] }
+    override class var contentTypes: [UTType] { [.item] }
 
     /// Pops up a dialog that allows the user to select a pairing file,
     /// returning on failure/cancel, or [<url>] on success.

@@ -10,6 +10,7 @@
 //
 
 #include <dlfcn.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -26,8 +27,8 @@
 
 #include "qemu_launcher.h"
 
+// PATH_MAX comes from <limits.h>, and is 1024 on Darwin.
 #define ARGUMENT_MAX (2048)
-#define PATH_MAX     (1024)
 
 // Helpers.
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof(array[0]))

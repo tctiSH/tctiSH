@@ -23,7 +23,11 @@ RED=$'\033[0;31m'
 NC=$'\033[0m'
 
 # Knobs
-IOS_SDKMINVER="11.0"
+#
+# IOS_SDKMINVER must track IPHONEOS_DEPLOYMENT_TARGET in tctiSH.xcodeproj. It is what decides
+# which SDK symbols clang treats as available; anything introduced later gets weak-linked and
+# is NULL at runtime on a device that predates it.
+IOS_SDKMINVER="18.0"
 MAC_SDKMINVER="10.11"
 
 # Build environment
@@ -300,10 +304,19 @@ build_pkg_config() {
     HOST_CFLAGS="$HOST_CFLAGS -Wno-error=implicit-function-declaration"
     HOST_CFLAGS="$HOST_CFLAGS -Wno-error=incompatible-pointer-types"
 
+    # The same availability rule the iOS build gets, and for the same reason: a symbol newer
+    # than the deployment target is weak-linked and NULL, so pkg-config would die on any macOS
+    # older than the SDK it was built against. Set at call time, well after CFLAGS_AVAILABILITY.
+    HOST_CFLAGS="$HOST_CFLAGS $CFLAGS_AVAILABILITY"
+
     cd "$DIR"
     if [ -z "$REBUILD" ]; then
         echo "${GREEN}Configuring ${NAME}...${NC}"
-        env -i SDKROOT="$HOST_SDKROOT" CFLAGS="$HOST_CFLAGS" ./configure --prefix="$PREFIX" --bindir="$PREFIX/host/bin" --with-internal-glib $@
+        # The bundled glib probes for pipe2 with autoconf, which declares the function itself
+        # rather than including the header, so the error above never reaches the probe. Answer
+        # for it: pipe2 is macOS 27 and newer, and glib falls back to pipe() plus an fcntl.
+        env -i SDKROOT="$HOST_SDKROOT" CFLAGS="$HOST_CFLAGS" ac_cv_func_pipe2=no \
+            ./configure --prefix="$PREFIX" --bindir="$PREFIX/host/bin" --with-internal-glib $@
     fi
     echo "${GREEN}Building ${NAME}...${NC}"
     SDKROOT="$HOST_SDKROOT" make -j$NCPU
@@ -665,6 +678,18 @@ if [ -z "$SDKMINVER" ]; then
 fi
 SDK=iphoneos
 CFLAGS_MINVER="-miphoneos-version-min=$SDKMINVER"
+
+# Reaching for an SDK symbol newer than $SDKMINVER is not a warning we can live with: the linker
+# weak-links it, and the call lands on NULL as soon as the app runs on a device that predates
+# the symbol. Erroring also corrects the feature probes, because QEMU's configure tests a
+# function by compiling a use of its real declaration -- a hard error is what makes it answer
+# "no" and take the portable fallback. That is what keeps pipe2 (iOS 27) and strchrnul (iOS
+# 18.4) out of the QEMU build.
+#
+# It does not reach meson, whose has_function writes its own declaration rather than using the
+# header, so the availability attribute never gets near the compiler. glib is the one thing
+# here built that way, and its pipe2 is dropped in third-party/dependencies/glib-2.69.0.patch.
+CFLAGS_AVAILABILITY="-Werror=unguarded-availability-new"
 PLATFORM_FAMILY_PREFIX="iOS"
 CFLAGS_TARGET=
 TCI_BUILD_FLAGS=""
@@ -748,6 +773,13 @@ CPPFLAGS="$CPPFLAGS -arch $ARCH -isysroot $SDKROOT -I$PREFIX/include $CFLAGS_MIN
 CXXFLAGS="$CXXFLAGS -arch $ARCH -isysroot $SDKROOT -I$PREFIX/include $CFLAGS_MINVER $CFLAGS_TARGET"
 OBJCFLAGS="$OBJCFLAGS -arch $ARCH -isysroot $SDKROOT -I$PREFIX/include $CFLAGS_MINVER $CFLAGS_TARGET"
 LDFLAGS="$LDFLAGS -arch $ARCH -isysroot $SDKROOT -L$PREFIX/lib $CFLAGS_MINVER $CFLAGS_TARGET"
+
+# Appended separately only to keep the lines above readable. Compile-time only, so it has no
+# business in LDFLAGS.
+CFLAGS="$CFLAGS $CFLAGS_AVAILABILITY"
+CPPFLAGS="$CPPFLAGS $CFLAGS_AVAILABILITY"
+CXXFLAGS="$CXXFLAGS $CFLAGS_AVAILABILITY"
+OBJCFLAGS="$OBJCFLAGS $CFLAGS_AVAILABILITY"
 export CFLAGS
 export CPPFLAGS
 export CXXFLAGS
