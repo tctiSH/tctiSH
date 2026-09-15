@@ -93,12 +93,12 @@ class JITHelperService: NSObject, NSExtensionRequestHandling {
 
     // MARK: - Operations
 
-    /// Attaches the debugger and answers QEMU's blessing trap.
+    /// Attaches the debugger and answers QEMU's blessing traps.
     ///
-    /// The protocol blocks until QEMU traps in compliance with the legacy
-    /// protocol: attach, continue, wait for exactly one `brk #0x69`. The host
-    /// thus has to issue it _before_ starting QEMU and wait for the attach to
-    /// land rather than for this to return.
+    /// Blocks for longer than it seems: the universal script stays attached,
+    /// serving `brk #0xf00d` calls until QEMU asks it to detach once every code
+    /// region is prepared. The host that to issue this _before_ it starts QEMU
+    /// and then wait for the attach to land.
     ///
     /// The host **must not** issue this unless it is going to boot QEMU under
     /// TCG expecting to be able to JIT. If this is not done, the script will
@@ -139,7 +139,7 @@ class JITHelperService: NSObject, NSExtensionRequestHandling {
                     targetPID: targetPID,
                     pairingFile: pairingFile,
                     ddiPaths: Self.ddiPaths,
-                    script: .legacy,
+                    script: .universal,
                     forceScript: false,
                     preparationProgress: { stage in
                         // `prepareDevice` returns as soon as it sees the image

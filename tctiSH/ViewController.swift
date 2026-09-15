@@ -27,6 +27,9 @@ class ViewController: UIViewController {
     /// Whether the pairing-file alert has already been put up this launch.
     private var hasOfferedPairingFile = false
 
+    /// Whether the JIT verdict has been logged and shown.
+    private var hasReportedJitOutcome = false
+
     /// Stores the most recently used terminal; for singleton-style fetches.
     private static var currentTerminal: TctiTermView?
 
@@ -121,13 +124,16 @@ class ViewController: UIViewController {
         // first and then leaves after a few seconds, and the boot spinner under
         // it for as long as the VM takes -- so there's never a moment with
         // nothing on screen, which is what made an ordinary wait read as a hang.
-        reportJitOutcome()
+        observeJitState()
         reportBootProgress(for: currentTerminal)
         observeJitPreparation()
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+
+        // The end of the black rectangle, as the user experiences it.
+        Log.ui.note("launch: first frame at \(AppDelegate.sinceLaunch())")
 
         // Not in viewDidLoad. Presenting anything from there fails silently --
         // the view isn't in a window yet, so there is nothing to present *from*
@@ -272,12 +278,34 @@ class ViewController: UIViewController {
     /// Fires if the shell never arrives.
     private var bootStallWatch: DispatchWorkItem?
 
-    /// Says how this launch ended up running.
+    /// Follows JIT enablement, which now outlives this view being created.
     ///
-    /// Held briefly and then handed on: it is worth knowing, but it isn't worth
-    /// a permanent fixture, and anything queued behind it is more current.
-    private func reportJitOutcome() {
-        let outcome = JitEnablement.outcome
+    /// Two separate things come out of it. While it is still going the banner
+    /// is up, because the tail of enablement stops the process outright and a
+    /// silent freeze reads as a crash. Once it has settled the verdict goes in
+    /// a pill, which is worth knowing but not worth a permanent fixture.
+    private func observeJitState() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(jitStateChanged),
+            name: JitEnablement.stateDidChange,
+            object: nil)
+
+        // It may well have settled before this view existed, in which case the
+        // notification has already been and gone.
+        jitStateChanged()
+    }
+
+    @objc private func jitStateChanged() {
+        if let message = JitEnablement.bannerMessage {
+            FreezeBanner.raise(message)
+        } else {
+            FreezeBanner.lower()
+        }
+
+        // Fires for every change, and the verdict only arrives once.
+        guard let outcome = JitEnablement.outcome, !hasReportedJitOutcome else { return }
+        hasReportedJitOutcome = true
 
         switch outcome {
         case .blessed, .ptrace:
@@ -292,6 +320,8 @@ class ViewController: UIViewController {
                 message: outcome.status.message,
                 state: .symbol(outcome.status.symbol),
                 duration: 5))
+
+        offerPairingFileIfWanted()
     }
 
     /// Shows and updates the progress pill as background preparation runs.
@@ -337,6 +367,11 @@ class ViewController: UIViewController {
     /// every dismissal -- returning from the document picker included -- so this
     /// also has to remember that it has already asked.
     private func offerPairingFileIfWanted() {
+        // Called on the JIT verdict as well as from `viewDidAppear`, and the
+        // verdict can arrive before there is a window to present from. Defer to
+        // whichever call has one rather than failing silently.
+        guard view.window != nil else { return }
+
         guard JitEnablement.needsPairingFile, !hasOfferedPairingFile else { return }
         hasOfferedPairingFile = true
 

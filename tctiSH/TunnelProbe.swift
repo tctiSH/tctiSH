@@ -35,10 +35,16 @@ enum TunnelProbe {
     static let defaultAddress = "10.7.0.1"
     static let defaultPort: UInt16 = 49152
 
-    /// StikJIT waits five seconds. We don't need to, but we can afford to be
-    /// generous: `tunnelInterfacePresent()` has already established that the
-    /// tunnel exists by the time we connect, so this only ever guards a wedged
-    /// endpoint. Measured round trip on a live tunnel is ~70ms.
+    /// The network LocalDevVPN works on, as a dotted prefix.
+    ///
+    /// The /16 rather than the endpoint's own /24, as the two don't match.
+    static let tunnelNetworkPrefix = "10.7."
+
+    /// Human-readable form of the above, for the log.
+    static let tunnelNetwork = "10.7.0.0/16"
+
+    /// Guards a wedged endpoint, with the measured round trip on a live tunnel
+    /// at ~7ms.
     static let defaultTimeout: TimeInterval = 0.5
 
     /// Reports whether a tunnel interface exists at all, keyed off the presence
@@ -163,6 +169,14 @@ enum TunnelProbe {
             return .unavailable(reason: "no tunnel interface", elapsed: 0)
         }
 
+        // A `utun` by name alone is not a LocalDevVPN tunnel: Tailscale answers
+        // to that description perfectly well so we run additional probes to
+        // avoid waiting the entire timeout.
+        guard tunnels.contains(where: { $0.address.hasPrefix(tunnelNetworkPrefix) }) else {
+            Log.network.note("tunnel: nothing on \(tunnelNetwork), so not probing")
+            return .unavailable(reason: "no tunnel interface on \(tunnelNetwork)", elapsed: 0)
+        }
+
         let result = probe()
 
         switch result {
@@ -195,8 +209,8 @@ private final class ProbeOutcome {
         return storedReason
     }
 
-    /// Records the first outcome to arrive; returns whether this call was the one
-    /// that settled it.
+    /// Records the first outcome to arrive; returns whether this call was the
+    /// one that settled it.
     func finish(reason: String?) -> Bool {
         lock.lock()
         defer { lock.unlock() }

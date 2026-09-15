@@ -2,15 +2,18 @@
 
 On iOS 26 and later, TXM prevents a process from making its own JIT mappings
 executable. QEMU therefore hands each executable region to whatever debugger is
-attached, by trapping with the region's address in x0 and its length in x1:
+attached, using StikJIT's universal protocol: `brk #0xf00d` with the operation
+in x16, its arguments in x0 and x1, and its answer back in x0.
 
-    mov x0, addr ; mov x1, len ; brk #0x69
+    JIT26PrepareRegion(addr, len)   x16 = 1  ->  x0 = prepared address
+    JIT26Detach()                   x16 = 0
 
-The debugger is expected to write one byte into each page of the region (the
-write travels the kernel's debug path, which is what makes the page usable) then
-step past the trap and continue. StikJIT's `legacy.js` does exactly this over
-the gdb-remote protocol; this script does the same thing from LLDB, so the JIT
-path can be exercised under Xcode without a StikJIT helper in the loop.
+For a prepare, the debugger writes one byte into each page of the region (the
+write travels the kernel's debug path, which is what makes the page usable),
+leaves the address in x0, then steps past the trap and continues. StikJIT's
+`universal.js` does exactly this over the gdb-remote protocol; this script does
+the same thing from LLDB, so the JIT path can be exercised under Xcode without a
+StikJIT helper in the loop.
 
 Importing the module arms a stop hook that answers the trap automatically, so
 the whole of the installation is one line in ~/.lldbinit-Xcode:
@@ -27,9 +30,8 @@ To handle a single trap by hand, once stopped on it:
 
     (lldb) jit-bless
 
-The byte written is 0x69 purely to echo the breakpoint immediate; its value is
-irrelevant, as QEMU overwrites the whole buffer with generated code immediately
-afterwards.
+The byte written is 0x69, matching what StikJIT writes; its value is irrelevant,
+as QEMU overwrites the whole buffer with generated code immediately afterwards.
 """
 
 import datetime
@@ -38,13 +40,21 @@ import time
 
 import lldb
 
-#: Breakpoint immediate QEMU uses to request a region. Matches `legacy.js`.
-BRK_IMMEDIATE = 0x69
+#: Breakpoint immediate the universal protocol traps on. Matches `universal.js`.
+BRK_IMMEDIATE = 0xF00D
 
-#: Module the trap is raised from -- `break_prepare_jit_region()` is ordinary
-#: compiled code inside the JIT build of QEMU, so the pc at the stop is always
-#: in this binary. Scoping the stop hook to it is what confines this script to
-#: tctiSH; the TCTI build (`qemu-x86_64-softmmu`) never traps.
+#: Operation selector, passed in x16.
+CMD_DETACH = 0
+CMD_PREPARE_REGION = 1
+
+#: Byte written into each page to prepare it, matching what StikJIT writes. Its
+#: value is irrelevant; QEMU overwrites the buffer with generated code at once.
+BLESS_BYTE = 0x69
+
+#: Module the trap is raised from -- the two jit calls are ordinary compiled
+#: code inside the JIT build of QEMU, so the pc at the stop is always in this
+#: binary. Scoping the stop hook to it is what confines this script to tctiSH;
+#: the TCTI build (`qemu-x86_64-softmmu`) never traps.
 JIT_MODULE = "qemu-x86_64-softmmu_jit"
 
 #: Stop reasons a `brk` can plausibly arrive as. Filtering on this first spares
@@ -109,8 +119,8 @@ def read_instruction(process, address):
     return int.from_bytes(data, "little")
 
 
-def pending_region(frame, process):
-    """If the frame is stopped at our trap, returns (address, length, pc).
+def pending_call(frame, process):
+    """If the frame is stopped at a jit call, returns (command, x0, x1, pc).
 
     Returns None for any other stop, so user breakpoints are left alone.
     """
@@ -122,9 +132,10 @@ def pending_region(frame, process):
     if decode_brk_immediate(instruction) != BRK_IMMEDIATE:
         return None
 
-    address = frame.FindRegister("x0").GetValueAsUnsigned()
-    length = frame.FindRegister("x1").GetValueAsUnsigned()
-    return (address, length, pc)
+    command = frame.FindRegister("x16").GetValueAsUnsigned()
+    x0 = frame.FindRegister("x0").GetValueAsUnsigned()
+    x1 = frame.FindRegister("x1").GetValueAsUnsigned()
+    return (command, x0, x1, pc)
 
 
 def bless_region(process, address, length, log):
@@ -148,7 +159,7 @@ def bless_region(process, address, length, log):
 
     for page in range(pages):
         page_address = address + page * JIT_PAGE_SIZE
-        written = process.WriteMemory(page_address, bytes([BRK_IMMEDIATE]), error)
+        written = process.WriteMemory(page_address, bytes([BLESS_BYTE]), error)
 
         if not error.Success() or written != 1:
             log(
@@ -177,16 +188,28 @@ def step_over_trap(frame, pc, log):
 
 
 def handle_trap(frame, process, log):
-    """Blesses the pending region and steps past the trap.
+    """Answers the pending jit call and steps past the trap.
 
     Returns True if this was our trap and it was handled.
     """
-    region = pending_region(frame, process)
-    if region is None:
+    call = pending_call(frame, process)
+    if call is None:
         return False
 
-    address, length, pc = region
-    if not bless_region(process, address, length, log):
+    command, x0, x1, pc = call
+
+    if command == CMD_PREPARE_REGION:
+        if not bless_region(process, x0, x1, log):
+            return False
+        # x0 is the answer as well as the argument, and already holds the
+        # address we prepared, so there is nothing to write back.
+    elif command == CMD_DETACH:
+        # Acknowledged, not obeyed. The session belongs to Xcode, and dropping
+        # it here would close the debugger the developer is sitting in; QEMU
+        # only needs the call to return, which stepping past the trap does.
+        log("jit-bless: detach requested; staying attached under Xcode")
+    else:
+        log("jit-bless: unknown jit call %d in x16; leaving it stopped" % command)
         return False
 
     return step_over_trap(frame, pc, log)
@@ -206,14 +229,14 @@ def jit_bless_command(debugger, command, exe_ctx, result, internal_dict):
         result.SetError("jit-bless: no running process")
         return
 
-    if pending_region(frame, process) is None:
+    if pending_call(frame, process) is None:
         result.SetError(
             "jit-bless: not stopped at a brk #0x%x -- pc is 0x%x" % (BRK_IMMEDIATE, frame.GetPC())
         )
         return
 
     if not handle_trap(frame, process, log):
-        result.SetError("jit-bless: failed to bless the region; see above")
+        result.SetError("jit-bless: failed to answer the jit call; see above")
         return
 
     if command.strip() == "stay":
@@ -225,7 +248,7 @@ def jit_bless_command(debugger, command, exe_ctx, result, internal_dict):
 
 
 class BlessStopHook:
-    """Stop hook that blesses regions automatically as they are requested.
+    """Stop hook that answers jit calls automatically as they are made.
 
     Stops normally for anything that isn't our trap, so ordinary debugging is
     unaffected.
@@ -246,7 +269,7 @@ class BlessStopHook:
         if frame.GetThread().GetStopReason() not in TRAP_STOP_REASONS:
             return True
 
-        if pending_region(frame, process) is None:
+        if pending_call(frame, process) is None:
             # Not ours -- let the stop happen as usual.
             return True
 
@@ -254,7 +277,7 @@ class BlessStopHook:
             log("jit-bless: leaving the process stopped for inspection")
             return True
 
-        # False means "resume"; the region is ready and the pc is past the trap.
+        # False means "resume"; the call is answered and the pc is past the trap.
         return False
 
 
@@ -275,8 +298,8 @@ def already_armed(debugger):
 
     Asks LLDB rather than remembering, because `command script import` reloads
     the module -- so module-level state resets, while a hook added by the
-    previous import is still there. Importing twice would otherwise bless every
-    region twice.
+    previous import is still there. Importing twice would otherwise answer every
+    jit call twice.
     """
     hooks = run_quietly(debugger, "target stop-hook list")
     return hooks is not None and "%s.BlessStopHook" % __name__ in hooks

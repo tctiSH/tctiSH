@@ -32,3 +32,37 @@ index 090544c..8da3753 100644
      return bytes.map(b => b.toString(16).padStart(2, '0')).join('');
  }
  
+diff --git a/Resources/universal.js b/Resources/universal.js
+index 9bca8f6..43a2460 100644
+--- a/Resources/universal.js
++++ b/Resources/universal.js
+@@ -212,22 +212,24 @@
+     for (let i = 0; i < hexStr.length; i += 2) {
+         bytes.push(parseInt(hexStr.substr(i, 2), 16));
+     }
++    // Every byte, high end first. Reading only the low five caps values at
++    // 2^40, and the JIT region already sits at 0x70_0000_0000 -- comfortably
++    // inside that today, and nowhere near guaranteed to stay there.
+     let num = 0n;
+-    for (let i = 4; i >= 0; i--) {
++    for (let i = bytes.length - 1; i >= 0; i--) {
+         num = (num << 8n) | BigInt(bytes[i]);
+     }
+     return num;
+ }
+ 
+ function numberToLittleEndianHexString(num) {
++    // Full width, for the same reason: a pc above 2^40 would otherwise be
++    // written back with its top bytes zeroed.
+     const bytes = [];
+-    for (let i = 0; i < 5; i++) {
++    for (let i = 0; i < 8; i++) {
+         bytes.push(Number(num & 0xFFn));
+         num >>= 8n;
+     }
+-    while (bytes.length < 8) {
+-        bytes.push(0);
+-    }
+     return bytes.map(b => b.toString(16).padStart(2, '0')).join('');
+ }
+ 

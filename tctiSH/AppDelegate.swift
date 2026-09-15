@@ -14,6 +14,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var configServer: ConfigServer?
     var saving: Bool = false
 
+    /// Where the slow half of the launch runs.
+    /// 
+    /// Serialized because the debugger has to be attached _before_ QEMU
+    /// allocates its code buffer so that JIT enablement can happen. We enforce
+    /// this using a serial queue without any locking.
+    private let bootQueue = DispatchQueue(label: "io.ara.tctiSH.boot")
+
     /// The controller used to support Picture in Picture.
     var pipController: AVPictureInPictureController?
 
@@ -30,10 +37,23 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     static var isFirstBoot = false
     static var memoryValueChanged = false
 
+    /// When `didFinishLaunchingWithOptions` began.
+    ///
+    /// The launch screen stays up until the first frame is drawn, so every
+    /// synchronous thing the launch path does is time the user spends looking
+    /// at nothing.
+    static var launchStarted = Date()
+
+    /// How long since the launch began, for the log.
+    static func sinceLaunch() -> String {
+        String(format: "%.2fs", Date().timeIntervalSince(launchStarted))
+    }
+
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
+        AppDelegate.launchStarted = Date()
 
         let default_images: [String: [String: String]] = [:]
 
@@ -50,8 +70,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             "memory": "1G",
         ])
 
-        // If we attempted a boot, but did not finish one, something went wrong last time.
-        // Force a recovery boot.
+        // If we attempted a boot, but did not finish one, something went wrong
+        // last time. Force a recovery boot.
         if UserDefaults.standard.bool(forKey: "attempting_boot") {
             AppDelegate.forceRecoveryBoot = true
         }
@@ -59,32 +79,43 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Mark ourselves as attempting a boot.
         UserDefaults.standard.set(true, forKey: "attempting_boot")
 
-        // Settle how we're going to run and arrange it.
-
-        // This has to happen _before_ QEMU exists: it reads `usingJitHacks` and
-        // `blessJitRegions` as it starts, and only asks for its code buffer to
-        // be blessed if it finds a debugger already attached.
-        JitEnablement.prepareForBoot()
-
         // Create a QEMU interface, which will launch our background kernel.
         qemu = QEMUInterface()
 
-        // Figure out if our memory limit has changed, and thus we'll need to print a message.
-        // This lets the user know to expect a delay, when appropriate.
+        // Both of these are cheap.
         AppDelegate.memoryValueChanged = qemu!.memoryValueChanged()
+        AppDelegate.isFirstBoot = qemu!.isFirstBoot()
 
-        self.bootQemu()
+        // Listens on a socket and does not care whether the VM is up yet, so it
+        // stays here where the scene callbacks can rely on finding it.
+        configServer = ConfigServer(qemuInterface: qemu!, listenImmediately: true)
+
+        // Settle how we're going to run, arrange it, and boot, all off the main
+        // thread.
+        bootQueue.async { [weak self] in
+            let outcome = JitEnablement.prepareForBoot()
+            Log.ui.note("launch: jit settled at \(AppDelegate.sinceLaunch())")
+
+            // QEMU's first act under TXM is to trap for its code buffer, and
+            // that trap stops every thread here until the last page is blessed.
+            if case .blessed = outcome, JitEnablement.expectsFreeze {
+                FreezeBanner.raiseAndWait(JitEnablement.preparingMessage)
+            }
+
+            self?.bootQemu()
+            Log.ui.note("launch: qemu started at \(AppDelegate.sinceLaunch())")
+        }
+
+        // Nothing slow left above, so this is the point at which UIKit is free
+        // to draw.
+        Log.ui.note("launch: delegate returned at \(AppDelegate.sinceLaunch())")
 
         return true
     }
 
+    /// Starts the VM. Runs on `bootQueue`, after JIT has been settled.
     func bootQemu() {
-        // To minimize startup time, start our kernel before anything else.
         qemu!.startQemuThread(forceRecoveryBoot: AppDelegate.forceRecoveryBoot)
-        AppDelegate.isFirstBoot = qemu!.isFirstBoot()
-
-        // Finally, before starting, spawn our background configuration server.
-        configServer = ConfigServer(qemuInterface: qemu!, listenImmediately: true)
     }
 
     /// Saves VM state as the app leaves the foreground.

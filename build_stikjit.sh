@@ -4,7 +4,7 @@
 #
 # StikJIT provides the debugger side of the iOS 26+ JIT protocol: it mounts the
 # developer disk image over the LocalDevVPN tunnel, attaches to a target
-# process, # and answers the `brk #0x69` traps QEMU raises for its code buffer.
+# process, # and answers the `brk #0xf00d` calls QEMU makes for its code buffer.
 # We build it # rather than vendoring the framework so the only binary in the
 # tree is the one StikJIT itself vendors (a prebuilt Rust FFI library).
 #

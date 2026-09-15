@@ -10,20 +10,25 @@ import Foundation
 /// Works out whether this launch can JIT, and does whatever that takes.
 ///
 /// The ordering here is forced and counter-intuitive: QEMU raises its blessing
-/// trap **only** if it finds a debugger attached at the moment it allocates its
-/// code buffer. The debugger therefore has to be in place *before* QEMU starts.
-/// But the helper call that attaches it does not return until the region has
-/// been blessed, which cannot happen until QEMU has started.
+/// traps **only** if it finds a debugger attached at the moment it allocates
+/// its code buffer. The debugger therefore has to be in place _before_ QEMU
+/// starts. The helper call that attaches it does not return until QEMU releases
+/// the debugger, which cannot happen until QEMU has started.
 ///
 /// So the host issues the call, waits for the *attach* rather than the call,
 /// and boots QEMU while the helper is still blocked inside it.
+///
+/// This all happens off the main thread as `prepareForBoot()` blocks for as
+/// long as the attach takes and the window cannot be drawn until the app
+/// delegate returns.
 enum JitEnablement {
 
     /// How this launch ended up running.
     enum Outcome {
 
-        /// TXM device with a debugger attached: QEMU JITs, and hands each code
-        /// region over to be blessed as it allocates it.
+        /// TXM device with a debugger attached: QEMU JITs, hands each code
+        /// region over to be blessed as it allocates it, and lets the debugger
+        /// go once the last one is ready.
         case blessed
 
         /// Pre-TXM device: convincing the process it is debugged is enough.
@@ -101,8 +106,32 @@ enum JitEnablement {
         }
     }
 
-    /// What `prepareForBoot()` settled on. Read by the UI to explain itself.
-    private(set) static var outcome: Outcome = .interpreted(.disabledInSettings)
+    /// What `prepareForBoot()` settled on, or nil while it is still deciding.
+    ///
+    /// The decision is made on a background queue, so the UI is on screen
+    /// before there is an answer.
+    private(set) static var outcome: Outcome?
+
+    /// Whether JIT is still being arranged.
+    private(set) static var isEnabling = false
+
+    /// Posted on the main queue when either of the two above changes.
+    static let stateDidChange = Notification.Name("io.ara.tctish.jit.stateDidChange")
+
+    /// True when a helper is attaching a debugger that QEMU will trap into.
+    private(set) static var expectsFreeze = false
+
+    /// What the banner says while JIT is being arranged.
+    static let preparingMessage = "Preparing JIT…"
+
+    /// What the blocking banner should say, or nil if it should not be up.
+    static var bannerMessage: String? {
+        switch outcome {
+        case nil: return preparingMessage
+        case .blessed: return isEnabling ? preparingMessage : nil
+        case .ptrace, .interpreted: return nil
+        }
+    }
 
     /// How long to wait for the debugger to attach before giving up.
     static let attachDeadline: TimeInterval = 5
@@ -112,13 +141,13 @@ enum JitEnablement {
 
     /// Settles how QEMU will run and sets the gates it reads on startup.
     ///
-    /// Must be called before the `QEMUInterface` is built. On the fast path it
-    /// blocks for as long as it takes the debugger to attach, up to
-    /// `attachDeadline`.
+    /// Must be called before `startQemuThread()`, and never on the main thread:
+    /// on the TXM path it blocks for as long as it takes the debugger to
+    /// attach, up to `attachDeadline`.
     @discardableResult
     static func prepareForBoot() -> Outcome {
         let outcome = decide()
-        self.outcome = outcome
+        publish(outcome)
 
         switch outcome {
         case .blessed:
@@ -138,6 +167,22 @@ enum JitEnablement {
         }
 
         return outcome
+    }
+
+    /// Hands the verdict to the UI.
+    private static func publish(_ value: Outcome) {
+        DispatchQueue.main.async {
+            outcome = value
+            NotificationCenter.default.post(name: stateDidChange, object: nil)
+        }
+    }
+
+    /// Says whether enablement is still running. Same queue, same reason.
+    private static func publish(isEnabling value: Bool) {
+        DispatchQueue.main.async {
+            isEnabling = value
+            NotificationCenter.default.post(name: stateDidChange, object: nil)
+        }
     }
 
     // MARK: - The decision
@@ -187,6 +232,10 @@ enum JitEnablement {
         // trap; under Xcode that is the jit-bless stop hook (see utils/jit-bless),
         // and a second debugger could not attach in any case.
         if jit_debugger_tracing() {
+            // Deliberately without raising the banner. That debugger is the
+            // developer's, the blessing is jit-bless's ~15s rather than
+            // StikJIT's ~1.7s, and someone watching /tmp/jit-bless.log does not
+            // need the screen taken away from them to be told it is working.
             Log.jit.note("a debugger is already attached; leaving the region to it")
             return .blessed
         }
@@ -214,10 +263,19 @@ enum JitEnablement {
         // about the time one tunnel handshake takes.
         let declined = Latch()
 
-        // Issued, not awaited. `enable` returns only once the region has been
-        // blessed, which cannot happen until QEMU is running, which cannot
-        // happen until this function returns.
+        // From here until the helper answers, JIT is being arranged. The tail
+        // of that is QEMU's code buffer being blessed with every thread in this
+        // process stopped. Both flags exist to get something on screen before
+        // that happens.
+        expectsFreeze = true
+        publish(isEnabling: true)
+
+        // `enable` returns only once QEMU has had every region blessed and
+        // released the debugger, none of which can happen until QEMU is
+        // running, which itself cannot happen until this returns.
         JITHelperClient.enable(pairingData: pairingData, targetPID: getpid()) { reply in
+            publish(isEnabling: false)
+
             guard let reply, reply.outcome == .succeeded else {
                 declined.close()
 
@@ -231,9 +289,9 @@ enum JitEnablement {
 
         guard waitForDebugger(unless: declined) else {
             // The helper may yet attach after this, and if it does it will wait
-            // for a trap that a TCTI boot never raises. Nothing here can call it
-            // off; it is logged so that it can be recognised on a device rather
-            // than puzzled over.
+            // for a trap that a TCTI boot never raises. Nothing here can call
+            // it off; it is logged so that it can be recognized on a device
+            // rather than puzzled over.
             return .interpreted(.attachTimedOut)
         }
 

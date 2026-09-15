@@ -19,7 +19,7 @@ enum JITHelper {
     /// What the host is asking the helper to do.
     enum Operation: String {
 
-        /// Attaches the debugger and answers QEMU's blessing trap.
+        /// Attaches the debugger and answers QEMU's blessing traps.
         case enable
     }
 
