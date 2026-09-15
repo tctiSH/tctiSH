@@ -1,6 +1,5 @@
 //
-// Terminal view for tctiSH.
-// Provides an internal SSH connection to our lightweight VM.
+// Terminal view for tctiSH. Provides an internal SSH connection to our lightweight VM.
 //
 //  Copyright © 2022 Kate Temkin <k@ktemkin.com>.
 //  Copyright © 2020 Miguel de Icaza.
@@ -55,8 +54,8 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
 
     /// Whether the SSH session is up.
     ///
-    /// Announces the transition, so whoever is telling the user to wait can stop.
-    /// Only the first one: reconnecting after an unlock isn't news.
+    /// Announces the transition, so whoever is telling the user to wait can
+    /// stop. Only the first one: reconnecting after an unlock isn't news.
     var connected: Bool = false {
         didSet {
             guard connected, !oldValue else { return }
@@ -93,9 +92,8 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
 
         // Create the SSH provider we'll use to connect to our instance.
         //
-        // Using this over e.g. serial mode ensures we have an out-of-band
-        // connection for e.g. terminal resizes to travel over, so SIGWINCH
-        // works correctly.
+        // Using this over e.g. serial mode ensures we have an out-of-band connection for e.g.
+        // terminal resizes to travel over, so SIGWINCH works correctly.
         makeShell()
 
         // Make sure the terminal looks the way it should before anything's displayed.
@@ -146,9 +144,9 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     /// Forces the SSH session to reconnect.
     func forceReconnect() {
 
-        // We are, as of now, not connected. Saying so matters twice over: it's
-        // what lets `didConnect` fire again when we get back in, and it's what
-        // stops the poll below cancelling itself on the first tick.
+        // We are, as of now, not connected. Saying so matters twice over: it's what lets
+        // `didConnect` fire again when we get back in, and it's what stops the poll below
+        // cancelling itself on the first tick.
         connected = false
         connecting = false
         failedAttempts = 0
@@ -160,9 +158,8 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         // ... add a line-feed to ensure the cursor is in a valid drawing position, again...
         self.feed(text: "\r\n")
 
-        // ... and go after it, retrying rather than getting one attempt. A
-        // reconnect that quietly failed used to leave a dead terminal with
-        // nothing left to try it again.
+        // ... and go after it, retrying rather than getting one attempt. A reconnect that quietly
+        // failed used to leave a dead terminal with nothing left to try it again.
         start()
     }
 
@@ -227,10 +224,9 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         if let d = data {
             let sliced = Array(d)[0...]
 
-            // We chunk the processing of data, as the SSH library might have
-            // received a lot of data, and we do not want the terminal to
-            // parse it all, and then render, we want to parse in chunks to
-            // give the terminal the chance to update the display as it goes.
+            // We chunk the processing of data, as the SSH library might have received a lot of
+            // data, and we do not want the terminal to parse it all, and then render, we want to
+            // parse in chunks to give the terminal the chance to update the display as it goes.
             let blocksize = 1024
             var next = 0
             let last = sliced.endIndex
@@ -248,9 +244,9 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     }
 
     func connect() {
-        // The guest usually isn't listening yet on the first few tries, which is
-        // expected and not worth reporting. What isn't expected is starting a
-        // second attempt over the top of the first.
+        // The guest usually isn't listening yet on the first few tries, which is expected and not
+        // worth reporting. What isn't expected is starting a second attempt over the top of the
+        // first.
         guard !connecting else {
             Log.network.note("ssh: still trying the last connection; not starting another")
             return
@@ -282,8 +278,8 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
                         }
                     }
 
-                    // Start the next attempt from a clean session; this one got
-                    // as far as it was going to.
+                    // Start the next attempt from a clean session; this one got as far as it was
+                    // going to.
                     self.makeShell()
                 } else {
                     if self.failedAttempts > 0 {
@@ -312,8 +308,8 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         fatalError("init(coder:) has not been implemented")
     }
 
-    /// Callback that occurs when the terminal is scrolled.
-    /// Can be used to save the scrollback, if desired.
+    /// Callback that occurs when the terminal is scrolled. Can be used to save
+    /// the scrollback, if desired.
     public func scrolled(source: TerminalView, position: Double) {
         // Nothing to do here, yet.
     }
@@ -339,8 +335,9 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         }
     }
 
-    /// Callback that occurs when we receive OSC 7, which indicates the current working directory.
-    /// The default tctiSH setup's shell integration generates OSC-7 each time the prompt is issue.
+    /// Callback that occurs when we receive OSC 7, which indicates the current
+    /// working directory. The default tctiSH setup's shell integration
+    /// generates OSC-7 each time the prompt is issue.
     public func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
         _cwd = directory
 
@@ -354,7 +351,8 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
 
     }
 
-    /// Callback that occurs when the user clicks on a URL or link in the tctiSH scrollback.
+    /// Callback that occurs when the user clicks on a URL or link in the tctiSH
+    /// scrollback.
     public func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
         if let fixedup = link.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
             if let url = NSURLComponents(string: fixedup) {

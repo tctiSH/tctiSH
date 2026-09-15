@@ -31,8 +31,8 @@ final class StatusPill: UIView {
             label.text = newValue
             accessibilityLabel = newValue
 
-            // The capsule is sized by its content, so a new message changes its
-            // width. Animate that rather than letting it jump.
+            // The capsule is sized by its content, so a new message changes its width. Animate that
+            // rather than letting it jump.
             UIView.animate(withDuration: 0.25) {
                 self.superview?.layoutIfNeeded()
             }
@@ -144,8 +144,8 @@ final class StatusPill: UIView {
         background.layer.cornerCurve = .continuous
         background.clipsToBounds = true
 
-        // A hairline keeps the capsule's edge legible against a terminal that
-        // might be any colour the theme fancies.
+        // A hairline keeps the capsule's edge legible against a terminal that might be any colour
+        // the theme fancies.
         background.layer.borderWidth = 1 / UIScreen.main.scale
         background.layer.borderColor = UIColor.separator.cgColor
 
@@ -193,17 +193,16 @@ final class StatusPill: UIView {
             dial.widthAnchor.constraint(equalToConstant: Metric.dial),
             dial.heightAnchor.constraint(equalToConstant: Metric.dial),
 
-            // The symbol shares the dial's slot, so the capsule is the same
-            // shape whichever is showing.
+            // The symbol shares the dial's slot, so the capsule is the same shape whichever is
+            // showing.
             symbolView.centerXAnchor.constraint(equalTo: dial.centerXAnchor),
             symbolView.centerYAnchor.constraint(equalTo: dial.centerYAnchor),
             symbolView.widthAnchor.constraint(equalTo: dial.widthAnchor),
             symbolView.heightAnchor.constraint(equalTo: dial.heightAnchor),
         ])
 
-        // Always interactive, for the swipe. A pill is small, transient and
-        // sits in a corner, so the taps it costs the terminal are worth being
-        // able to get rid of it.
+        // Always interactive, for the swipe. A pill is small, transient and sits in a corner, so
+        // the taps it costs the terminal are worth being able to get rid of it.
         isUserInteractionEnabled = true
 
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
@@ -428,8 +427,8 @@ private final class ProgressDial: UIView {
         mark.strokeEnd = 0
         mark.strokeColor = UIColor.label.cgColor
 
-        // Core Animation drops animations when the app is backgrounded and does
-        // not put them back; without this the spinner returns frozen.
+        // Core Animation drops animations when the app is backgrounded and does not put them back;
+        // without this the spinner returns frozen.
         NotificationCenter.default.addObserver(
             self, selector: #selector(restartSpinnerIfNeeded),
             name: UIApplication.willEnterForegroundNotification, object: nil)
@@ -451,8 +450,8 @@ private final class ProgressDial: UIView {
         let centre = CGPoint(x: bounds.midX, y: bounds.midY)
         let radius = side / 2 - Metric.lineWidth / 2
 
-        // Starting at -pi/2 puts the seam at twelve o'clock, so the ring fills
-        // from the top the way a clock face would.
+        // Starting at -pi/2 puts the seam at twelve o'clock, so the ring fills from the top the way
+        // a clock face would.
         let ring = UIBezierPath(
             arcCenter: centre, radius: radius,
             startAngle: -.pi / 2, endAngle: .pi * 1.5,
@@ -518,8 +517,8 @@ private final class ProgressDial: UIView {
         case .succeeded, .failed:
             showArc(wasIndeterminate: wasIndeterminate)
 
-            // Complete the ring first, then draw the mark into it, so the two
-            // read as one gesture rather than appearing together.
+            // Complete the ring first, then draw the mark into it, so the two read as one gesture
+            // rather than appearing together.
             setStrokeEnd(arc, to: 1, animated: animated)
             drawMark(animated: animated)
         }
@@ -530,8 +529,8 @@ private final class ProgressDial: UIView {
         spinner.removeAllAnimations()
         arc.isHidden = false
 
-        // Coming off the spinner, start from empty rather than animating down
-        // from whatever happened to be shown last.
+        // Coming off the spinner, start from empty rather than animating down from whatever
+        // happened to be shown last.
         if wasIndeterminate {
             setStrokeEnd(arc, to: 0, animated: false)
         }

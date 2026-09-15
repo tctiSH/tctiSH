@@ -73,8 +73,8 @@ final class StatusPresenter {
             pill.tint = item.tint ?? .label
             pill.onTap = item.onTap
 
-            // The pill animates itself off; this is just the bookkeeping, so
-            // the stack closes up and any pending expiry is cancelled.
+            // The pill animates itself off; this is just the bookkeeping, so the stack closes up
+            // and any pending expiry is cancelled.
             let key = item.key
             pill.onSwipeAway = { [weak self] in self?.forget(key: key) }
 

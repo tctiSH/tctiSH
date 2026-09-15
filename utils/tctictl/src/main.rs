@@ -1,4 +1,5 @@
-/// tctiSH configuration and control tool.
+//! tctiSH configuration and control tool.
+
 mod comms;
 mod mount;
 mod simple;
@@ -108,8 +109,8 @@ fn main() {
     }
 }
 
-// Provides access to our low-level commands.
-// Mostly peeks into the backends of our higher-level commands.
+// Provides access to our low-level commands. Mostly peeks into the backends of our higher-level
+// commands.
 fn lowlevel(subcommand: LowlevelCommands) {
     match subcommand {
         LowlevelCommands::Raw {
@@ -117,13 +118,15 @@ fn lowlevel(subcommand: LowlevelCommands) {
             key,
             value,
         } => {
+            // Printing it is the whole job of a raw command, and `dbg!` prints an `Err` as readily
+            // as an `Ok`, so there is nothing left to do with what it hands back.
             let result = comms::run_command(command, key, value);
-            dbg!(result);
+            let _ = dbg!(result);
         }
 
         LowlevelCommands::PrepareMount { ios_path } => {
             let result = mount::prepare_mount_from_path(ios_path);
-            dbg!(result);
+            let _ = dbg!(result);
         }
 
         LowlevelCommands::Mount {

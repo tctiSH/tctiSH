@@ -27,7 +27,19 @@ use_field_init_shorthand = true
 where_single_line = false
 
 # Configuration controlling the formatting of comments.
-comment_width = 80
+#
+# `wrap_comments` is a ceiling, not a formatter: it breaks a line that runs past
+# `comment_width` but never joins short ones back up, so on its own it cannot
+# make two paragraphs agree with each other. utils/reflow-comments does the
+# filling, and `make format-rust` runs it first; this catches anything that
+# arrives past the limit by another route.
+#
+# So `comment_width` is the widest any comment may be, which is COMMENT_WIDTH in
+# the Makefile -- not DOC_COMMENT_WIDTH. rustfmt has one setting for both kinds,
+# and setting it to 80 would re-break every ordinary comment the reflow had just
+# filled to 100. It counts the whole line, indent and `//` included.
+comment_width = 100
+wrap_comments = true
 format_code_in_doc_comments = true
 normalize_comments = true
 normalize_doc_attributes = true

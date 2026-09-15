@@ -14,6 +14,10 @@ These run on the development machine rather than inside tctiSH.
 
 - `jit-bless` is an LLDB script implementing the iOS 26+ JIT breakpoint protocol, so the JIT path
   can be debugged under Xcode without StikJIT in the loop
+- `reflow-comments` refills Swift and Rust comment paragraphs -- doc comments to 80 columns, the
+  rest to 100 -- which none of swift-format, SwiftFormat, rustfmt or clang-format will do: they all
+  break a long line but never join short ones. `make format-swift` and `make format-rust` run it
+  ahead of the real formatter, which rewrites code and never comments
 
 To install it, put its import -- and nothing else -- in `~/.lldbinit-Xcode`:
 

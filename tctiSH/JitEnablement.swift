@@ -87,9 +87,9 @@ enum JitEnablement {
             var statusSymbol: String {
                 switch self {
                 case .txmUnknown:
-                    // Distinct from the rest on purpose. The others mean JIT
-                    // isn't set up, which is ordinary; this one means the device
-                    // wouldn't answer a question it should have, which isn't.
+                    // Distinct from the rest on purpose. The others mean JIT isn't set up, which is
+                    // ordinary; this one means the device wouldn't answer a question it should
+                    // have, which isn't.
                     return "exclamationmark.triangle.fill"
                 default:
                     return "tortoise.fill"
@@ -193,8 +193,7 @@ enum JitEnablement {
         }
 
         #if targetEnvironment(macCatalyst)
-            // Catalyst gets JIT from its entitlements. Nothing to arrange, and
-            // nothing to bless.
+            // Catalyst gets JIT from its entitlements. Nothing to arrange, and nothing to bless.
             return .ptrace
         #else
             let txm = TxmPresence.current
@@ -202,17 +201,16 @@ enum JitEnablement {
 
             switch txm {
             case .absent:
-                // The pre-TXM world, unchanged: a process that believes it is being
-                // debugged may map its own pages executable, and no second process
-                // need be involved at all.
+                // The pre-TXM world, unchanged: a process that believes it is being debugged may
+                // map its own pages executable, and no second process need be involved at all.
                 return set_up_jit()
                     ? .ptrace
                     : .interpreted(.ptraceRefused)
 
             case .unknown:
-                // StikJIT refuses to guess here, and guessing wrong is expensive in
-                // both directions -- a trap nobody answers, or a debugger waiting on
-                // a trap that never comes. Decline in step with it.
+                // StikJIT refuses to guess here, and guessing wrong is expensive in both directions
+                // -- a trap nobody answers, or a debugger waiting on a trap that never comes.
+                // Decline in step with it.
                 return .interpreted(.txmUnknown)
 
             case .present:
@@ -228,14 +226,14 @@ enum JitEnablement {
     /// self-traced process cannot be attached to, so calling it would lock out
     /// the very debugger we are trying to invite in.
     private static func enableUnderTxm() -> Outcome {
-        // Already traced -- Xcode, most likely. Whatever is attached owns the
-        // trap; under Xcode that is the jit-bless stop hook (see utils/jit-bless),
-        // and a second debugger could not attach in any case.
+        // Already traced -- Xcode, most likely. Whatever is attached owns the trap; under Xcode
+        // that is the jit-bless stop hook (see utils/jit-bless), and a second debugger could not
+        // attach in any case.
         if jit_debugger_tracing() {
-            // Deliberately without raising the banner. That debugger is the
-            // developer's, the blessing is jit-bless's ~15s rather than
-            // StikJIT's ~1.7s, and someone watching /tmp/jit-bless.log does not
-            // need the screen taken away from them to be told it is working.
+            // Deliberately without raising the banner. That debugger is the developer's, the
+            // blessing is jit-bless's ~15s rather than StikJIT's ~1.7s, and someone watching
+            // /tmp/jit-bless.log does not need the screen taken away from them to be told it is
+            // working.
             Log.jit.note("a debugger is already attached; leaving the region to it")
             return .blessed
         }
@@ -245,8 +243,8 @@ enum JitEnablement {
         }
 
         guard let pairingData = JitPairingFile.read() else {
-            // Asking for one needs a window, which does not exist yet. The UI
-            // picks this up once it has somewhere to put the picker.
+            // Asking for one needs a window, which does not exist yet. The UI picks this up once it
+            // has somewhere to put the picker.
             needsPairingFile = true
             return .interpreted(.noPairingFile)
         }
@@ -258,40 +256,38 @@ enum JitEnablement {
     private static func attach(pairingData: Data) -> Outcome {
         let started = Date()
 
-        // Set if `enable` comes back having done nothing, which it can do long
-        // before the deadline. An unmounted developer disk image is declined in
-        // about the time one tunnel handshake takes.
+        // Set if `enable` comes back having done nothing, which it can do long before the deadline.
+        // An unmounted developer disk image is declined in about the time one tunnel handshake
+        // takes.
         let declined = Latch()
 
-        // From here until the helper answers, JIT is being arranged. The tail
-        // of that is QEMU's code buffer being blessed with every thread in this
-        // process stopped. Both flags exist to get something on screen before
-        // that happens.
+        // From here until the helper answers, JIT is being arranged. The tail of that is QEMU's
+        // code buffer being blessed with every thread in this process stopped. Both flags exist to
+        // get something on screen before that happens.
         expectsFreeze = true
         publish(isEnabling: true)
 
-        // `enable` returns only once QEMU has had every region blessed and
-        // released the debugger, none of which can happen until QEMU is
-        // running, which itself cannot happen until this returns.
+        // `enable` returns only once QEMU has had every region blessed and released the debugger,
+        // none of which can happen until QEMU is running, which itself cannot happen until this
+        // returns.
         JITHelperClient.enable(pairingData: pairingData, targetPID: getpid()) { reply in
             publish(isEnabling: false)
 
             guard let reply, reply.outcome == .succeeded else {
                 declined.close()
 
-                // Much the commonest reason is an unmounted developer disk
-                // image, and fixing that takes a network and minutes. Start it
-                // now so that the next launch can take the fast path.
+                // Much the commonest reason is an unmounted developer disk image, and fixing that
+                // takes a network and minutes. Start it now so that the next launch can take the
+                // fast path.
                 prepareInBackground(pairingData: pairingData)
                 return
             }
         }
 
         guard waitForDebugger(unless: declined) else {
-            // The helper may yet attach after this, and if it does it will wait
-            // for a trap that a TCTI boot never raises. Nothing here can call
-            // it off; it is logged so that it can be recognized on a device
-            // rather than puzzled over.
+            // The helper may yet attach after this, and if it does it will wait for a trap that a
+            // TCTI boot never raises. Nothing here can call it off; it is logged so that it can be
+            // recognized on a device rather than puzzled over.
             return .interpreted(.attachTimedOut)
         }
 
@@ -341,8 +337,7 @@ enum JitEnablement {
         Log.jit.note("preparing the device in the background, for the next launch")
         setPreparation(.running(message: "Getting DDI", fraction: nil))
 
-        // In-process, so it can say how it's getting on as it goes. Blocking,
-        // hence the queue.
+        // In-process, so it can say how it's getting on as it goes. Blocking, hence the queue.
         DispatchQueue.global(qos: .utility).async {
             let outcome = DdiPreparation.run(pairingData: pairingData) { message, fraction in
                 setPreparation(.running(message: message, fraction: fraction))

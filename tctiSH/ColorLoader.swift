@@ -42,8 +42,8 @@ struct ThemeColor: Hashable, Equatable {
         return Color(red: r * 257, green: g * 257, blue: b * 257)
     }
 
-    // Returns a ThemeColor from an Xrdb string (this should contain the whole file)
-    // xrdb is one of the simpler formats supported on the iTerm2 web site with themes
+    // Returns a ThemeColor from an Xrdb string (this should contain the whole file) xrdb is one of
+    // the simpler formats supported on the iTerm2 web site with themes
     static func fromXrdb(title: String, xrdb: String) -> ThemeColor? {
         var ansi: [Int: Color] = [:]
         var background: Color?

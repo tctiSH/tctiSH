@@ -89,15 +89,36 @@ SHELL_SOURCES  := $(shell git ls-files '*.sh' | grep -Ev '$(NOT_OURS)')
 PYTHON_SOURCES := $(shell git ls-files '*.py' | grep -Ev '$(NOT_OURS)')
 NIX_SOURCES    := $(shell git ls-files '*.nix' | grep -Ev '$(NOT_OURS)')
 RUBY_SOURCES   := $(shell git ls-files 'Podfile' '*.rb' | grep -Ev '$(NOT_OURS)')
+RUST_SOURCES   := $(shell git ls-files '*.rs' | grep -Ev '$(NOT_OURS)')
+
+# tctictl only ever runs inside the guest, so it is linted for the guest's target. Without this,
+# cargo builds it for the macOS host, where the Linux-only sys-mount crate does not compile at all
+# -- twenty errors in a dependency, before any of our own code is looked at. The devshell provides
+# the target; see utils/tctictl/build_and_copy.sh, which builds with the same one.
+CARGO_TARGET := x86_64-unknown-linux-musl
 
 # Four spaces, matching Xcode's editor and the existing scripts. The dialect comes
 # from each script's shebang, so a genuinely POSIX script would still be treated
 # as one.
 SHFMT_FLAGS := --indent 4 --case-indent
 
+# Comments are the one thing swift-format will not touch: it neither breaks a line that runs past
+# the limit nor joins short ones back up, so a paragraph wrapped at 60 columns and one wrapped at 99
+# both pass, for ever. SwiftFormat's `wrap` rule does the first but not the second, and cannot be
+# scoped to comments without also taking authority over code layout -- measured at 43 code lines
+# changed against 2 comment lines on this tree. Hence our own pass, which is the exact complement of
+# swift-format: it rewrites comments and never code, and runs first so neither can undo the other.
+# Doc comments get a narrower measure than the code they sit above: they are read as prose, in a
+# popover or on a docs page, and 100 columns of it is a wall.
+COMMENT_REFLOW := utils/reflow-comments/reflow_comments.py
+COMMENT_WIDTH := 100
+DOC_COMMENT_WIDTH := 80
+REFLOW_FLAGS := --width $(COMMENT_WIDTH) --doc-width $(DOC_COMMENT_WIDTH)
+
 .PHONY: format-swift
 format-swift: ## Format the Swift sources
 	$(call require_xcode_tool,$(SWIFT_FORMAT),swift-format)
+	@$(SHELL_WRAPPER) python3 $(COMMENT_REFLOW) $(REFLOW_FLAGS) $(SWIFT_SOURCES)
 	@$(SWIFT_FORMAT) format --parallel --in-place $(SWIFT_SOURCES)
 
 .PHONY: format-c
@@ -107,6 +128,7 @@ format-c: ## Format the C and Objective-C sources
 
 .PHONY: format-rust
 format-rust: ## Format the Rust sources
+	@$(SHELL_WRAPPER) python3 $(COMMENT_REFLOW) $(REFLOW_FLAGS) $(RUST_SOURCES)
 	$(SHELL_WRAPPER) cargo fmt --manifest-path utils/tctictl/Cargo.toml --all
 
 .PHONY: format-shell
@@ -139,6 +161,7 @@ format: format-swift format-c format-rust format-shell format-python format-nix 
 .PHONY: format-check-swift
 format-check-swift: ## Check Swift formatting without changing files
 	$(call require_xcode_tool,$(SWIFT_FORMAT),swift-format)
+	@$(SHELL_WRAPPER) python3 $(COMMENT_REFLOW) $(REFLOW_FLAGS) --check $(SWIFT_SOURCES)
 	@failed=0; for f in $(SWIFT_SOURCES); do \
 		$(SWIFT_FORMAT) format "$$f" | diff -u --label "$$f" --label "$$f (formatted)" "$$f" - || failed=1; \
 	done; exit $$failed
@@ -150,6 +173,7 @@ format-check-c: ## Check C and Objective-C formatting without changing files
 
 .PHONY: format-check-rust
 format-check-rust: ## Check Rust formatting without changing files
+	@$(SHELL_WRAPPER) python3 $(COMMENT_REFLOW) $(REFLOW_FLAGS) --check $(RUST_SOURCES)
 	$(SHELL_WRAPPER) cargo fmt --manifest-path utils/tctictl/Cargo.toml --all --check
 
 .PHONY: format-check-shell
@@ -177,7 +201,8 @@ format-check: format-check-swift format-check-c format-check-rust format-check-s
 
 .PHONY: clippy
 clippy: ## Lint the Rust sources with clippy
-	$(SHELL_WRAPPER) cargo clippy --manifest-path utils/tctictl/Cargo.toml --all-targets
+	$(SHELL_WRAPPER) cargo clippy --manifest-path utils/tctictl/Cargo.toml --all-targets \
+		--target $(CARGO_TARGET)
 
 .PHONY: lint
 lint: format-check clippy ## Run all the linting tasks

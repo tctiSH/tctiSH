@@ -80,8 +80,8 @@ final class FileDownloader: NSObject, URLSessionDownloadDelegate {
         downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
-        // The temporary file is deleted the moment this returns, so the move
-        // has to happen here and not in didCompleteWithError.
+        // The temporary file is deleted the moment this returns, so the move has to happen here and
+        // not in didCompleteWithError.
         do {
             guard let destination else {
                 throw DownloadError.message("finished a download nobody asked for")

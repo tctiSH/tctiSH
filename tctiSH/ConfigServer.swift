@@ -40,8 +40,8 @@ class ConfigServer {
     /// A queue used to synchronize access to our sockets.
     let clientLockQueue = DispatchQueue(label: "io.ara.tctiSH.configserver")
 
-    /// Our interface to our QEMU kernel.
-    /// Should only be accessed from our command loop.
+    /// Our interface to our QEMU kernel. Should only be accessed from our
+    /// command loop.
     private var qemu: QEMUInterface
 
     /// The thread that's running our command-loop.
@@ -146,8 +146,8 @@ class ConfigServer {
                     // Get the data that was captured.
                     let length = try client.read(into: &buffer)
 
-                    // If we didn't get any data, the other side has closed the connection.
-                    // This communication is complete.
+                    // If we didn't get any data, the other side has closed the connection. This
+                    // communication is complete.
                     if length == 0 {
                         clientAlive = false
                     }
@@ -186,13 +186,13 @@ class ConfigServer {
             case "choose_folder":
                 handleChoosePath(message: message, from: client)
 
-            // Requests that we pop up a filer picker to choose a path,
-            // and then ensure that path is accessible to QEMU.
+            // Requests that we pop up a filer picker to choose a path, and then ensure that path is
+            // accessible to QEMU.
             case "open_folder":
                 handleOpenPath(message: message, from: client)
 
-            // Requests that we prepare a given device for mounting. Responds
-            // with the 'tag' used to mount the device with a `mount -t 9p`
+            // Requests that we prepare a given device for mounting. Responds with the 'tag' used to
+            // mount the device with a `mount -t 9p`
             // command. {"command": "prepare_mount", "value": "/tmp"}
             case "prepare_mount":
                 handlePrepareMountCommand(message: message, from: client)
@@ -205,8 +205,8 @@ class ConfigServer {
             case "getcwd":
                 handleGetCWD(message: message, from: client)
 
-            // Requests that we pop up a file picker to import a pairing file,
-            // used by the JIT server to reach the device.
+            // Requests that we pop up a file picker to import a pairing file, used by the JIT
+            // server to reach the device.
             case "import_pairing_file":
                 handleImportPairingFile(message: message, from: client)
 
@@ -239,8 +239,8 @@ class ConfigServer {
                 value: "cancelled", to: client)
 
         case .failed(let reason):
-            // Previously reported as "cancelled", which told the user their own
-            // tap had failed rather than that the file couldn't be read.
+            // Previously reported as "cancelled", which told the user their own tap had failed
+            // rather than that the file couldn't be read.
             sendErrorResponse("could not import pairing file: \(reason)", to: client)
         }
     }
@@ -273,8 +273,9 @@ class ConfigServer {
         sendResponse(command: "choose_folder", key: "directory", value: url.path, to: client)
     }
 
-    /// Fetches a "folder picker" result for our client, and returns a serialized _bookmark_
-    /// associated with a security context; so it can be used to persistently open a folder.
+    /// Fetches a "folder picker" result for our client, and returns a
+    /// serialized _bookmark_ associated with a security context; so it can be
+    /// used to persistently open a folder.
     private func handleOpenPath(message: ConfigurationMessage, from: Client) {
         let client = from
 
@@ -389,8 +390,8 @@ class ConfigServer {
 
     }
 
-    /// Command that fetches the CWD for the current shell.
-    /// Used for restoring the CWD after a reconnect.
+    /// Command that fetches the CWD for the current shell. Used for restoring
+    /// the CWD after a reconnect.
     private func handleGetCWD(message: ConfigurationMessage, from: Client) {
         let client = from
 

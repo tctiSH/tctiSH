@@ -15,7 +15,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var saving: Bool = false
 
     /// Where the slow half of the launch runs.
-    /// 
+    ///
     /// Serialized because the debugger has to be attached _before_ QEMU
     /// allocates its code buffer so that JIT enablement can happen. We enforce
     /// this using a serial queue without any locking.
@@ -70,8 +70,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             "memory": "1G",
         ])
 
-        // If we attempted a boot, but did not finish one, something went wrong
-        // last time. Force a recovery boot.
+        // If we attempted a boot, but did not finish one, something went wrong last time. Force a
+        // recovery boot.
         if UserDefaults.standard.bool(forKey: "attempting_boot") {
             AppDelegate.forceRecoveryBoot = true
         }
@@ -86,18 +86,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         AppDelegate.memoryValueChanged = qemu!.memoryValueChanged()
         AppDelegate.isFirstBoot = qemu!.isFirstBoot()
 
-        // Listens on a socket and does not care whether the VM is up yet, so it
-        // stays here where the scene callbacks can rely on finding it.
+        // Listens on a socket and does not care whether the VM is up yet, so it stays here where
+        // the scene callbacks can rely on finding it.
         configServer = ConfigServer(qemuInterface: qemu!, listenImmediately: true)
 
-        // Settle how we're going to run, arrange it, and boot, all off the main
-        // thread.
+        // Settle how we're going to run, arrange it, and boot, all off the main thread.
         bootQueue.async { [weak self] in
             let outcome = JitEnablement.prepareForBoot()
             Log.ui.note("launch: jit settled at \(AppDelegate.sinceLaunch())")
 
-            // QEMU's first act under TXM is to trap for its code buffer, and
-            // that trap stops every thread here until the last page is blessed.
+            // QEMU's first act under TXM is to trap for its code buffer, and that trap stops every
+            // thread here until the last page is blessed.
             if case .blessed = outcome, JitEnablement.expectsFreeze {
                 FreezeBanner.raiseAndWait(JitEnablement.preparingMessage)
             }
@@ -106,8 +105,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             Log.ui.note("launch: qemu started at \(AppDelegate.sinceLaunch())")
         }
 
-        // Nothing slow left above, so this is the point at which UIKit is free
-        // to draw.
+        // Nothing slow left above, so this is the point at which UIKit is free to draw.
         Log.ui.note("launch: delegate returned at \(AppDelegate.sinceLaunch())")
 
         return true

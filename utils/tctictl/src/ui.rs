@@ -4,8 +4,14 @@ use anyhow::{Result, anyhow};
 
 use crate::comms::run_command;
 
-/// Selects a folder from the host, and ensures tctiSH can access it.
-/// Returns the unix file path for the relevant folder.
+/// Selects a folder from the host, and ensures tctiSH can access it. Returns
+/// the unix file path for the relevant folder.
+///
+/// The path-flavoured counterpart to `select_folder_as_bookmark`, and the half
+/// of the pair nothing calls yet. Kept so the two ways of naming a folder stay
+/// symmetrical, rather than deleted and rewritten when the first caller wants a
+/// path.
+#[allow(dead_code)]
 pub(crate) fn select_folder_as_path() -> Result<String> {
     // Pop up our UI, and fetch the actual folder.
     let response = run_command("choose_folder".to_owned(), None, None);
@@ -20,18 +26,16 @@ pub(crate) fn select_folder_as_path() -> Result<String> {
                 return Err(anyhow!(message.value.unwrap_or("-none-".to_owned())));
             }
 
-            return Ok(message
+            Ok(message
                 .value
-                .expect("ConfigServer indicated we have a folder, but didn't provide one!"));
+                .expect("ConfigServer indicated we have a folder, but didn't provide one!"))
         }
-        Err(err) => {
-            return Err(err);
-        }
+        Err(err) => Err(err),
     }
 }
 
-/// Selects a folder from the host, and ensures tctiSH can access it.
-/// Returns a base64 'bookmark' that can be used with e.g. the mount API calls.
+/// Selects a folder from the host, and ensures tctiSH can access it. Returns a
+/// base64 'bookmark' that can be used with e.g. the mount API calls.
 pub(crate) fn select_folder_as_bookmark() -> Result<String> {
     // Pop up our UI, and fetch the actual folder.
     let response = run_command("open_folder".to_owned(), None, None);
@@ -46,12 +50,10 @@ pub(crate) fn select_folder_as_bookmark() -> Result<String> {
                 return Err(anyhow!(message.value.unwrap_or("-none-".to_owned())));
             }
 
-            return Ok(message
+            Ok(message
                 .value
-                .expect("ConfigServer indicated we have a folder, but didn't provide one!"));
+                .expect("ConfigServer indicated we have a folder, but didn't provide one!"))
         }
-        Err(err) => {
-            return Err(err);
-        }
+        Err(err) => Err(err),
     }
 }

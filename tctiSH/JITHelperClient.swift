@@ -28,11 +28,11 @@ enum JITHelperClient {
 
     /// Attaches the debugger and answers QEMU's blessing trap.
     ///
-    /// Returns when enablement is *over*, which is long after the point the host
-    /// cares about: the attach lands early, QEMU is booted once it has, and this
-    /// only comes back once the region has been blessed. Callers wait on the
-    /// attach -- see `jit_debugger_tracing()` -- and treat this completion as
-    /// the after-the-fact report it is.
+    /// Returns when enablement is *over*, which is long after the point the
+    /// host cares about: the attach lands early, QEMU is booted once it has,
+    /// and this only comes back once the region has been blessed. Callers wait
+    /// on the attach -- see `jit_debugger_tracing()` -- and treat this
+    /// completion as the after-the-fact report it is.
     static func enable(
         pairingData: Data?,
         targetPID: pid_t,
@@ -87,9 +87,8 @@ enum JITHelperClient {
                 "host: \(operation) \(reply.outcome.rawValue) after \(elapsed()) "
                     + "(helper pid \(helperPid)): \(reply.detail)")
 
-            // The helper logs these itself, but a helper the system killed takes
-            // its buffered log with it, so what made it back here is what we can
-            // rely on having.
+            // The helper logs these itself, but a helper the system killed takes its buffered log
+            // with it, so what made it back here is what we can rely on having.
             for line in reply.report {
                 Log.jit.note("host:   \(line)")
             }

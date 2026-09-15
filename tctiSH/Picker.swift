@@ -13,8 +13,8 @@ import UniformTypeIdentifiers
 /// Picker for allowing the user to select a single directory.
 class DirectoryPicker: NSObject, UIDocumentPickerDelegate {
 
-    /// The result of our selection; the URLs picked.
-    /// Protected by selectionCondition.lock().
+    /// The result of our selection; the URLs picked. Protected by
+    /// selectionCondition.lock().
     private var selectedURLs: [URL]?
 
     /// CV that indicates when selection is complete.
@@ -25,8 +25,8 @@ class DirectoryPicker: NSObject, UIDocumentPickerDelegate {
         super.init()
     }
 
-    /// Pops up a dialog that allows the user to select a directory.
-    /// Returns [] on failure/cancel, or [<url>] on success.
+    /// Pops up a dialog that allows the user to select a directory. Returns []
+    /// on failure/cancel, or [<url>] on success.
     public class func popUpModalDialog() -> [URL] {
 
         // Create a simple directory picker...
@@ -46,15 +46,14 @@ class DirectoryPicker: NSObject, UIDocumentPickerDelegate {
 
             // Set up a file picker to find a folder...
             //
-            // `asCopy: false` is what makes this open in place rather than
-            // duplicating the selection into our container, which is the whole
-            // point: the user picks a directory to share with the guest.
+            // `asCopy: false` is what makes this open in place rather than duplicating the
+            // selection into our container, which is the whole point: the user picks a directory to
+            // share with the guest.
             let documentPicker = UIDocumentPickerViewController(
                 forOpeningContentTypes: Self.contentTypes, asCopy: false)
             documentPicker.delegate = self
 
-            // ... and pop up that picker, if there's anything to pop it up
-            // from.
+            // ... and pop up that picker, if there's anything to pop it up from.
             guard let viewController = ViewController.getCurrent() else {
                 self.handleDocumentPickerResult(urls: [])
                 return
@@ -63,8 +62,8 @@ class DirectoryPicker: NSObject, UIDocumentPickerDelegate {
         }
     }
 
-    /// Retreives any files selected by the user.
-    /// Typically called in a blocking manner.
+    /// Retreives any files selected by the user. Typically called in a blocking
+    /// manner.
     func getSelectedFiles(blocking: Bool = true) -> [URL]? {
         selectionCondition.lock()
         defer { selectionCondition.unlock() }

@@ -11,11 +11,11 @@ import StikJIT
 
 /// Matches the host's `Log.jit`, so one Console filter catches both processes.
 ///
-/// Not the host's `Log` type itself: that lives in the app target and this is
-/// a separate binary. The subsystem string is the contract between the two.
+/// Not the host's `Log` type itself: that lives in the app target and this is a
+/// separate binary. The subsystem string is the contract between the two.
 ///
-/// Public because the unified log otherwise redacts every interpolated value
-/// to `<private>`, which makes the messages useless for diagnosis.
+/// Public because the unified log otherwise redacts every interpolated value to
+/// `<private>`, which makes the messages useless for diagnosis.
 private let jitLogger = Logger(subsystem: "io.ara.tctish.jit", category: "jit")
 private func jitNote(_ message: String) {
     jitLogger.notice("\(message, privacy: .public)")
@@ -47,9 +47,9 @@ class JITHelperService: NSObject, NSExtensionRequestHandling {
                 report.append(line)
             }
 
-            // A local IORegistry read: no tunnel, no pairing file, no cost. The
-            // host works this out independently and compares, so a drift between
-            // the two gates shows up in the log instead of as a hang.
+            // A local IORegistry read: no tunnel, no pairing file, no cost. The host works this out
+            // independently and compares, so a drift between the two gates shows up in the log
+            // instead of as a hang.
             reply.txmPresent = StikJIT.isTXMPresent
 
             let started = Date()
@@ -123,10 +123,9 @@ class JITHelperService: NSObject, NSExtensionRequestHandling {
 
         do {
             try withPairingFile(pairingData) { pairingFile in
-                // Ask before attaching. `enableJIT` would happily prepare the
-                // device for us, but preparing means downloading and mounting a
-                // developer disk image: minutes of work, finishing long after
-                // the host stopped waiting and booted without JIT.
+                // Ask before attaching. `enableJIT` would happily prepare the device for us, but
+                // preparing means downloading and mounting a developer disk image: minutes of work,
+                // finishing long after the host stopped waiting and booted without JIT.
                 let mounted = try StikJIT.isDDIMounted(pairingFile: pairingFile)
                 reply.ddiMounted = mounted
 
@@ -142,9 +141,8 @@ class JITHelperService: NSObject, NSExtensionRequestHandling {
                     script: .universal,
                     forceScript: false,
                     preparationProgress: { stage in
-                        // `prepareDevice` returns as soon as it sees the image
-                        // mounted, which the check above just confirmed, so it
-                        // should get no further than that.
+                        // `prepareDevice` returns as soon as it sees the image mounted, which the
+                        // check above just confirmed, so it should get no further than that.
                         if case .downloadingDDI = stage {
                             note(
                                 "  WARNING: downloading the DDI from inside enable, "

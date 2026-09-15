@@ -1,8 +1,8 @@
-/// ! Commands for mounting iOS folders into the tctiSH guest.
+//! Commands for mounting iOS folders into the tctiSH guest.
+
 use std::{fs, thread, time::Duration};
 
 use anyhow::{Result, anyhow};
-use sys_mount::{FilesystemType, Mount, MountFlags};
 
 use crate::comms::run_command;
 
@@ -14,10 +14,14 @@ const MOUNT_ALLOWED: bool = false;
 const MOUNT_ALLOWED: bool = true;
 
 /// Options used when mounting host filesystems.
+///
+/// Unused while the mount below is still a FIXME, and kept rather than deleted
+/// because it is the one part of that work already known to be right.
+#[allow(dead_code)]
 const HOST_MOUNT_OPTIONS: &str = "trans=virtio,version=9p2000.L,debug=0x40";
 
-/// The delay between a successful prepare_mount() and returning.
-/// Gives QEMU time to actually make things available.
+/// The delay between a successful prepare_mount() and returning. Gives QEMU
+/// time to actually make things available.
 const PREPARE_MOUNT_DELAY: Duration = Duration::new(1, 0);
 
 /// Handles the "mount" command.
@@ -28,12 +32,13 @@ pub(crate) fn mount_from_host(host_bookmark: String, guest_path: String) -> Resu
     }
 
     // Set up mounting from inside the guest...
-    let mount_tag = prepare_mount_from_bookmark(host_bookmark, guest_path)
+    let _mount_tag = prepare_mount_from_bookmark(host_bookmark, guest_path)
         .expect("failed to prepare mount from host!");
     scan_for_new_virtfs_channels().expect("could not set up guest to receive mount!");
 
     // ... and perform the mount itself.
-    // FIXME: do this
+    // FIXME: do this. `use sys_mount::{FilesystemType, Mount, MountFlags};` comes back with it, and
+    // the binding above loses its underscore.
     // let result = Mount::new(
     // mount_tag,
     // guest_path,
@@ -48,36 +53,36 @@ pub(crate) fn mount_from_host(host_bookmark: String, guest_path: String) -> Resu
     Ok(())
 }
 
-/// Performs a full mount from a host path identifier, which can be a bookmark or a path.
-/// Argtype should indicate if this is a 'path' or a 'bookmark' using those strings.
-/// Returns a tag that can be used to mount the given folder using 9pfs.
-fn prepare_mount(mount_arg: String, argName: String) -> Result<String> {
+/// Performs a full mount from a host path identifier, which can be a bookmark
+/// or a path. Argtype should indicate if this is a 'path' or a 'bookmark' using
+/// those strings. Returns a tag that can be used to mount the given folder
+/// using 9pfs.
+fn prepare_mount(mount_arg: String, arg_name: String) -> Result<String> {
     let response = run_command(
         "prepare_mount".to_owned(),
-        Some(argName.to_owned()),
+        Some(arg_name.to_owned()),
         Some(mount_arg),
     );
     match response {
         Ok(message) => {
             thread::sleep(PREPARE_MOUNT_DELAY);
-            return Ok(message
+            Ok(message
                 .value
-                .expect("did not receive a mount path in response!"));
+                .expect("did not receive a mount path in response!"))
         }
-        Err(err) => {
-            return Err(err);
-        }
+        Err(err) => Err(err),
     }
 }
 
-/// Prepares QEMU to mount a host folder into our guest.
-/// Returns a tag that can be used to mount the given folder using 9pfs.
+/// Prepares QEMU to mount a host folder into our guest. Returns a tag that can
+/// be used to mount the given folder using 9pfs.
 pub(crate) fn prepare_mount_from_path(host_path: String) -> Result<String> {
     prepare_mount(host_path, "".to_owned())
 }
 
-/// Prepares QEMU to mount a folder from a base64 'bookmark' e.g. returned from other API calls.
-/// Returns a tag that can be used to mount the given folder using 9pfs.
+/// Prepares QEMU to mount a folder from a base64 'bookmark' e.g. returned from
+/// other API calls. Returns a tag that can be used to mount the given folder
+/// using 9pfs.
 pub(crate) fn prepare_mount_from_bookmark(bookmark: String, name: String) -> Result<String> {
     prepare_mount(bookmark, name)
 }

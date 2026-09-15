@@ -89,7 +89,8 @@ enum TunnelProbe {
         return found
     }
 
-    /// Probes the tunnel endpoint, blocking until it answers or `timeout` elapses.
+    /// Probes the tunnel endpoint, blocking until it answers or `timeout`
+    /// elapses.
     static func probe(
         address: String = defaultAddress,
         port: UInt16 = defaultPort,
@@ -121,10 +122,10 @@ enum TunnelProbe {
             case .failed(let error):
                 if outcome.finish(reason: error.localizedDescription) { semaphore.signal() }
 
-            // Reported when the path itself is unusable. Measured behaviour with
-            // the tunnel down is a timeout rather than this -- 10.7.0.1 routes out
-            // the default interface and the SYNs are simply dropped -- but handle
-            // it anyway for the cases where the network does say no.
+            // Reported when the path itself is unusable. Measured behaviour with the tunnel down is
+            // a timeout rather than this -- 10.7.0.1 routes out the default interface and the SYNs
+            // are simply dropped -- but handle it anyway for the cases where the network does say
+            // no.
             case .waiting(let error):
                 if outcome.finish(reason: "waiting: \(error.localizedDescription)") {
                     semaphore.signal()
@@ -157,8 +158,8 @@ enum TunnelProbe {
     static func probeAndReport() -> TunnelProbeResult {
         let tunnels = activeTunnelInterfaces()
 
-        // Log what we found either way: the endpoint's subnet turned out not to
-        // match the address we're assigned, so this is how we learn the layout.
+        // Log what we found either way: the endpoint's subnet turned out not to match the address
+        // we're assigned, so this is how we learn the layout.
         let summary =
             tunnels.isEmpty
             ? "none"
@@ -169,9 +170,8 @@ enum TunnelProbe {
             return .unavailable(reason: "no tunnel interface", elapsed: 0)
         }
 
-        // A `utun` by name alone is not a LocalDevVPN tunnel: Tailscale answers
-        // to that description perfectly well so we run additional probes to
-        // avoid waiting the entire timeout.
+        // A `utun` by name alone is not a LocalDevVPN tunnel: Tailscale answers to that description
+        // perfectly well so we run additional probes to avoid waiting the entire timeout.
         guard tunnels.contains(where: { $0.address.hasPrefix(tunnelNetworkPrefix) }) else {
             Log.network.note("tunnel: nothing on \(tunnelNetwork), so not probing")
             return .unavailable(reason: "no tunnel interface on \(tunnelNetwork)", elapsed: 0)
@@ -197,7 +197,8 @@ enum TunnelProbe {
     }
 }
 
-/// Guards against the connection reporting twice, or reporting after we've given up.
+/// Guards against the connection reporting twice, or reporting after we've
+/// given up.
 private final class ProbeOutcome {
     private let lock = NSLock()
     private var isFinished = false

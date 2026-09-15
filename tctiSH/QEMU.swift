@@ -25,7 +25,8 @@ struct DiskMountInfo: Codable {
 /// Provides an interface for running / controlling a QEMU VM.
 public class QEMUInterface {
 
-    /// The hostfwd pattern used to make SSH connections available to the application.
+    /// The hostfwd pattern used to make SSH connections available to the
+    /// application.
     private static let sshHostForward: String = "tcp:127.0.0.1:10022-:22"
 
     /// The port on which we connect using the QEMU monitor.
@@ -68,10 +69,9 @@ public class QEMUInterface {
         // ... get a filename for our unix domain monitor-connection socket ...
         monitorSocketPath = getDatastoreURL("monitor", fileExtension: "socket").path
 
-        // Say what we're about to run. A hung VM looks identical whichever
-        // build and boot image produced it, and those are exactly the two things
-        // that determine whether it *can* boot -- a snapshot taken under one
-        // QEMU build is not necessarily loadable by the other.
+        // Say what we're about to run. A hung VM looks identical whichever build and boot image
+        // produced it, and those are exactly the two things that determine whether it *can* boot --
+        // a snapshot taken under one QEMU build is not necessarily loadable by the other.
         Log.qemu.note(
             "\(getAppropriateQemuFramework().lastPathComponent), "
                 + "accel \(AppDelegate.usingJitHacks ? "tcg,split-wx=on" : "tcg"), "
@@ -92,20 +92,21 @@ public class QEMUInterface {
         recreatePersistentMounts()
     }
 
-    /// Saves the state of the running QEMU instance.
-    /// With no arguments, updates the Instant Boot cache.
+    /// Saves the state of the running QEMU instance. With no arguments, updates
+    /// the Instant Boot cache.
     func saveState(tag: String) {
         issueMonitorCommand("savevm \(tag)")
     }
 
-    /// Saves the state of the running QEMU instance.
-    /// With no arguments, loads from the Instant Boot cache.
+    /// Saves the state of the running QEMU instance. With no arguments, loads
+    /// from the Instant Boot cache.
     func loadState(tag: String) {
         issueMonitorCommand("loadvm \(tag)")
         issueMonitorCommand("c")
     }
 
-    /// Saves the state of the running QEMU instance in a background-safe manner.
+    /// Saves the state of the running QEMU instance in a background-safe
+    /// manner.
     func performBackgroundSave() {
         if let terminal = ViewController.getCurrentTerminal() {
             let nextTag = getNextInstantResumeTag()
@@ -121,8 +122,8 @@ public class QEMUInterface {
         }
     }
 
-    /// Get the next 'instant resume' file image.
-    /// This ensures we never overwrite an image until our save is complete.
+    /// Get the next 'instant resume' file image. This ensures we never
+    /// overwrite an image until our save is complete.
     private func getNextInstantResumeTag() -> String {
         let current = getImageProperty(
             diskName: getDiskName(), property: "resume_image", defaultValue: "b")
@@ -154,8 +155,8 @@ public class QEMUInterface {
         issueMonitorCommand("hostfwd_add \(QEMUInterface.sshHostForward)")
     }
 
-    /// Sets up the permissions for using a bookmarked folder.
-    /// Used to restore access to an iOS folder.
+    /// Sets up the permissions for using a bookmarked folder. Used to restore
+    /// access to an iOS folder.
     private func setupMountPermissions(bookmarkData: Data) -> URL? {
         var isStale = false;
 
@@ -188,7 +189,8 @@ public class QEMUInterface {
         return mount(hostPath: hostPath!, interfaceId: id, predefinedTag: tag)
     }
 
-    /// Saves mount data into our "VM" configuration, so we can automatically remount it on startup.
+    /// Saves mount data into our "VM" configuration, so we can automatically
+    /// remount it on startup.
     private func makeMountPersistent(bookmarkData: Data, interfaceId: String, tag: String) {
 
         // Get an encapsulation of our mount data...
@@ -288,7 +290,8 @@ public class QEMUInterface {
     }
 
     /// Fetches the path to the QEMU framework appropriate for this environment.
-    /// Will return a JIT-capable image if JIT is supported; or a TCTI image otherwise.
+    /// Will return a JIT-capable image if JIT is supported; or a TCTI image
+    /// otherwise.
     private func getAppropriateQemuFramework() -> URL {
         var frameworkURL = Bundle.main.bundleURL
         frameworkURL.appendPathComponent("Frameworks", isDirectory: true)
@@ -384,8 +387,8 @@ public class QEMUInterface {
         return targetURL
     }
 
-    /// Returns the URL of a folder that can be used as the root of our iOS mounts.
-    /// Typically mounted as `/ios_host`.
+    /// Returns the URL of a folder that can be used as the root of our iOS
+    /// mounts. Typically mounted as `/ios_host`.
     static func getSharedFolder() -> URL {
         // Figure out where our persistent store would be located.
         let targetURL = getDatastoreURL("SharedFolder", fileExtension: "d")
@@ -399,14 +402,14 @@ public class QEMUInterface {
         return targetURL
     }
 
-    /// Returns the URL of a folder that can be used as the root of our iOS mounts.
-    /// Typically mounted as `/ios_host`.
+    /// Returns the URL of a folder that can be used as the root of our iOS
+    /// mounts. Typically mounted as `/ios_host`.
     func getSharedFolder() -> URL {
         return QEMUInterface.getSharedFolder()
     }
 
-    /// Returns the path of a shared file that can be used to pass our last-cwd to the guest.
-    /// Contents of the file are managed by our console frontend.
+    /// Returns the path of a shared file that can be used to pass our last-cwd
+    /// to the guest. Contents of the file are managed by our console frontend.
     static func getLastCWDFile() -> URL {
         var cwdFile = QEMUInterface.getSharedFolder()
         cwdFile.appendPathComponent("last_cwd.dat")
@@ -414,7 +417,8 @@ public class QEMUInterface {
         return cwdFile
     }
 
-    /// Removes any last-CWD file present, which is used to store the current CWD.
+    /// Removes any last-CWD file present, which is used to store the current
+    /// CWD.
     func clearLastCWDFile() {
         let cwdFile = QEMUInterface.getLastCWDFile()
 
@@ -424,8 +428,8 @@ public class QEMUInterface {
         }
     }
 
-    /// Retreives the path to a file in our local data store.
-    /// Currently fetches a path in the per-app 'Documents' directory; but this may change.
+    /// Retreives the path to a file in our local data store. Currently fetches
+    /// a path in the per-app 'Documents' directory; but this may change.
     private static func getDatastoreURL(_ name: String, fileExtension: String, create: Bool = true)
         -> URL
     {
@@ -444,8 +448,8 @@ public class QEMUInterface {
         return targetURL
     }
 
-    /// Retreives the path to a file in our local data store.
-    /// Currently fetches a path in the per-app 'Documents' directory; but this may change.
+    /// Retreives the path to a file in our local data store. Currently fetches
+    /// a path in the per-app 'Documents' directory; but this may change.
     private func getDatastoreURL(_ name: String, fileExtension: String, create: Bool = true) -> URL
     {
         QEMUInterface.getDatastoreURL(name, fileExtension: fileExtension, create: create)
@@ -485,13 +489,15 @@ public class QEMUInterface {
         return (image == "") || (image == "instantboot")
     }
 
-    /// Gets the name of the save-state to be used for resuming a VM in "persist state" mode.
+    /// Gets the name of the save-state to be used for resuming a VM in "persist
+    /// state" mode.
     private func getResumeImage(diskName: String? = nil) -> String {
         let diskName = diskName ?? getDiskName()
         return getImageProperty(diskName: diskName, property: "resume_image", defaultValue: "")
     }
 
-    /// Sets the name of the save-state to be used for resuming a VM in "persist state" mode.
+    /// Sets the name of the save-state to be used for resuming a VM in "persist
+    /// state" mode.
     private func setResumeImage(tag: String, diskName: String? = nil) {
         let diskName = diskName ?? getDiskName()
         setImageProperty(diskName: diskName, property: "resume_image", value: tag)
@@ -508,8 +514,8 @@ public class QEMUInterface {
         return (try? monitorSocket.write(from: terminatedCommand.data(using: .utf8)!)) != nil
     }
 
-    /// Ensures we have a connection to our VM over the QEMU management protocol,
-    /// returning whether there is one.
+    /// Ensures we have a connection to our VM over the QEMU management
+    /// protocol, returning whether there is one.
     @discardableResult
     private func ensureMonitorConnection() -> Bool {
 
@@ -553,8 +559,8 @@ public class QEMUInterface {
     func requestRecoveryBoot() -> Bool {
         Log.qemu.note("recovery boot requested; resetting the machine")
 
-        // Whatever happens next, the resumed session is gone -- so make sure a
-        // relaunch doesn't try to pick it up again.
+        // Whatever happens next, the resumed session is gone -- so make sure a relaunch doesn't try
+        // to pick it up again.
         UserDefaults.standard.set(true, forKey: "attempting_boot")
 
         guard issueMonitorCommand("system_reset") else {

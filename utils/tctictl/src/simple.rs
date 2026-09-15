@@ -9,8 +9,8 @@ const COMMAND_FONT: &str = "font";
 const COMMAND_GETCWD: &str = "getcwd";
 
 /// Returns a given tctiSH font property.
-fn get_font_property(property: &str) -> Result<String> {
-    return Ok("<TODO>".to_owned());
+fn get_font_property(_property: &str) -> Result<String> {
+    Ok("<TODO>".to_owned())
 }
 
 /// Sets a font property, changing the way the host displays its terminal.
@@ -28,11 +28,7 @@ pub(crate) fn handle_font(property: Option<String>, value: Option<String>) {
         }
         // Otherwise, fetch it.
         else {
-            println!(
-                "{} = {}\n",
-                &property,
-                get_font_property(&property).unwrap()
-            );
+            println!("{} = {}\n", property, get_font_property(&property).unwrap());
         }
     }
     // If we don't have any arguments, print our known values and
@@ -59,10 +55,8 @@ pub(crate) fn handle_getcwd() -> Result<String> {
                 return Err(anyhow!(message.value.unwrap_or("-none-".to_owned())));
             }
 
-            return Ok(message.value.expect("response didn't include a CWD"));
+            Ok(message.value.expect("response didn't include a CWD"))
         }
-        Err(err) => {
-            return Err(err);
-        }
+        Err(err) => Err(err),
     }
 }

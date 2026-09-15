@@ -57,8 +57,8 @@ enum JitPairingFile {
             return .cancelled
         }
 
-        // Files chosen through the picker live outside our container, so they
-        // need the security scope held open for the length of the copy.
+        // Files chosen through the picker live outside our container, so they need the security
+        // scope held open for the length of the copy.
         let scoped = source.startAccessingSecurityScopedResource()
         defer {
             if scoped {

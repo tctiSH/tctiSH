@@ -69,9 +69,8 @@ final class FreezeBanner: UIView {
             pendingRaise = nil
             present(message)
 
-            // Signalled from the completion of the transaction that commits
-            // this layout, which is the first moment the banner is on the glass
-            // rather than merely in the hierarchy.
+            // Signalled from the completion of the transaction that commits this layout, which is
+            // the first moment the banner is on the glass rather than merely in the hierarchy.
             CATransaction.begin()
             CATransaction.setCompletionBlock { drawn.signal() }
             current?.superview?.layoutIfNeeded()
@@ -83,8 +82,8 @@ final class FreezeBanner: UIView {
         }
     }
 
-    /// Takes the banner down, and calls off one that hasn't appeared yet.
-    /// Safe from any thread.
+    /// Takes the banner down, and calls off one that hasn't appeared yet. Safe
+    /// from any thread.
     static func lower() {
         onMain {
             pendingRaise?.cancel()
@@ -146,8 +145,8 @@ final class FreezeBanner: UIView {
         autoresizingMask = [.flexibleWidth, .flexibleHeight]
         backgroundColor = UIColor.black.withAlphaComponent(0.55)
 
-        // Swallows every touch, which is the honest thing to do: the app is
-        // about to stop answering them anyway.
+        // Swallows every touch, which is the honest thing to do: the app is about to stop answering
+        // them anyway.
         isUserInteractionEnabled = true
         accessibilityViewIsModal = true
 
