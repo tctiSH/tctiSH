@@ -10,6 +10,7 @@
 //
 
 #include <dlfcn.h>
+#include <stdatomic.h>
 #include <limits.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -64,8 +65,118 @@ struct qemu_args {
     char *boot_image_name;
     char *dll_name;
     char *memory_value;
+    char *accel_args;
     bool is_jit;
 };
+
+/// The QEMU image, once the VM thread has opened it.
+///
+/// `dlopen` here is RTLD_LOCAL, so these symbols never reach the global
+/// namespace and `RTLD_DEFAULT` cannot find them. Keeping the handle is how
+/// anything outside that thread gets to ask QEMU a question.
+static _Atomic(void *) qemu_image_handle;
+
+/// Looks a symbol up in the QEMU image, or NULL if it isn't open yet.
+static void *qemu_symbol(const char *name) {
+    void *handle = atomic_load(&qemu_image_handle);
+    return handle ? dlsym(handle, name) : NULL;
+}
+
+size_t qemu_code_cache_used(void) {
+    static size_t (*fn)(void);
+    if (!fn) {
+        fn = qemu_symbol("tctish_code_cache_used");
+    }
+    return fn ? fn() : 0;
+}
+
+size_t qemu_code_cache_usable(void) {
+    static size_t (*fn)(void);
+    if (!fn) {
+        fn = qemu_symbol("tctish_code_cache_usable");
+    }
+    return fn ? fn() : 0;
+}
+
+size_t qemu_code_cache_total(void) {
+    static size_t (*fn)(void);
+    if (!fn) {
+        fn = qemu_symbol("tctish_code_cache_total");
+    }
+    return fn ? fn() : 0;
+}
+
+bool qemu_code_cache_can_grow(void) {
+    static bool (*fn)(void);
+    if (!fn) {
+        fn = qemu_symbol("tctish_code_cache_can_grow");
+    }
+    return fn ? fn() : false;
+}
+
+size_t qemu_code_cache_released(void) {
+    static size_t (*fn)(void);
+    if (!fn) {
+        fn = qemu_symbol("tctish_code_cache_released");
+    }
+    return fn ? fn() : 0;
+}
+
+size_t qemu_code_cache_release_attempts(void) {
+    static size_t (*fn)(void);
+    if (!fn) {
+        fn = qemu_symbol("tctish_code_cache_release_attempts");
+    }
+    return fn ? fn() : 0;
+}
+
+int qemu_code_cache_release_errno(void) {
+    static int (*fn)(void);
+    if (!fn) {
+        fn = qemu_symbol("tctish_code_cache_release_errno");
+    }
+    return fn ? fn() : 0;
+}
+
+int qemu_code_cache_release_errno_rx(void) {
+    static int (*fn)(void);
+    if (!fn) {
+        fn = qemu_symbol("tctish_code_cache_release_errno_rx");
+    }
+    return fn ? fn() : 0;
+}
+
+bool qemu_snapshot_was_missing(void) {
+    static bool (*fn)(void);
+    if (!fn) {
+        fn = qemu_symbol("tctish_snapshot_was_missing");
+    }
+    return fn ? fn() : false;
+}
+
+size_t qemu_code_cache_shrink(size_t target) {
+    static size_t (*fn)(size_t);
+    if (!fn) {
+        fn = qemu_symbol("tctish_code_cache_shrink");
+    }
+    return fn ? fn(target) : 0;
+}
+
+bool qemu_code_cache_needs_debugger(void) {
+    static bool (*fn)(void);
+    if (!fn) {
+        fn = qemu_symbol("tctish_code_cache_needs_debugger");
+    }
+    return fn ? fn() : false;
+}
+
+size_t qemu_code_cache_grow(size_t target) {
+    static size_t (*fn)(size_t);
+    if (!fn) {
+        fn = qemu_symbol("tctish_code_cache_grow");
+    }
+    return fn ? fn(target) : 0;
+}
 
 /// Core thread that runs our background QEMU.
 static void *qemu_thread(void *raw_args) {
@@ -123,8 +234,8 @@ static void *qemu_thread(void *raw_args) {
         // Monitor conection in-guest tools.
         "-monitor", "tcp:localhost:10045,server,wait=off",
 
-        // Use JIT if we have JIT hacks.
-        "-accel", args->is_jit ? "tcg,split-wx=on" : "tcg",
+        // Use JIT if we have JIT hacks, and size the code cache if we were asked to.
+        "-accel", args->accel_args,
 
         // Share in our core shared folder, always.
         "-fsdev", args->shared_folder_args,
@@ -142,6 +253,9 @@ static void *qemu_thread(void *raw_args) {
 
     // Open the appropriate QEMU framework...
     qemu_dll = dlopen(args->qemu_image, RTLD_NOW);
+
+    // ... publish it, so the app can ask the running VM about its code cache ...
+    atomic_store(&qemu_image_handle, qemu_dll);
 
     // ... and fetch the QEMU functions we need.
     qemu_init = dlsym(qemu_dll, "qemu_init");
@@ -161,6 +275,7 @@ static void *qemu_thread(void *raw_args) {
     free(args->disk_args);
     free(args->shared_folder_args);
     free(args->memory_value);
+    free(args->accel_args);
     if (args->boot_image_name) {
         free(args->boot_image_name);
     }
@@ -174,7 +289,7 @@ void run_background_qemu(const char *qemu_path, const char *kernel_path, const c
                          const char *bios_path, const char *disk_path,
                          const char *shared_folder_path, const char *boot_image_name,
                          const char *memory_value, const char *monitor_socket_path, bool is_jit,
-                         bool bless_jit_regions) {
+                         bool bless_jit_regions, unsigned int tb_size_mib, unsigned int chunk_mib) {
     pthread_t thread;
     pthread_attr_t qosAttribute;
 
@@ -184,6 +299,12 @@ void run_background_qemu(const char *qemu_path, const char *kernel_path, const c
     // debugger and its script; QEMU trapping when no script is listening is
     // fatal, and a script waiting for a trap that never comes hangs.
     setenv("TCTISH_JIT_BLESS", bless_jit_regions ? "1" : "0", 1);
+
+    // How much of the code cache to prepare at a time. Travels the same way and for the same
+    // reason: the app owns it, because the app is what finds a debugger for each chunk.
+    char chunk_value[32];
+    snprintf(chunk_value, sizeof(chunk_value), "%u", chunk_mib);
+    setenv("TCTISH_CODE_CACHE_CHUNK", chunk_value, 1);
 
     struct qemu_args *args = calloc(1, sizeof(struct qemu_args));
 
@@ -211,6 +332,15 @@ void run_background_qemu(const char *qemu_path, const char *kernel_path, const c
     args->monitor_channel_args = calloc(ARGUMENT_MAX, sizeof(char));
     snprintf(args->monitor_channel_args, ARGUMENT_MAX, "unix:%s,server,nowait",
              monitor_socket_path);
+
+    // Create our accelerator argument.
+    //
+    // tb_size_mib is passed whatever it is, including zero: QEMU reads `tb-size=0` as "use the
+    // default", which is the same decision size_code_gen_buffer() makes when the property is left
+    // off entirely. One line, and no branch whose other half nothing ever takes.
+    args->accel_args = calloc(ARGUMENT_MAX, sizeof(char));
+    snprintf(args->accel_args, ARGUMENT_MAX, "tcg%s,tb-size=%u", is_jit ? ",split-wx=on" : "",
+             tb_size_mib);
 
     // Copy in each of our filenames/arguments.
     strncpy(args->qemu_image, qemu_path, PATH_MAX - 1);

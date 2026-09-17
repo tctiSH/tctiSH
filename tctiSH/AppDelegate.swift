@@ -37,6 +37,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     static var isFirstBoot = false
     static var memoryValueChanged = false
 
+    /// Whether the code cache size has moved since the last boot.
+    ///
+    /// Separate from `memoryValueChanged` because guest RAM is part of the
+    /// migration stream, so changing it invalidates every snapshot and forces a
+    /// cold boot. The code cache is never migrated at all, so a change here
+    /// waits for a restart but never costs the session.
+    static var codeCacheChanged = false
+
     /// When `didFinishLaunchingWithOptions` began.
     ///
     /// The launch screen stays up until the first frame is drawn, so every
@@ -68,6 +76,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             "jit_mode": "jit_when_possible",
             "images": default_images,
             "memory": "1G",
+            "code_cache_mode": CodeCache.Mode.fixed.rawValue,
+            "code_cache_ceiling": CodeCache.autoCeiling,
+            "code_cache_notifications": true,
         ])
 
         // If we attempted a boot, but did not finish one, something went wrong last time. Force a
@@ -82,8 +93,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Create a QEMU interface, which will launch our background kernel.
         qemu = QEMUInterface()
 
-        // Both of these are cheap.
+        // All of these are cheap, and all have to be read before the boot below records this
+        // launch's values over the top of them.
         AppDelegate.memoryValueChanged = qemu!.memoryValueChanged()
+        AppDelegate.codeCacheChanged = CodeCache.changedSinceLastBoot
         AppDelegate.isFirstBoot = qemu!.isFirstBoot()
 
         // Listens on a socket and does not care whether the VM is up yet, so it stays here where
@@ -121,6 +134,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     /// Called by `SceneDelegate`: under the scene life cycle UIKit delivers
     /// background transitions to the scene, not to the application delegate.
     func handleEnteredBackground() {
+        // Going back to the background cancels a reconnect that was waiting on the save. There is
+        // no foreground left to reconnect for, and `handleWillEnterForeground` will ask again.
+        reconnectWhenSaved = false
+
         if (saving) {
             return;
         }
@@ -130,24 +147,99 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return ();
         }
 
+        // Read on the main thread, because it is the view's idea of whether it is connected. Never
+        // snapshot a machine that has not finished booting: there is nothing in it worth resuming,
+        // and the snapshot could replace a valid one.
+        guard ViewController.getCurrentTerminal()?.connected == true else {
+            Log.ui.note("backgrounded before the shell connected; not saving")
+            return
+        }
+
         let application = UIApplication.shared
 
         saving = true
-        let taskIdentifier = application.beginBackgroundTask {}
-        qemu?.performBackgroundSave()
-        application.endBackgroundTask(taskIdentifier)
-        saving = false
+
+        // Off the main thread, with the assertion held until the save is really finished.
+        //
+        // Snapshotting a multi-gigabyte guest takes far longer than the moment iOS gives an app on
+        // its way out, so it has to run under a background task, and it cannot run *on* the main
+        // thread, because the expiration handler that gives the assertion back is called there.
+        var task = UIBackgroundTaskIdentifier.invalid
+
+        // Giving the assertion back and finishing the save are separate events, and conflating them
+        // lets a second save start on top of the first. Expiry means "hand this back now or be
+        // killed" but it does not stop the work, which carries on until its own deadlines run out.
+        // `saving` therefore stays true until the work actually ends.
+        let releaseAssertion = {
+            guard task != .invalid else { return }
+
+            application.endBackgroundTask(task)
+            task = .invalid
+        }
+
+        task = application.beginBackgroundTask(withName: "Saving Linux state") { [weak self] in
+            // Not `reportSaveFailure`: expiry means "hand the assertion back", not "the save
+            // failed". The work carries on and often finishes, so the announcement is deferred and
+            // withdrawn if it does; see `reportSaveRanOutOfTime`.
+            self?.qemu?.reportSaveRanOutOfTime()
+            releaseAssertion()
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.qemu?.performBackgroundSave()
+
+            DispatchQueue.main.async {
+                releaseAssertion()
+                self?.saveDidFinish()
+            }
+        }
 
         Log.ui.note("backgrounded")
     }
 
     /// Rebuilds the shell after a spell in the background.
+    ///
+    /// Held back while a save is running. `savevm` stops the guest for as long
+    /// as the snapshot takes, so reconnecting into one means SSH against a
+    /// machine that is not executing: the attempt fails, and the terminal's own
+    /// 1.5s poll retries until the VM comes back.
     func handleWillEnterForeground() {
         guard let terminal = ViewController.getCurrentTerminal(), terminal.connected else {
             return
         }
 
+        guard !saving else {
+            Log.ui.note("returned to the foreground mid-save; reconnecting once it finishes")
+
+            reconnectWhenSaved = true
+            NotificationCenter.default.post(name: AppDelegate.reconnectDeferred, object: nil)
+            return
+        }
+
         Log.ui.note("returned to the foreground; rebuilding the shell")
+        terminal.forceReconnect()
+    }
+
+    /// Whether the shell is waiting for a save before it reconnects.
+    private var reconnectWhenSaved = false
+
+    /// Posted on the main queue when a reconnect has been held back.
+    static let reconnectDeferred = Notification.Name("io.ara.tctish.reconnectDeferred")
+
+    /// Marks a save finished, and does whatever was waiting on it.
+    private func saveDidFinish() {
+        saving = false
+
+        guard reconnectWhenSaved else { return }
+        reconnectWhenSaved = false
+
+        // Checked again rather than assumed: a session that dropped while we were away needs no
+        // forcing, because the terminal's own poll is already on it.
+        guard let terminal = ViewController.getCurrentTerminal(), terminal.connected else {
+            return
+        }
+
+        Log.ui.note("session save finished; rebuilding the shell")
         terminal.forceReconnect()
     }
 

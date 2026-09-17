@@ -93,6 +93,7 @@ class ViewController: UIViewController {
 
             tv.feed(text: "This will take ~20 seconds or so.\r\n\r\n")
         }
+
         // If the user has just changed the amount of memory in the VM, they'll need a full boot to
         // re-populate the environment. Let them know.
         else if AppDelegate.memoryValueChanged {
@@ -101,6 +102,18 @@ class ViewController: UIViewController {
             tv.feed(text: "environment, just this once after the change.\r\n\r\n")
 
             tv.feed(text: "This will take ~20 seconds or so.\r\n\r\n")
+
+        }
+
+        // A code cache change costs nothing at the guest's end so this says what changed without
+        // promising a slow boot the way the branches above have to.
+        else if AppDelegate.codeCacheChanged {
+            tv.feed(text: "The code cache size has changed.\r\n")
+            tv.feed(text: "tctiSH is now using \(CodeCache.summary).\r\n\r\n")
+
+            for _ in 0...20 {
+                tv.feed(text: "\n")
+            }
 
         } else {
             // Provide some filler content,to ensure the ScrollView starts with something in it;
@@ -118,6 +131,15 @@ class ViewController: UIViewController {
         }
 
         setupKeyboardMonitor()
+
+        // Before `becomeFirstResponder`, because the accessory view is read as the terminal takes
+        // the keyboard. Installing it afterwards would need an explicit `reloadInputViews()` and
+        // would briefly show the bar without it.
+        SettingsAccessory.install(on: currentTerminal) { [weak self] in
+            guard let self else { return }
+            SettingsViewController.present(from: self)
+        }
+
         currentTerminal.becomeFirstResponder()
 
         // All of these need a window, which is exactly why the launch path couldn't do them itself.
@@ -130,6 +152,29 @@ class ViewController: UIViewController {
         observeJitState()
         reportBootProgress(for: currentTerminal)
         observeJitPreparation()
+        observeCodeCache()
+
+        // Every moment someone could be told. Becoming active covers a launch that follows the
+        // failed save and a return from the backgrounding that caused it, including the first
+        // activation of this launch.
+        //
+        // `didBecomeActive` rather than `willEnterForeground`, because showing this news spends it:
+        // the flag is the only copy, and a pill raised before the app is really in front of someone
+        // would run its few seconds out unwatched.
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.reportFailedSaveIfNeeded()
+        }
+
+        // And a save that fails while the app is already in front of someone, which neither of
+        // those covers: coming back mid-save defers the reconnect and leaves the save running, so
+        // its failure arrives with nobody about to become active for it.
+        NotificationCenter.default.addObserver(
+            forName: QEMUInterface.saveDidFail, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.reportFailedSaveIfNeeded()
+        }
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -167,17 +212,30 @@ class ViewController: UIViewController {
             name: TctiTermView.willReconnect,
             object: nil)
 
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(reconnectDeferred),
+            name: AppDelegate.reconnectDeferred,
+            object: nil)
+
         // Belt and braces: the observer goes on before anything could possibly have connected, but
         // a pill that never goes away is a worse bug than a pill that never appears.
         guard !terminal.connected else { return }
 
         showBootProgress(message: "Starting Linux")
+        watchForMissingSnapshot()
     }
 
     @objc private func terminalDidConnect() {
         bootStallWatch?.cancel()
         bootStallWatch = nil
+        stopWatchingForMissingSnapshot()
         status?.dismiss(key: Self.bootStatusKey)
+
+        // Asked for here, and only here: there is now a session that would be lost if saving it
+        // went wrong, which is the one thing this app ever posts a notification about. Asking at
+        // launch would put the prompt in front of someone before the app had done anything.
+        LocalAlert.requestPermission()
     }
 
     /// Says that the session is coming back, after a lock or a spell in the
@@ -188,6 +246,15 @@ class ViewController: UIViewController {
     /// finishes, and offers the same way out.
     @objc private func terminalWillReconnect() {
         showBootProgress(message: "Resuming from snapshot")
+    }
+
+    /// Says why the shell hasn't come back yet.
+    ///
+    /// The same pill `terminalWillReconnect` uses, under the same key, so when
+    /// the save finishes and the reconnect really starts this changes its
+    /// message rather than stacking a second one beside it.
+    @objc private func reconnectDeferred() {
+        showBootProgress(message: "Finishing session save")
     }
 
     /// Puts the boot pill up as a spinner, and starts the clock on it.
@@ -263,6 +330,86 @@ class ViewController: UIViewController {
         // itself again rather than hanging silently.
         showBootProgress(message: "Restarting Linux")
     }
+
+    /// Says so when the VM was told to resume from a snapshot that isn't there.
+    ///
+    /// Polled, because the answer isn't known until QEMU has opened the disk
+    /// and looked: a second or two into a launch that has already started.
+    private func watchForMissingSnapshot() {
+        guard snapshotWatch == nil else { return }
+
+        // QEMU settles this while it is opening the disk, a second or two in, so the answer is
+        // either given early or not at all. The deadline is what stops a boot that never finishes
+        // from leaving a timer asking the same question for the life of the app.
+        let deadline = Date().addingTimeInterval(Self.snapshotWatchDeadline)
+
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            guard qemu_snapshot_was_missing() else {
+                if Date() >= deadline {
+                    self?.stopWatchingForMissingSnapshot()
+                }
+                return
+            }
+
+            self?.stopWatchingForMissingSnapshot()
+
+            // Disowned as well as reported. The pointer is this app's own bookkeeping and it is now
+            // known to be wrong, so leaving it in place would mean saying this again on every
+            // launch until a save happens to succeed.
+            (UIApplication.shared.delegate as? AppDelegate)?.qemu?.forgetMissingResumeImage()
+
+            self?.status?.present(
+                .init(
+                    key: Self.snapshotStatusKey,
+                    message: "Snapshot not found",
+                    state: .symbol("exclamationmark.triangle.fill"),
+                    duration: 6,
+                    tint: .systemOrange))
+        }
+
+        RunLoop.main.add(timer, forMode: .common)
+        snapshotWatch = timer
+    }
+
+    private func stopWatchingForMissingSnapshot() {
+        snapshotWatch?.invalidate()
+        snapshotWatch = nil
+    }
+
+    /// Watches for a snapshot that never turned up.
+    private var snapshotWatch: Timer?
+
+    /// How long to keep asking whether the snapshot was there.
+    ///
+    /// Comfortably past the point where QEMU has opened the disk and decided,
+    /// and well short of the boot-stall deadline, so a boot going wrong is
+    /// reported as the one thing it is rather than as two.
+    private static let snapshotWatchDeadline: TimeInterval = 20
+
+    private static let snapshotStatusKey = "snapshot"
+
+    // MARK: - Saving
+
+    /// Says so when the last attempt to save the session failed.
+    private func reportFailedSaveIfNeeded() {
+        // Only when there is someone to tell. A failure can land while the app is in the
+        // background, and putting the pill up there would let its few seconds expire on a screen
+        // nobody is looking at, taking the flag with it.
+        guard UIApplication.shared.applicationState == .active else { return }
+
+        guard QEMUInterface.lastSaveFailed else { return }
+        QEMUInterface.lastSaveFailed = false
+
+        status?.present(
+            .init(
+                key: Self.saveStatusKey,
+                message: "Couldn't save your session",
+                state: .symbol("exclamationmark.triangle.fill"),
+                duration: 6,
+                tint: .systemOrange))
+    }
+
+    private static let saveStatusKey = "session-save"
 
     private static let bootStatusKey = "boot"
 
@@ -363,11 +510,143 @@ class ViewController: UIViewController {
         }
     }
 
+    // MARK: - Code cache
+
+    /// Follows the code cache, and offers to expand it when it fills up.
+    ///
+    /// Silent unless the cache was prepared in chunks, which only a blessed JIT
+    /// launch running Dynamic ever is. Everywhere else there is nothing held
+    /// back and nothing to offer.
+    private func observeCodeCache() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(codeCacheStateChanged),
+            name: CodeCacheMonitor.stateDidChange,
+            object: nil)
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(codeCacheEventOccurred),
+            name: CodeCacheMonitor.eventDidOccur,
+            object: nil)
+
+        CodeCacheMonitor.start()
+    }
+
+    /// Says what just happened to the cache, briefly.
+    ///
+    /// The notifications setting is applied at the source, in the monitor, so
+    /// there is nothing to check here, but "gated" is not the same as "off":
+    /// warnings come through whatever the setting says, which is why this picks
+    /// them out below rather than treating everything alike.
+    @objc private func codeCacheEventOccurred() {
+        guard let event = CodeCacheMonitor.lastEvent else { return }
+
+        // Warnings are picked out of the ordinary run of size changes, and given longer to be read:
+        // the others are news about something working, where these ask you to decide whether to do
+        // anything about it. Orange to match the other pill that reports a condition rather than
+        // progress, which is "Snapshot not found".
+        let warning = event.isWarning
+
+        status?.present(
+            .init(
+                key: Self.codeCacheEventKey,
+                message: event.message,
+                state: .symbol(event.symbol),
+                duration: warning ? 6 : 4,
+                tint: warning ? .systemOrange : nil))
+    }
+
+    private static let codeCacheEventKey = "code-cache-event"
+
+    @objc private func codeCacheStateChanged() {
+        switch CodeCacheMonitor.state {
+        case .quiet:
+            stopCountdownTicks()
+            status?.dismiss(key: Self.codeCacheStatusKey)
+
+        case .countingDown, .growing:
+            startCountdownTicks()
+        }
+    }
+
+    /// Drives whichever ring the cache is currently showing.
+    ///
+    /// Redrawn rather than animated in one go. The countdown has to reach zero
+    /// at the same moment the expansion starts, and the preparation ring is
+    /// tracking an estimate that may be overtaken at any point. Neither
+    /// survives being handed to a single animation and left alone.
+    private func startCountdownTicks() {
+        guard codeCacheTick == nil else {
+            renderCodeCache()
+            return
+        }
+
+        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            self?.renderCodeCache()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        codeCacheTick = timer
+
+        renderCodeCache()
+    }
+
+    private func renderCodeCache() {
+        switch CodeCacheMonitor.state {
+        case .quiet:
+            stopCountdownTicks()
+
+        case .countingDown(let next):
+            let size = Mebibytes.describe(next / (1024 * 1024))
+
+            status?.present(
+                .init(
+                    key: Self.codeCacheStatusKey,
+                    message: "Code cache \u{2192} \(size)",
+                    state: .countdown(CodeCacheMonitor.countdownRemaining),
+                    duration: nil,
+                    animated: false,
+                    onTap: { CodeCacheMonitor.cancelGrowth() },
+                    onSwipeAway: { CodeCacheMonitor.cancelGrowth() }))
+
+        case .growing:
+            // Finding and arming a debugger takes several seconds during which the app is perfectly
+            // responsive, and saying nothing about it made the whole expansion read as one long
+            // hang. `.quiet` is what ends the ticking.
+            guard let progress = CodeCacheMonitor.preparationProgress else {
+                status?.present(
+                    .init(
+                        key: Self.codeCacheStatusKey,
+                        message: "Expanding",
+                        state: .indeterminate,
+                        duration: nil))
+                return
+            }
+
+            status?.present(
+                .init(
+                    key: Self.codeCacheStatusKey,
+                    message: JitEnablement.preparingMessage,
+                    state: .progress(progress),
+                    duration: nil,
+                    animated: false))
+        }
+    }
+
+    private func stopCountdownTicks() {
+        codeCacheTick?.invalidate()
+        codeCacheTick = nil
+    }
+
+    /// Redraws the countdown ring while one is running.
+    private var codeCacheTick: Timer?
+
+    private static let codeCacheStatusKey = "code-cache"
+
     /// Offers to import a pairing file, if one was all that JIT was missing.
     ///
     /// Call only once the view is on screen. `viewDidAppear` runs again after
-    /// every dismissal -- returning from the document picker included -- so
-    /// this also has to remember that it has already asked.
+    /// every dismissal so this also has to remember that it has already asked.
     private func offerPairingFileIfWanted() {
         // Called on the JIT verdict as well as from `viewDidAppear`, and the verdict can arrive
         // before there is a window to present from. Defer to whichever call has one rather than

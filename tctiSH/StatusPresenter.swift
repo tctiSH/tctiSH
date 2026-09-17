@@ -34,8 +34,14 @@ final class StatusPresenter {
         /// Colour of the message and the dial. Nil leaves it as it comes.
         var tint: UIColor?
 
+        /// Whether a change to an existing pill's indicator is animated.
+        var animated: Bool = true
+
         /// What tapping it does, if anything.
         var onTap: (() -> Void)?
+
+        /// What swiping it away does, beyond taking it off the screen.
+        var onSwipeAway: (() -> Void)?
     }
 
     private weak var parent: UIView?
@@ -58,9 +64,10 @@ final class StatusPresenter {
 
         if let existing = pills.first(where: { $0.key == item.key })?.pill {
             existing.title = item.message
-            existing.setState(item.state)
+            existing.setState(item.state, animated: item.animated)
             existing.tint = item.tint ?? .label
             existing.onTap = item.onTap
+            attach(onSwipeAway: item.onSwipeAway, to: existing, key: item.key)
         } else {
             guard let parent else { return }
 
@@ -72,11 +79,7 @@ final class StatusPresenter {
             pill.setState(item.state, animated: false)
             pill.tint = item.tint ?? .label
             pill.onTap = item.onTap
-
-            // The pill animates itself off; this is just the bookkeeping, so the stack closes up
-            // and any pending expiry is cancelled.
-            let key = item.key
-            pill.onSwipeAway = { [weak self] in self?.forget(key: key) }
+            attach(onSwipeAway: item.onSwipeAway, to: pill, key: item.key)
 
             pills.append((key: item.key, pill: pill))
         }
@@ -86,6 +89,22 @@ final class StatusPresenter {
         let expiry = DispatchWorkItem { [weak self] in self?.dismiss(key: item.key) }
         expiries[item.key] = expiry
         DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: expiry)
+    }
+
+    /// Wires up what happens when a pill is thrown off the screen.
+    ///
+    /// Alongside every other handler rather than only at creation. A pill under
+    /// a key that is presented again is a different piece of news wearing the
+    /// same pill, and leaving the first one's handler on it means a swipe
+    /// answers a question nobody is asking any more.
+    ///
+    /// The pill animates itself off; the bookkeeping here is so the stack
+    /// closes up and any pending expiry is cancelled.
+    private func attach(onSwipeAway swiped: (() -> Void)?, to pill: StatusPill, key: String) {
+        pill.onSwipeAway = { [weak self] in
+            self?.forget(key: key)
+            swiped?()
+        }
     }
 
     /// Takes one pill away, and closes the gap it leaves.

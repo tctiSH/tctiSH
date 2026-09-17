@@ -250,6 +250,12 @@ final class StatusPill: UIView {
 
         /// Not progress at all -- a piece of status, shown as an SF Symbol.
         case symbol(String)
+
+        /// Something is about to happen by itself, and this is how much time is
+        /// left to stop it: 1 down to 0.
+        ///
+        /// The ring empties rather than fills.
+        case countdown(Double)
     }
 
     /// Sets what the indicator shows.
@@ -274,6 +280,7 @@ final class StatusPill: UIView {
         case .progress(let fraction): accessibilityValue = "\(Int(fraction * 100)) percent"
         case .succeeded: accessibilityValue = "finished"
         case .failed: accessibilityValue = "failed"
+        case .countdown: accessibilityValue = "cancel"
         case .symbol: break
         }
     }
@@ -481,7 +488,7 @@ private final class ProgressDial: UIView {
             path.addLine(to: point(-0.056, 0.144))
             path.addLine(to: point(0.189, -0.156))
 
-        case .failed:
+        case .failed, .countdown:
             path.move(to: point(-0.14, -0.14))
             path.addLine(to: point(0.14, 0.14))
             path.move(to: point(0.14, -0.14))
@@ -502,6 +509,11 @@ private final class ProgressDial: UIView {
         case .symbol:
             // Handled by the pill, which swaps the dial out entirely.
             break
+
+        case .countdown(let remaining):
+            showArc(wasIndeterminate: wasIndeterminate)
+            setStrokeEnd(arc, to: CGFloat(min(max(remaining, 0), 1)), animated: animated)
+            drawMark(animated: false)
 
         case .indeterminate:
             arc.isHidden = true

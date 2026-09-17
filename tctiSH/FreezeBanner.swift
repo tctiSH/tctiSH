@@ -67,14 +67,20 @@ final class FreezeBanner: UIView {
         DispatchQueue.main.async {
             pendingRaise?.cancel()
             pendingRaise = nil
-            present(message)
 
-            // Signalled from the completion of the transaction that commits this layout, which is
-            // the first moment the banner is on the glass rather than merely in the hierarchy.
-            CATransaction.begin()
-            CATransaction.setCompletionBlock { drawn.signal() }
+            // Opaque at once. A fade would still be running when the process stops, and the caller
+            // is about to stop it.
+            present(message, fading: false)
             current?.superview?.layoutIfNeeded()
-            CATransaction.commit()
+
+            // Hands this turn's layer changes to the render server *now*.
+            //
+            // The heart of the thing: UIKit commits once per run loop turn, and the caller traps
+            // the moment this returns which is well inside the same turn. Ending an explicit
+            // transaction group is not enough, because that group nests inside the run loop's own
+            // and it is the outer one that reaches the render server.
+            CATransaction.flush()
+            drawn.signal()
         }
 
         if drawn.wait(timeout: .now() + drawDeadline) == .timedOut {
@@ -109,7 +115,7 @@ final class FreezeBanner: UIView {
     }
 
     /// Adds the banner to whatever is on screen. Main thread only.
-    private static func present(_ message: String) {
+    private static func present(_ message: String, fading: Bool = true) {
         pendingRaise = nil
 
         if let current {
@@ -124,10 +130,12 @@ final class FreezeBanner: UIView {
 
         let banner = FreezeBanner(frame: host.bounds)
         banner.message = message
-        banner.alpha = 0
+        banner.alpha = fading ? 0 : 1
 
         host.addSubview(banner)
         current = banner
+
+        guard fading else { return }
 
         UIView.animate(withDuration: 0.15) { banner.alpha = 1 }
     }

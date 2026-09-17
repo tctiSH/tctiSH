@@ -33,11 +33,11 @@ public class QEMUInterface {
     private static let monitorPort: Int32 = 10044
 
     /// Our QEMU human-readable protocol socket.
-    var monitorSocket: Socket?
-    var monitorSocketPath: String?
-
-    /// A queue used for general monitor operations.
-    let monitorQueue = DispatchQueue(label: "io.ara.ios.tctiSH.monitor")
+    ///
+    /// Private, and touched only with `monitorLock` held: there is one of these
+    /// and more than one thread that wants it.
+    private var monitorSocket: Socket?
+    private var monitorSocketPath: String?
 
     /// Start our background QEMU thread.
     func startQemuThread(forceRecoveryBoot: Bool = false) {
@@ -57,14 +57,21 @@ public class QEMUInterface {
         // ... figure out which image we'll be restoring state from ...
         let bootImageName = getBootImageName(forceRecoveryBoot: forceRecoveryBoot)
 
+        // Noted so that a pointer QEMU cannot follow can be disowned; see
+        // `forgetMissingResumeImage`. Only when it came from `resume_image`: a tag typed into Boot
+        // From Snapshot is the user's, and quietly erasing what someone typed is not a repair.
+        let fromResumeImage = bootImageName != nil && bootImageName == getResumeImage()
+        DispatchQueue.main.async { self.bootedFromResumeImage = fromResumeImage }
+
         // ... find where our QEMU binary is actually located ...
         let qemuImage = getAppropriateQemuFramework().path
 
         // ... figure out the folder we'll be sharing into our environment ...
         let sharedFolder = getSharedFolder().path
 
-        // ... figure out how much memory to give the VM ...
-        let memoryValue = getMemoryValue()
+        // ... figure out how much memory to give the VM, and how much code cache ...
+        let memoryValue = VmMemory.qemuArgument
+        let tbSize = CodeCache.tbSizeArgument
 
         // ... get a filename for our unix domain monitor-connection socket ...
         monitorSocketPath = getDatastoreURL("monitor", fileExtension: "socket").path
@@ -74,52 +81,449 @@ public class QEMUInterface {
         // a snapshot taken under one QEMU build is not necessarily loadable by the other.
         Log.qemu.note(
             "\(getAppropriateQemuFramework().lastPathComponent), "
-                + "accel \(AppDelegate.usingJitHacks ? "tcg,split-wx=on" : "tcg"), "
+                + "accel tcg\(AppDelegate.usingJitHacks ? ",split-wx=on" : ""),tb-size=\(tbSize), "
                 + "bless \(AppDelegate.blessJitRegions)")
         Log.qemu.note(
             "\(bootImageName.map { "resuming from '\($0)'" } ?? "cold boot"), "
-                + "memory \(memoryValue)")
+                + "memory \(memoryValue), code cache \(CodeCache.summary)")
 
         // ... and start up the QEMU kernel, which will start paused.
         run_background_qemu(
             qemuImage, kernelPath, initrdPath, bundlePrefix, diskPath, sharedFolder, bootImageName,
-            memoryValue, monitorSocketPath, AppDelegate.usingJitHacks, AppDelegate.blessJitRegions);
+            memoryValue, monitorSocketPath, AppDelegate.usingJitHacks, AppDelegate.blessJitRegions,
+            UInt32(tbSize), UInt32(CodeCache.initialSize));
 
-        // Mark the amount of memory we booted with, for next time.
-        setLastMemoryValue(value: memoryValue)
+        // Mark what we booted with, so the next launch can tell whether the settings moved.
+        VmMemory.recordBooted()
+        CodeCache.recordBooted()
 
         // Finally, recreate our persistent mounts, so they're available in the VM.
         recreatePersistentMounts()
     }
 
-    /// Saves the state of the running QEMU instance. With no arguments, updates
-    /// the Instant Boot cache.
-    func saveState(tag: String) {
-        issueMonitorCommand("savevm \(tag)")
+    /// Whether this launch was told to resume from `resume_image`.
+    ///
+    /// Main-thread only. `startQemuThread` runs on `AppDelegate.bootQueue` and
+    /// the watcher that reads this is a main-queue timer, so the write hops
+    /// rather than racing as `CodeCacheMonitor` does with the flags it sets
+    /// from its growth queue. Nothing reads it until QEMU has opened the disk
+    /// and had its say, which is seconds after the hop lands.
+    private var bootedFromResumeImage = false
+
+    /// Stops pointing at a snapshot QEMU has said is not there.
+    ///
+    /// Left alone, a `resume_image` naming a snapshot that does not exist is
+    /// permanent: it is only ever rewritten by a save that succeeds, so until
+    /// one does, every launch pays the same failed lookup and says the same
+    /// thing about it. Clearing it means the next launch is an honest cold boot
+    /// instead of a resume that cannot happen, and the save that eventually
+    /// works fills it back in.
+    ///
+    /// Only the pointer this app maintains. A tag someone typed into Boot From
+    /// Snapshot is theirs, and the right response to that one being missing is
+    /// to say so, which already happens.
+    ///
+    /// Returns whether anything was forgotten. Main thread only; see
+    /// `bootedFromResumeImage`.
+    @discardableResult
+    func forgetMissingResumeImage() -> Bool {
+        dispatchPrecondition(condition: .onQueue(.main))
+
+        guard bootedFromResumeImage else { return false }
+        bootedFromResumeImage = false
+
+        let stale = getResumeImage()
+        guard !stale.isEmpty else { return false }
+
+        Log.qemu.warn("resume: '\(stale)' is not on the disk; forgetting it")
+        setResumeImage(tag: "")
+        return true
     }
 
-    /// Saves the state of the running QEMU instance. With no arguments, loads
-    /// from the Instant Boot cache.
-    func loadState(tag: String) {
-        issueMonitorCommand("loadvm \(tag)")
-        issueMonitorCommand("c")
+    /// Whether the last attempt to save the session failed.
+    ///
+    /// Persisted, because of when the failure happens. The save runs as the app
+    /// is going into the background, so there is often nobody looking at the
+    /// screen to be told. By the time anyone is, this process may be gone. The
+    /// UI clears it once it has said so.
+    static var lastSaveFailed: Bool {
+        get { UserDefaults.standard.bool(forKey: "last_save_failed") }
+        set { UserDefaults.standard.set(newValue, forKey: "last_save_failed") }
     }
 
-    /// Saves the state of the running QEMU instance in a background-safe
-    /// manner.
-    func performBackgroundSave() {
-        if let terminal = ViewController.getCurrentTerminal() {
-            let nextTag = getNextInstantResumeTag()
+    /// Snapshots the session, and points the next launch at it if it worked.
+    ///
+    /// Returns whether the session was saved.
+    ///
+    /// Call off the main thread, and only once the shell has connected: a
+    /// snapshot of a machine that has not finished booting is not worth
+    /// resuming, and the check is a view's, so the caller makes it.
+    @discardableResult
+    func performBackgroundSave() -> Bool {
+        let tag = getNextInstantResumeTag()
+        let started = Date()
 
-            // Never take a snapshot before we've connected to our VM.
-            if (!terminal.connected) {
-                return;
+        guard let reply = runMonitorCommand("savevm \(tag)", timeout: Self.saveDeadline) else {
+            reportSaveFailure(
+                "'savevm \(tag)' did not finish within \(Int(Self.saveDeadline))s")
+            return false
+        }
+
+        let elapsed = -started.timeIntervalSinceNow
+
+        // Logged every time, not just on the way out. How long a snapshot takes is the number this
+        // whole path is sized against.
+        Log.qemu.note(
+            String(format: "session save: 'savevm %@' returned after %.1fs", tag, elapsed))
+
+        // A failed HMP command says why, on the monitor, and the reason is worth having verbatim.
+        if let failure = Self.monitorError(in: reply) {
+            reportSaveFailure("savevm refused: \(failure)")
+            return false
+        }
+
+        guard snapshotIsLoadable(tag: tag) else {
+            reportSaveFailure("'\(tag)' is not loadable; leaving the previous snapshot in place")
+            return false
+        }
+
+        // Only now, and only having been told the snapshot is really there.
+        setResumeImage(tag: tag)
+        Self.lastSaveFailed = false
+
+        // Including anything `reportSaveRanOutOfTime` left queued. The assertion running out did
+        // not stop the work, and the work went on to succeed.
+        LocalAlert.withdraw(id: Self.saveFailureAlertId)
+
+        Log.qemu.note("session save: resuming from '\(tag)' next time")
+        return true
+    }
+
+    /// Posted on the main queue when a save has failed.
+    static let saveDidFail = Notification.Name("io.ara.tctish.saveDidFail")
+
+    /// Records that the session was not saved, and says so where it will be
+    /// seen.
+    func reportSaveFailure(_ reason: String) {
+        Log.qemu.warn("session save: \(reason)")
+        Self.lastSaveFailed = true
+
+        LocalAlert.post(
+            title: "Session not saved",
+            body: Self.saveFailureBody,
+            id: Self.saveFailureAlertId)
+
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: Self.saveDidFail, object: nil)
+        }
+    }
+
+    /// Records that the save has run out of time, and says so unless it
+    /// finishes after all.
+    ///
+    /// Not `reportSaveFailure`, because an assertion expiring is a different
+    /// fact from a save that failed. iOS is saying "hand this back now"; it is
+    /// not stopping the work, which carries on under its own deadlines and
+    /// quite often succeeds.
+    ///
+    /// The delay is the save's own deadline, so it fires at the moment the save
+    /// has definitively run out of road rather than at some guess.
+    func reportSaveRanOutOfTime() {
+        Log.qemu.warn("session save: ran out of time in the background")
+        Self.lastSaveFailed = true
+
+        LocalAlert.post(
+            title: "Session not saved",
+            body: Self.saveFailureBody,
+            id: Self.saveFailureAlertId,
+            after: Self.saveDeadline)
+    }
+
+    /// What resuming will do, rather than by what is "lost", because which of
+    /// those is true depends on what happens next.
+    private static let saveFailureBody =
+        "tctiSH couldn't snapshot your Linux session. Resuming will take you back to "
+        + "the last successful save."
+
+    private static let saveFailureAlertId = "session-save-failed"
+
+    /// The reason an HMP command gave for refusing, if it refused.
+    ///
+    /// `hmp_handle_error` prefixes every one with "Error: ", so the marker is
+    /// reliable; what follows it is one line of prose written for a person.
+    private static func monitorError(in reply: String) -> String? {
+        for line in Self.lines(of: reply) {
+            let text = line.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if text.hasPrefix("Error: ") {
+                return String(text.dropFirst("Error: ".count))
+            }
+        }
+
+        return nil
+    }
+
+    /// How long a snapshot may take before we stop waiting for it.
+    ///
+    /// Sized against what iOS gives a background task rather than against any
+    /// measurement of `savevm`, which scales with how much RAM the guest was
+    /// given and can be several gigabytes of it.
+    private static let saveDeadline: TimeInterval = 20
+
+    /// How long to wait for a monitor command that only has to answer.
+    private static let monitorReplyDeadline: TimeInterval = 5
+
+    /// The HMP prompt, and so the only reliable "that command has finished".
+    private static let monitorPrompt = "(qemu)"
+
+    /// Serialises everything that talks to the monitor.
+    ///
+    /// One socket, one command at a time, one reader. `savevm` holds it for as
+    /// long as the snapshot takes. The collision this prevents is not
+    /// hypothetical: locking the device is both what backgrounds the app, which
+    /// starts a save on a background thread, and what fires
+    /// `applicationProtectedDataWillBecomeUnavailable`, which sends
+    /// `hostfwd_remove` from the main one. Interleaved, the second command's
+    /// prompt is read as the first command finishing.
+    private let monitorLock = NSLock()
+
+    /// Where queued commands run, in the order they were asked for.
+    ///
+    /// Serial, so `hostfwd_remove` cannot overtake `halt`, and off the main
+    /// thread, because the lock above may be held by a snapshot for twenty
+    /// seconds and nothing on the main thread may wait that long.
+    private let monitorQueue = DispatchQueue(label: "io.ara.tctish.monitor")
+
+    /// How long to wait for the monitor when something else is using it.
+    private static let monitorBusyDeadline: TimeInterval = 2
+
+    /// How many replies the monitor still owes us.
+    ///
+    /// Every HMP command ends by printing a fresh prompt, so a command written
+    /// without its reply being read leaves one sitting in the socket, and the
+    /// next command to read finds it there and stops on it, returning before
+    /// its own output has arrived. Draining first only helps if the stray
+    /// prompt has already landed, which is a race rather than a guarantee.
+    ///
+    /// Counting them means a reader can settle the debt by waiting rather than
+    /// by hoping. Written and read only with `monitorLock` held.
+    private var promptsOwed = 0
+
+    /// Reads off the replies to commands nobody waited for.
+    ///
+    /// Call with `monitorLock` held, before reading for a command of your own.
+    private func settleOutstandingPrompts() {
+        while promptsOwed > 0 {
+            guard readUntilPrompt(timeout: Self.monitorReplyDeadline) != nil else {
+                Log.qemu.warn("the monitor owes \(promptsOwed) replies and isn't giving them")
+
+                // The state of the connection is no longer known, so neither is the count. Whatever
+                // arrives later is the next drain's problem rather than a debt that can never be
+                // settled. Left standing, it would make every future command wait out this deadline
+                // before doing anything.
+                promptsOwed = 0
+                return
             }
 
-            saveState(tag: nextTag)
-            Thread.sleep(forTimeInterval: TimeInterval(2))
-            setResumeImage(tag: nextTag)
+            promptsOwed -= 1
         }
+    }
+
+    /// Sends a command without waiting for it, in order behind any other.
+    ///
+    /// Goes through `runMonitorCommand` rather than writing directly, so that
+    /// the reply is read and the socket is left just past a prompt; see
+    /// `promptsOwed` for what happens when it isn't.
+    private func sendMonitorCommand(_ command: String) {
+        monitorQueue.async { [weak self] in
+            self?.runMonitorCommand(command, timeout: Self.monitorReplyDeadline)
+        }
+    }
+
+    /// Issues a monitor command and returns everything printed before the
+    /// monitor came back to its prompt, or nil if it never did.
+    ///
+    /// Blocks for up to `timeout`, so never call it from the main thread.
+    @discardableResult
+    private func runMonitorCommand(_ command: String, timeout: TimeInterval) -> String? {
+        monitorLock.lock()
+        defer { monitorLock.unlock() }
+
+        guard ensureMonitorConnection(), monitorSocket != nil else { return nil }
+
+        // What earlier commands wrote and walked away from, waited for rather than hoped for.
+        settleOutstandingPrompts()
+
+        // And then whatever is left: a half-line, output belonging to a prompt already taken.
+        // Anything still buffered here would otherwise be read as this command having finished
+        // before it started.
+        drainMonitor()
+
+        guard writeMonitorCommand(command) else { return nil }
+
+        guard let response = readUntilPrompt(timeout: timeout) else {
+            Log.qemu.warn("monitor never came back to its prompt after '\(command)'")
+            promptsOwed = 0
+            return nil
+        }
+
+        promptsOwed -= 1
+        return response
+    }
+
+    /// Writes one command. Call with `monitorLock` held.
+    ///
+    /// Records the reply as owed, whether or not this caller intends to read
+    /// it: see `promptsOwed`.
+    @discardableResult
+    private func writeMonitorCommand(_ command: String) -> Bool {
+        // One newline, not CR LF.
+        let terminated = "\(command)\n"
+
+        guard ensureMonitorConnection(), let monitorSocket else { return false }
+        guard (try? monitorSocket.write(from: terminated.data(using: .utf8)!)) != nil else {
+            return false
+        }
+
+        promptsOwed += 1
+        return true
+    }
+
+    /// Waits up to `milliseconds` for the monitor to have something to say.
+    ///
+    /// `Socket.wait` rather than the socket's own `isReadableOrWritable`, which
+    /// looks like the obvious call but isn't: it selects on the write set as
+    /// well as the read set, and a connected socket with an empty send buffer
+    /// is always writable.
+    ///
+    /// `Socket.wait` is the same `select` with the write set left out.
+    private func monitorHasOutput(within milliseconds: UInt) -> Bool {
+        guard let monitorSocket else { return false }
+
+        let ready = try? Socket.wait(for: [monitorSocket], timeout: milliseconds)
+        return ready?.isEmpty == false
+    }
+
+    /// Reads until the monitor's prompt comes round. Call with the lock held.
+    private func readUntilPrompt(timeout: TimeInterval) -> String? {
+        guard let monitorSocket else { return nil }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        var response = ""
+
+        while true {
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0 else { return nil }
+
+            // Milliseconds, and sliced so that a long `savevm` still notices the deadline rather
+            // than sitting in one enormous select.
+            let slice = UInt(max(min(remaining, 1) * 1000, 1))
+
+            guard monitorHasOutput(within: slice) else { continue }
+
+            // Readable with nothing to give means the far end has gone.
+            guard let chunk = try? monitorSocket.readString(), !chunk.isEmpty else {
+                Log.qemu.warn("the monitor connection closed")
+                return nil
+            }
+
+            response += chunk
+
+            if response.contains(Self.monitorPrompt) {
+                return response
+            }
+        }
+    }
+
+    /// The monitor's output, one line at a time.
+    ///
+    /// By `Character.isNewline` rather than by splitting on "\n", which is the
+    /// same thing in most languages and is not the same thing here.
+    private static func lines(of text: String) -> [Substring] {
+        text.split(whereSeparator: \.isNewline)
+    }
+
+    /// A monitor reply flattened onto one line, for the log.
+    private static func forLogging(_ reply: String) -> String {
+        var content: [String] = []
+        var echo: [String] = []
+
+        for line in lines(of: reply) {
+            let text =
+                line
+                .replacingOccurrences(
+                    of: "\u{1B}\\[[0-9;?]*[ -/]*[@-~]", with: "", options: .regularExpression
+                )
+                .trimmingCharacters(in: .whitespaces)
+
+            guard !text.isEmpty else { continue }
+
+            if line.unicodeScalars.contains("\u{1B}") {
+                echo.append(text)
+            } else {
+                content.append(text)
+            }
+        }
+
+        return (content.isEmpty ? echo : content).joined(separator: " | ")
+    }
+
+    /// Throws away whatever the monitor has already said. Call with the lock
+    /// held.
+    private func drainMonitor() {
+        guard let monitorSocket else { return }
+
+        while monitorHasOutput(within: 0),
+            let leftover = try? monitorSocket.readString(),
+            !leftover.isEmpty
+        {}
+    }
+
+    /// Whether `tag` names a snapshot that could actually be loaded.
+    private func snapshotIsLoadable(tag: String) -> Bool {
+        guard let response = runMonitorCommand("info snapshots", timeout: Self.monitorReplyDeadline)
+        else {
+            Log.qemu.warn("session save: the monitor did not answer 'info snapshots'")
+            return false
+        }
+
+        var inLoadableList = false
+        var found = false
+
+        for line in Self.lines(of: response) {
+            let text = line.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if text.hasPrefix("List of snapshots present on all disks") {
+                inLoadableList = true
+                continue
+            }
+            if text.hasPrefix("List of partial") {
+                inLoadableList = false
+                continue
+            }
+
+            guard inLoadableList else { continue }
+
+            // "ID  TAG  VM SIZE  DATE  VM CLOCK  ICOUNT", padded into columns.
+            let fields = text.split(separator: " ", omittingEmptySubsequences: true)
+            if fields.count >= 2, fields[1] == tag {
+                found = true
+                break
+            }
+        }
+
+        // The whole answer, verbatim, whenever the tag was not in the loadable list. There is no
+        // second chance at this: the save runs as the app is being put away, and afterwards the
+        // outcome alone cannot say which of the two lists the tag landed in or whether the machine
+        // had a snapshot-capable disk at all, which is the case `hmp_info_snapshots` answers by
+        // printing nothing and reporting to stderr.
+        if !found {
+            Log.qemu.warn(
+                "session save: '\(tag)' is not in the loadable list; monitor said: "
+                    + Self.forLogging(response))
+        }
+
+        return found
     }
 
     /// Get the next 'instant resume' file image. This ensures we never
@@ -137,22 +541,22 @@ public class QEMUInterface {
 
     /// Starts or resumes the tctiSH instance's execution.
     func pause() {
-        issueMonitorCommand("halt")
+        sendMonitorCommand("halt")
     }
 
     /// Starts or resumes the tctiSH instance's execution.
     func resume() {
-        issueMonitorCommand("cont")
+        sendMonitorCommand("cont")
     }
 
     /// Terminates the SSH channel used for console comms.
     func stopHostChannels() {
-        issueMonitorCommand("hostfwd_remove \(QEMUInterface.sshHostForward)")
+        sendMonitorCommand("hostfwd_remove \(QEMUInterface.sshHostForward)")
     }
 
     /// Terminates the SSH channel used for console comms.
     func startHostChannels() {
-        issueMonitorCommand("hostfwd_add \(QEMUInterface.sshHostForward)")
+        sendMonitorCommand("hostfwd_add \(QEMUInterface.sshHostForward)")
     }
 
     /// Sets up the permissions for using a bookmarked folder. Used to restore
@@ -332,7 +736,12 @@ public class QEMUInterface {
                 return resume_image
             }
         case "snapshot_boot":
-            return UserDefaults.standard.string(forKey: "boot_snapshot")
+            // Blank means no snapshot was named, which is a cold boot rather than a request to
+            // resume from one called "". QEMU survives being asked for that but there's nothing to
+            // say.
+            let snapshot = UserDefaults.standard.string(forKey: "boot_snapshot")?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return (snapshot?.isEmpty ?? true) ? nil : snapshot
         case "recovery_boot":
             return nil
         case "clean_boot":
@@ -344,28 +753,23 @@ public class QEMUInterface {
     }
 
     /// Returns a string indicating the currently used disc name.
+    ///
+    /// A blank name reads as "not set" rather than as a name. The settings
+    /// screen offers this as a text field with a clear button, and an emptied
+    /// one is stored as "" which shadows the registered default, so the
+    /// fallback below would never be reached and the session would silently
+    /// move to a disk called ".qcow".
     private func getDiskName() -> String {
-        return UserDefaults.standard.string(forKey: "disk_name") ?? "disk"
-    }
+        let stored = UserDefaults.standard.string(forKey: "disk_name")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
-    /// Returns the argument that specifies the QEMU initial memory.
-    private func getMemoryValue() -> String {
-        return UserDefaults.standard.string(forKey: "memory") ?? "1G"
-    }
-
-    /// Get the memory value that was used at the last boot.
-    private func getLastMemoryValue() -> String {
-        return UserDefaults.standard.string(forKey: "last_memory") ?? "1G"
-    }
-
-    /// Set the memory value that was used at the last boot.
-    private func setLastMemoryValue(value: String) {
-        return UserDefaults.standard.set(value, forKey: "last_memory")
+        guard let stored, !stored.isEmpty else { return "disk" }
+        return stored
     }
 
     /// Returns true iff the memory setting has changed since the last boot.
     func memoryValueChanged() -> Bool {
-        return getMemoryValue() != getLastMemoryValue()
+        return VmMemory.changedSinceLastBoot
     }
 
     /// Returns the URL to a qcow image that will acts as our persistent store.
@@ -503,17 +907,6 @@ public class QEMUInterface {
         setImageProperty(diskName: diskName, property: "resume_image", value: tag)
     }
 
-    /// Issue a QEMU managament protocol scheme command, returning whether it
-    /// got as far as being written.
-    @discardableResult
-    private func issueMonitorCommand(_ command: String) -> Bool {
-        let terminatedCommand = "\(command)\r\n"
-
-        // Send our command ...
-        guard ensureMonitorConnection(), let monitorSocket else { return false }
-        return (try? monitorSocket.write(from: terminatedCommand.data(using: .utf8)!)) != nil
-    }
-
     /// Ensures we have a connection to our VM over the QEMU management
     /// protocol, returning whether there is one.
     @discardableResult
@@ -542,6 +935,16 @@ public class QEMUInterface {
         }
 
         monitorSocket = socket
+
+        // A new connection owes nothing; the banner prompt below is not a debt, it is the greeting,
+        // and it is read right here.
+        promptsOwed = 0
+
+        // Let the monitor finish introducing itself before anyone talks over it.
+        if readUntilPrompt(timeout: Self.monitorBusyDeadline) == nil {
+            Log.qemu.warn("the monitor connected but never showed a prompt")
+        }
+
         return true
     }
 
@@ -563,13 +966,19 @@ public class QEMUInterface {
         // to pick it up again.
         UserDefaults.standard.set(true, forKey: "attempting_boot")
 
-        guard issueMonitorCommand("system_reset") else {
+        guard monitorLock.lock(before: Date().addingTimeInterval(Self.monitorBusyDeadline)) else {
+            Log.qemu.fail("the monitor is busy saving the session; not resetting")
+            return false
+        }
+        defer { monitorLock.unlock() }
+
+        guard writeMonitorCommand("system_reset") else {
             Log.qemu.fail("the monitor didn't take system_reset; QEMU itself is stuck")
             return false
         }
 
         // Harmless if it's already running, and necessary if it isn't.
-        issueMonitorCommand("c")
+        writeMonitorCommand("c")
         return true
     }
 }
