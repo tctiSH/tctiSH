@@ -22,6 +22,39 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>UIApplicationShortcutItems</key>
+	<array>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>io.ara.tctish.shortcut.with-jit</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Launch with JIT</string>
+			<key>UIApplicationShortcutItemSubtitle</key>
+			<string>Just this once</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>hare.fill</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>io.ara.tctish.shortcut.without-jit</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Launch without JIT</string>
+			<key>UIApplicationShortcutItemSubtitle</key>
+			<string>Just this once</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>tortoise.fill</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>io.ara.tctish.shortcut.recovery</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Recovery Boot</string>
+			<key>UIApplicationShortcutItemSubtitle</key>
+			<string>Start Linux from scratch</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>lifepreserver</string>
+		</dict>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

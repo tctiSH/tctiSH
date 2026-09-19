@@ -43,6 +43,9 @@ enum JitEnablement {
             /// The user turned it off.
             case disabledInSettings
 
+            /// A quick action asked for this one launch to run without it.
+            case declinedForThisLaunch
+
             /// The IORegistry wouldn't say whether TXM is present.
             case txmUnknown
 
@@ -61,6 +64,7 @@ enum JitEnablement {
             var logDescription: String {
                 switch self {
                 case .disabledInSettings: return "JIT is turned off in settings"
+                case .declinedForThisLaunch: return "a quick action asked for a JITless launch"
                 case .txmUnknown: return "could not tell whether TXM is present"
                 case .ptraceRefused: return "the ptrace hack was refused"
                 case .noTunnel: return "no LocalDevVPN tunnel"
@@ -75,6 +79,7 @@ enum JitEnablement {
             var statusMessage: String {
                 switch self {
                 case .disabledInSettings: return "JIT off in settings"
+                case .declinedForThisLaunch: return "JIT off for this launch"
                 case .txmUnknown: return "JIT support unclear"
                 case .ptraceRefused: return "JIT refused"
                 case .noTunnel: return "No debug tunnel"
@@ -111,6 +116,18 @@ enum JitEnablement {
     /// The decision is made on a background queue, so the UI is on screen
     /// before there is an answer.
     private(set) static var outcome: Outcome?
+
+    /// Whether this launch is running with JIT, or nil while it is still being
+    /// settled.
+    ///
+    /// A flattening of `outcome` for callers that only want the one bit of it.
+    static var isJitting: Bool? {
+        switch outcome {
+        case .blessed, .ptrace: return true
+        case .interpreted: return false
+        case nil: return nil
+        }
+    }
 
     /// Whether JIT is still being arranged.
     private(set) static var isEnabling = false
@@ -188,8 +205,19 @@ enum JitEnablement {
     // MARK: - The decision
 
     private static func decide() -> Outcome {
-        guard UserDefaults.standard.string(forKey: "jit_mode") == "jit_when_possible" else {
-            return .interpreted(.disabledInSettings)
+        // A quick action speaks for this launch and this launch only; the setting is left exactly
+        // as it was found, and answers for every launch that isn't asked about.
+        switch QuickActions.jitRequest {
+        case .some(false):
+            return .interpreted(.declinedForThisLaunch)
+
+        case .some(true):
+            break
+
+        case .none:
+            guard UserDefaults.standard.string(forKey: "jit_mode") == "jit_when_possible" else {
+                return .interpreted(.disabledInSettings)
+            }
         }
 
         #if targetEnvironment(macCatalyst)

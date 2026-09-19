@@ -77,9 +77,14 @@ class ViewController: UIViewController {
         ViewController.currentTerminal = currentTerminal
         ViewController.currentTerminalController = self
 
-        // If we're doing a recovery boot by user choice, provide a message letting the user know
-        // that this will take a hot moment.
-        if UserDefaults.standard.string(forKey: "resume_behavior") == "recovery_boot" {
+        // If we're doing a recovery boot by user choice provide a message letting the user know
+        // that this will take a moment.
+        //
+        // Ahead of the `forceRecoveryBoot` branch below, which would otherwise catch the quick
+        // action and apologize for a resume that never went wrong.
+        if QuickActions.request == .recovery
+            || UserDefaults.standard.string(forKey: "resume_behavior") == "recovery_boot"
+        {
             currentTerminal.feed(text: "(Recovery booting; startup will take a bit.)\r\n\r\n")
         }
 
@@ -161,6 +166,7 @@ class ViewController: UIViewController {
         reportBootProgress(for: currentTerminal)
         observeJitPreparation()
         observeCodeCache()
+        observeQuickActions()
 
         // Every moment someone could be told. Becoming active covers a launch that follows the
         // failed save and a return from the backgrounding that caused it, including the first
@@ -337,6 +343,55 @@ class ViewController: UIViewController {
         // Back to waiting, with the clock restarted -- so a recovery boot that also stalls offers
         // itself again rather than hanging silently.
         showBootProgress(message: "Restarting Linux")
+    }
+
+    // MARK: - Quick actions
+
+    private static let quickActionStatusKey = "quick-action"
+
+    /// Listens for the quick actions that need somewhere to be shown.
+    private func observeQuickActions() {
+        NotificationCenter.default.addObserver(
+            forName: QuickActions.didArrive, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.showQuickActionArrival()
+        }
+
+        // It may well have arrived before this view existed, in which case the notification has
+        // already been and gone with nothing listening for it.
+        showQuickActionArrival()
+    }
+
+    private func showQuickActionArrival() {
+        guard let arrival = QuickActions.takeArrival() else { return }
+
+        switch arrival {
+        case .alreadySatisfied(let message, let symbol):
+            status?.present(
+                .init(
+                    key: Self.quickActionStatusKey,
+                    message: message,
+                    state: .symbol(symbol),
+                    duration: 4))
+
+        case .offersRestart(let message, let request):
+            // Open-ended, because this is a question rather than news: it waits either for the tap
+            // that answers it or for the swipe that declines it.
+            status?.present(
+                .init(
+                    key: Self.quickActionStatusKey,
+                    message: message,
+                    state: .symbol("arrow.clockwise"),
+                    duration: nil,
+                    onTap: { QuickActions.restart(for: request) }))
+
+        case .recoverInPlace:
+            // The one action a running VM can honor by itself, so it is simply done. Resetting the
+            // machine is exactly what a recovery boot is; going out through the home screen for it
+            // would cost a relaunch and buy nothing.
+            status?.dismiss(key: Self.quickActionStatusKey)
+            performRecoveryBoot()
+        }
     }
 
     /// Says so when the VM was told to resume from a snapshot that isn't there.
