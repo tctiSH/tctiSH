@@ -13,4 +13,5 @@ ramdisk
 sysroot-iOS-arm64/
 build-iOS-arm64/
 build-StikJIT/
+build-idevice/
 

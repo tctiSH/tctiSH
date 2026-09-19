@@ -1,0 +1,241 @@
+diff --git a/Sources/PairableHost.swift b/Sources/PairableHost.swift
+new file mode 100644
+index 0000000..d9218a0
+--- /dev/null
++++ b/Sources/PairableHost.swift
+@@ -0,0 +1,190 @@
++import Foundation
++@_implementationOnly import idevice
++
++/// Advertises this device as a computer that another device can pair *with*.
++///
++/// The direction is the point. Every other pairing path has the host connect to
++/// the device and ask it to pair, which iOS does not permit from an app: the
++/// device will pair-verify a host it knows and hangs up on one it does not.
++/// iOS 27 opened the opposite direction instead -- a host advertises
++/// `_remotepairing-pairable-host._tcp`, the *device* connects to it, and the
++/// user types a PIN the host displays.
++///
++/// So the flow is: `init` to generate an identity and the records to advertise,
++/// the caller publishes and accepts a connection, then `accept(fileDescriptor:)`
++/// drives the SRP accessory side and returns the pairing file.
++///
++/// **Advertising is deliberately left to the caller.** Doing mDNS from in here
++/// would need `com.apple.developer.networking.multicast`, a restricted
++/// entitlement; `NetService` on the app side needs none. This split is what
++/// `pairable_host_prepare` and `pairable_host_accept_fd` exist for.
++public final class PairableHost {
++
++    /// The Bonjour instance name to publish under.
++    public let serviceIdentifier: String
++
++    /// The TXT records to publish with it. The device needs these to recognise
++    /// what is being advertised.
++    public let txtRecords: [String: String]
++
++    /// The service type to publish. Not a parameter: the device browses for
++    /// exactly this.
++    public static let serviceType = "_remotepairing-pairable-host._tcp"
++
++    private let handle: OpaquePointer
++
++    /// Generates a fresh host identity.
++    ///
++    /// - Parameters:
++    ///   - name: shown on the device when it lists what it can pair with.
++    ///   - model: a hardware model identifier, also shown. iOS treats the host
++    ///     as a computer, so this should stay a Mac identifier.
++    ///   - pinless: advertise pinless pairing and use the all-zero setup code
++    ///     rather than displaying a PIN.
++    public init(name: String, model: String = "Mac17,7", pinless: Bool = false) throws {
++        var handle: OpaquePointer?
++        var serviceIdentifier: UnsafeMutablePointer<CChar>?
++        var txtBytes: UnsafeMutablePointer<UInt8>?
++        var txtLength = 0
++
++        // The final argument is an out-pointer for the host `altIRK`, which a paired device would
++        // use to recognise this host on a later advertisement. Passed null: every entry point in
++        // this API treats it as an output and none accepts one as input, so there is no way to
++        // restore a saved one, and storing key material nothing can read is a liability rather
++        // than a head start.
++        try IdeviceFFI.check("could not prepare a pairable host") {
++            name.withCString { name in
++                model.withCString { model in
++                    pairable_host_prepare(
++                        name, model, pinless,
++                        &handle, &serviceIdentifier, &txtBytes, &txtLength, nil)
++                }
++            }
++        }
++
++        guard let handle else {
++            throw StikJITError.pairingFile("the pairable host returned nothing to advertise")
++        }
++
++        // Everything from here on has to free the handle by hand. `deinit` is not run for an
++        // object whose `init` threw, so the usual pairing of the two does not apply until this
++        // initialiser has returned.
++        guard let serviceIdentifier, let txtBytes else {
++            pairable_host_free(handle)
++            throw StikJITError.pairingFile("the pairable host returned nothing to advertise")
++        }
++        defer {
++            idevice_string_free(serviceIdentifier)
++            idevice_data_free(txtBytes, UInt(txtLength))
++        }
++
++        let records: [String: String]
++        do {
++            records = try Self.parseTXT(bytes: txtBytes, length: txtLength)
++        } catch {
++            pairable_host_free(handle)
++            throw error
++        }
++
++        self.handle = handle
++        self.serviceIdentifier = String(cString: serviceIdentifier)
++        self.txtRecords = records
++    }
++
++    deinit {
++        pairable_host_free(handle)
++    }
++
++    /// Runs pair-setup against a device that has already connected.
++    ///
++    /// Blocks until pairing finishes, so call it off the main thread. The fd is
++    /// duplicated internally, so the caller keeps ownership of its socket.
++    ///
++    /// `onPIN` is called once, from whichever thread the handshake is running
++    /// on, with the six digits the user has to type into the device.
++    ///
++    /// **There is no cancelling this.** `pairable_host_cancel_new` exists, but
++    /// only `pairable_host_accept` takes a token; `pairable_host_accept_fd`
++    /// does not, and a caller supplying its own socket is expected to close it.
++    /// So the way to abandon a handshake is `shutdown()` on the fd passed in,
++    /// which this call will then fail out of. The fd is duplicated internally,
++    /// and `shutdown` acts on the socket rather than the descriptor, so it
++    /// reaches the copy as well -- `close()` on the original would not.
++    public func accept(
++        fileDescriptor: Int32,
++        onPIN: @escaping (String) -> Void
++    ) throws -> Data {
++        let box = PINCallbackBox(onPIN)
++        let context = Unmanaged.passUnretained(box).toOpaque()
++
++        var pairing: OpaquePointer?
++        try IdeviceFFI.check("pairing failed") {
++            pairable_host_accept_fd(
++                handle, fileDescriptor,
++                { pin, context in
++                    guard let pin, let context else { return }
++                    Unmanaged<PINCallbackBox>.fromOpaque(context)
++                        .takeUnretainedValue()
++                        .body(String(cString: pin))
++                },
++                context,
++                nil,  // out_peer_device: the pairing file carries what we need.
++                &pairing)
++        }
++        withExtendedLifetime(box) {}
++
++        guard let pairing else {
++            throw StikJITError.pairingFile("pairing reported success but produced no file")
++        }
++        defer { rp_pairing_file_free(pairing) }
++
++        return try Self.serialise(pairing)
++    }
++
++    // MARK: - Plumbing
++
++    /// The TXT records arrive as an XML plist dictionary.
++    private static func parseTXT(
++        bytes: UnsafeMutablePointer<UInt8>,
++        length: Int
++    ) throws -> [String: String] {
++        let data = Data(bytes: bytes, count: length)
++
++        guard
++            let plist = try? PropertyListSerialization.propertyList(
++                from: data, options: [], format: nil),
++            let dictionary = plist as? [String: Any]
++        else {
++            throw StikJITError.pairingFile("the TXT records were not a plist dictionary")
++        }
++
++        // Anything non-string would be a protocol change rather than something to paper over, so
++        // drop it and let the device tell us it does not like the advertisement.
++        return dictionary.compactMapValues { $0 as? String }
++    }
++
++    /// Copies the pairing file out of its handle as plist bytes.
++    private static func serialise(_ pairing: OpaquePointer) throws -> Data {
++        var bytes: UnsafeMutablePointer<UInt8>?
++        var length = 0
++
++        try IdeviceFFI.check("failed to serialise the pairing file") {
++            rp_pairing_file_to_bytes(pairing, &bytes, &length)
++        }
++        guard let bytes else {
++            throw StikJITError.pairingFile("serialised to nothing")
++        }
++        defer { idevice_data_free(bytes, UInt(length)) }
++
++        guard length > 0 else {
++            throw StikJITError.pairingFile("serialised to an empty file")
++        }
++        return Data(bytes: bytes, count: length)
++    }
++}
++
++/// Carries the PIN closure across the C callback boundary.
++private final class PINCallbackBox {
++    let body: (String) -> Void
++    init(_ body: @escaping (String) -> Void) { self.body = body }
++}
+diff --git a/Sources/StikJIT+Prepared.swift b/Sources/StikJIT+Prepared.swift
+new file mode 100644
+index 0000000..e4d99be
+--- /dev/null
++++ b/Sources/StikJIT+Prepared.swift
+@@ -0,0 +1,39 @@
++import Foundation
++
++extension StikJIT {
++
++    /// Enables JIT on a device the caller has already prepared.
++    ///
++    /// The difference from `enableJIT(targetPID:pairingFile:ddiPaths:...)` is
++    /// what it *doesn't* do: that one runs `prepareDevice` first, which opens a
++    /// tunnel of its own solely to ask whether the developer disk image is
++    /// mounted. A caller that has just asked that question -- because it needs
++    /// the answer to decide whether to attach at all -- pays for it twice, and
++    /// every tunnel is a `create_tcp_listener` on the device.
++    ///
++    /// The deprecated `enableJIT(targetPID:pairingFile:configuration:...)`
++    /// overload already behaves this way, but its deprecation says to use the
++    /// preparing one, which is the opposite of what a caller in this position
++    /// should do. This is the same thing said affirmatively.
++    ///
++    /// **The device really must be prepared.** Nothing here checks. Attaching
++    /// without a mounted image fails inside the debug session rather than
++    /// politely up front.
++    public static func enableJITOnPreparedDevice(
++        targetPID: Int32,
++        pairingFile: URL,
++        configuration: Configuration = .default,
++        script: Script = .universal,
++        forceScript: Bool = false,
++        progress: @escaping (String) -> Void = { _ in }
++    ) throws {
++        let session = JITSession(pairingFilePath: pairingFile.path, configuration: configuration)
++
++        try session.enableJIT(
++            targetPID: targetPID,
++            script: script,
++            forceScript: forceScript,
++            txmPresence: ProcessInfo.processInfo.txmPresence,
++            progress: progress)
++    }
++}

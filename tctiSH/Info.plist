@@ -46,6 +46,19 @@
 		<string>audio</string>
 		<string>processing</string>
 	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>io.ara.tctish.pairing</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>tctiSH advertises itself on your local network so this device can pair with it, which is what lets the VM run with JIT.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_remotepairing-pairable-host._tcp</string>
+		<!-- Means nothing to anyone; exists only to raise the Local Network
+		     prompt deliberately. See LocalNetworkPermission.swift. -->
+		<string>_tctishprobe._tcp</string>
+	</array>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

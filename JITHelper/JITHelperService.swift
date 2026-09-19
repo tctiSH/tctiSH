@@ -134,21 +134,13 @@ class JITHelperService: NSObject, NSExtensionRequestHandling {
                     return
                 }
 
-                try StikJIT.enableJIT(
+                // `enableJIT(ddiPaths:)` would run `prepareDevice`, which opens a second tunnel
+                // purely to ask the same question again.
+                try StikJIT.enableJITOnPreparedDevice(
                     targetPID: targetPID,
                     pairingFile: pairingFile,
-                    ddiPaths: Self.ddiPaths,
                     script: .universal,
                     forceScript: false,
-                    preparationProgress: { stage in
-                        // `prepareDevice` returns as soon as it sees the image mounted, which the
-                        // check above just confirmed, so it should get no further than that.
-                        if case .downloadingDDI = stage {
-                            note(
-                                "  WARNING: downloading the DDI from inside enable, "
-                                    + "having just been told it was mounted.")
-                        }
-                    },
                     progress: { note("  \($0)") })
 
                 reply.outcome = .succeeded
@@ -162,12 +154,6 @@ class JITHelperService: NSObject, NSExtensionRequestHandling {
     }
 
     // MARK: - Plumbing
-
-    /// Where this process would cache a developer disk image.
-    private static var ddiPaths: DDIPaths {
-        let library = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
-        return DDIPaths.default(in: library.appendingPathComponent("StikJIT"))
-    }
 
     /// Stages the pairing data as a file for the length of `body`.
     private func withPairingFile<T>(_ data: Data, _ body: (URL) throws -> T) throws -> T {

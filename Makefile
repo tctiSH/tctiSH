@@ -21,6 +21,8 @@ QEMU_FRAMEWORK    := $(QEMU_SYSROOT)/Frameworks/qemu-x86_64-softmmu_jit.framewor
 QEMU_LIBRARY      := $(QEMU_FRAMEWORK)/qemu-x86_64-softmmu_jit
 STIKJIT_BUILD     := build-StikJIT
 STIKJIT_FRAMEWORK := $(STIKJIT_BUILD)/StikJIT.xcframework/Info.plist
+IDEVICE_BUILD     := build-idevice
+IDEVICE_LIBRARY   := $(IDEVICE_BUILD)/out/libidevice_ffi.a
 PODS_MANIFEST     := Pods/Manifest.lock
 
 # -- Building -------------------------------------------------------------------------------------
@@ -31,7 +33,12 @@ PODS_MANIFEST     := Pods/Manifest.lock
 $(QEMU_LIBRARY): build_dependencies.sh
 	$(SHELL_WRAPPER) ./build_dependencies.sh
 
-$(STIKJIT_FRAMEWORK): build_stikjit.sh $(wildcard patches/*.patch)
+# Pinned by version inside build_idevice.sh, so that is the only prerequisite: a
+# bump there is what should trigger a rebuild.
+$(IDEVICE_LIBRARY): build_idevice.sh
+	$(SHELL_WRAPPER) ./build_idevice.sh
+
+$(STIKJIT_FRAMEWORK): build_stikjit.sh $(wildcard patches/*.patch) $(IDEVICE_LIBRARY)
 	$(SHELL_WRAPPER) ./build_stikjit.sh
 
 $(PODS_MANIFEST): Podfile
@@ -39,6 +46,9 @@ $(PODS_MANIFEST): Podfile
 
 .PHONY: deps
 deps: $(QEMU_LIBRARY) ## Build QEMU and its libraries into sysroot-iOS-arm64/ (slow)
+
+.PHONY: idevice
+idevice: $(IDEVICE_LIBRARY) ## Build idevice's FFI library for iOS from source
 
 .PHONY: stikjit
 stikjit: $(STIKJIT_FRAMEWORK) ## Build build-StikJIT/StikJIT.xcframework from the patched submodule copy
@@ -224,6 +234,13 @@ clean-rust: ## Remove tctictl's build output
 clean-stikjit: ## Remove the StikJIT framework, its archive and the patched source copy
 	rm -rf $(STIKJIT_BUILD)
 
+# Takes the cargo target directory with it, which is most of the size and all of
+# the rebuild time. Removing this forces a StikJIT rebuild too, since the
+# framework depends on the library.
+.PHONY: clean-idevice
+clean-idevice: ## Remove the idevice source checkout and its build output
+	rm -rf $(IDEVICE_BUILD)
+
 # build_dependencies.sh configures QEMU inside the submodule itself, so those two trees outlive a
 # `rm -rf build-iOS-arm64`. Leaving them means the next build reuses stale objects and a stale
 # config-host.mak, which is the one thing a clean exists to rule out.
@@ -237,7 +254,7 @@ clean-deps: ## Remove the QEMU sysroot and its build tree (an hour to rebuild)
 clean: clean-app clean-rust ## Remove the app and tctictl build output
 
 .PHONY: distclean
-distclean: clean clean-stikjit clean-deps ## Remove everything, including the slow QEMU and StikJIT builds
+distclean: clean clean-stikjit clean-idevice clean-deps ## Remove everything, including the slow QEMU and StikJIT builds
 
 # -- Utility --------------------------------------------------------------------------------------
 

@@ -63,6 +63,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     ) -> Bool {
         AppDelegate.launchStarted = Date()
 
+        // Has to happen before launching finishes, and costs nothing if pairing is never used.
+        PairingKeepAlive.register()
+
         let default_images: [String: [String: String]] = [:]
 
         // Register our default values; which will be used for any unset values.

@@ -19,6 +19,9 @@ BASEDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_DIR="${STIKJIT_SOURCE:-$BASEDIR/third-party/StikJIT}"
 BUILD_DIR="$BASEDIR/build-StikJIT"
 
+# Our own idevice build, staged over the one StikJIT vendors. See build_idevice.sh.
+IDEVICE_DIR="$BASEDIR/build-idevice/out"
+
 # Patched and built here, never in SOURCE_DIR.
 #
 # Patching the submodule in place left it permanently modified in `git status`,
@@ -70,6 +73,15 @@ check_env() {
         echo -e "${RED}'xcodegen' not found. Run inside 'nix develop'.${NC}" >&2
         exit 1
     }
+
+    # Falling back to StikJIT's vendored copy would build perfectly well and
+    # then be missing the pairing API, which surfaces as undefined symbols in
+    # Swift rather than as anything naming idevice.
+    if [ ! -f "$IDEVICE_DIR/libidevice_ffi.a" ] || [ ! -f "$IDEVICE_DIR/idevice.h" ]; then
+        echo -e "${RED}No idevice build at $IDEVICE_DIR.${NC}" >&2
+        echo "Run './build_idevice.sh' first, or 'make idevice'." >&2
+        exit 1
+    fi
 }
 
 check_env
@@ -83,6 +95,16 @@ check_env
 stage_source() {
     mkdir -p "$WORK_DIR"
     rsync -a --delete --exclude '.git' "$SOURCE_DIR"/ "$WORK_DIR"/
+}
+
+# Replaces StikJIT's vendored idevice with ours.
+stage_idevice() {
+    cp "$IDEVICE_DIR/libidevice_ffi.a" "$WORK_DIR/idevice/libidevice_ffi.a"
+    cp "$IDEVICE_DIR/idevice.h" "$WORK_DIR/idevice/idevice.h"
+
+    if [ -f "$IDEVICE_DIR/VERSION" ]; then
+        echo "  idevice $(tail -1 "$IDEVICE_DIR/VERSION") ($(head -c 12 "$IDEVICE_DIR/VERSION"))"
+    fi
 }
 
 # Fixes we need that aren't upstream yet. The submodule points at
@@ -130,6 +152,9 @@ mkdir -p "$BUILD_DIR"
 
 echo -e "${GREEN}Staging a clean copy...${NC}"
 stage_source
+
+echo -e "${GREEN}Staging our idevice build...${NC}"
+stage_idevice
 
 echo -e "${GREEN}Applying local patches...${NC}"
 apply_patches

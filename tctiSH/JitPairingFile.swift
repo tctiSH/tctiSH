@@ -77,19 +77,31 @@ enum JitPairingFile {
         return .imported
     }
 
-    /// Copies `source` into place, replacing any existing pairing file.
+    /// Stores a pairing file this device produced for us.
     ///
-    /// The copy goes via a temporary file in the same directory so an
-    /// interrupted import can't leave a half-written pairing file behind.
+    /// The bytes have already been proved by the handshake that produced them,
+    /// so there is nothing further to verify.
+    static func store(_ pairingData: Data) throws {
+        try install(contents: pairingData)
+        Log.fs.note("pairing: stored \(pairingData.count) bytes")
+    }
+
+    /// Copies `source` into place, replacing any existing pairing file.
     private static func install(from source: URL) throws {
-        let manager = FileManager.default
+        try install(contents: try Data(contentsOf: source))
+    }
+
+    /// Writes `contents` into place, replacing any existing pairing file.
+    ///
+    /// The write is atomic so an interrupted import can't leave a half-written
+    /// pairing file behind, and a failed one can't destroy a working file.
+    private static func install(contents: Data) throws {
         let destination = url
 
-        try manager.createDirectory(
+        try FileManager.default.createDirectory(
             at: destination.deletingLastPathComponent(),
             withIntermediateDirectories: true)
 
-        let data = try Data(contentsOf: source)
-        try data.write(to: destination, options: .atomic)
+        try contents.write(to: destination, options: .atomic)
     }
 }

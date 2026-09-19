@@ -25,6 +25,14 @@ class ViewController: UIViewController {
     /// Shows system status: how we're running and what's happening alongside.
     private var status: StatusPresenter?
 
+    /// The pairing session in progress, if any. Strong: nothing else holds it.
+    private var pairingSession: PairableHostPairing?
+
+    /// Whichever pairing alert is up, so it can be replaced or taken away.
+    private weak var pairingAlertOnScreen: UIAlertController?
+
+    private static let pairingStatusKey = "pairing"
+
     /// Whether the pairing-file alert has already been put up this launch.
     private var hasOfferedPairingFile = false
 
@@ -659,33 +667,42 @@ class ViewController: UIViewController {
         let alert = UIAlertController(
             title: "Enable JIT?",
             message: "tctiSH can run much faster with a debugger's help, but it "
-                + "needs a pairing file for this device. Importing one now "
+                + "needs a pairing file for this device. Setting one up now "
                 + "will speed up the next launch.",
             preferredStyle: .alert)
+
+        // iOS 27 is where a device gained the ability to pair *with* a host.
+        if #available(iOS 27.0, *) {
+            alert.addAction(
+                // Deliberately the same words the device shows in Settings: the user taps "Pair
+                // with tctiSH" here and then goes looking for "Pair with tctiSH" there.
+                UIAlertAction(title: "Pair with tctiSH", style: .default) { _ in
+                    self.startPairing()
+                })
+        }
 
         alert.addAction(
             UIAlertAction(title: "Choose File", style: .default) { _ in
                 // `importInteractively()` blocks until the user picks, so it cannot run on the main
-                // thread -- the picker it waits on is presented from there.
+                // thread as the picker it waits on is presented from there.
                 DispatchQueue.global(qos: .userInitiated).async {
                     let result = JitPairingFile.importInteractively()
 
                     DispatchQueue.main.async {
                         switch result {
                         case .imported:
-                            // Says so itself: preparation starts and puts up its own pill within
-                            // the second.
+                            // Preparation starts and puts up its own pill within the second.
                             JitEnablement.pairingFileArrived()
 
                         case .cancelled:
-                            // Deliberate, so no comment. Asking again this launch would just be
-                            // nagging; the next one will offer.
+                            // Asking again this launch would just be nagging; the next one will
+                            // offer.
                             break
 
                         case .failed:
                             self.status?.present(
                                 .init(
-                                    key: "pairing",
+                                    key: Self.pairingStatusKey,
                                     message: "Couldn't read that file",
                                     state: .symbol("exclamationmark.triangle.fill"),
                                     duration: 5))
@@ -697,6 +714,142 @@ class ViewController: UIViewController {
         alert.addAction(UIAlertAction(title: "Not Now", style: .cancel))
 
         present(alert, animated: true)
+    }
+
+    /// Advertises tctiSH and waits for this device to pair with it.
+    ///
+    /// Held as a property because the wait outlives the call: the user leaves
+    /// for Settings, and the advertisement has to still be up when they get
+    /// there.
+    private func startPairing() {
+        let session = PairableHostPairing(
+            onPIN: { [weak self] pin in self?.showPairingCode(pin) },
+            onOutcome: { [weak self] outcome in self?.finishPairing(outcome) })
+
+        pairingSession = session
+        showPairingInstructions()
+        session.start()
+    }
+
+    /// Tells the user where to go, because they cannot guess it.
+    ///
+    /// An alert rather than a pill as this is a path through Settings, it has
+    /// to survive being read twice, and it has to still be there when they come
+    /// back from looking. It is replaced by the code alert once the device
+    /// connects.
+    private func showPairingInstructions() {
+        // Developer Mode is not worth checking for: since iOS 16 a development-signed app carrying
+        // `get-task-allow` cannot launch without it, tctiSH claims that entitlement for JIT, and
+        // the deployment target is 18.
+        let alert = pairingAlert(
+            title: "Pair with tctiSH",
+            message: "On this device, open:\n\n"
+                + "Settings › Privacy & Security › Developer Mode\n\n"
+                + "Scroll down, tap \"Pair with tctiSH\", then come back here for the code.")
+
+        alert.addAction(
+            UIAlertAction(title: "Open Settings", style: .default) { _ in
+                Self.openSettings()
+            })
+
+        present(alert)
+    }
+
+    /// Shows the code the user has to type into the device.
+    ///
+    /// An alert rather than a pill: this is the one moment in the flow where
+    /// the user has something to read off and copy, and it should not be
+    /// dismissed by accident while they are typing.
+    private func showPairingCode(_ code: String) {
+        present(
+            pairingAlert(
+                title: "Pairing Code",
+                message: "Enter this code on your device to finish pairing:\n\n\(code)"))
+    }
+
+    /// Opens Settings where the user actually needs to be.
+    private static func openSettings() {
+        let application = UIApplication.shared
+
+        func openOwnPage() {
+            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+            application.open(url)
+        }
+
+        guard let root = URL(string: "App-Prefs:") else {
+            openOwnPage()
+            return
+        }
+
+        application.open(root) { opened in
+            Log.ui.note("settings: App-Prefs: \(opened ? "opened" : "was refused")")
+            if !opened { openOwnPage() }
+        }
+    }
+
+    /// Puts up one of the pairing alerts, replacing whichever is on screen.
+    private func pairingAlert(title: String, message: String) -> UIAlertController {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(
+            UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in
+                self?.pairingSession?.cancel()
+            })
+        return alert
+    }
+
+    /// Shows `alert`, taking away the previous one first.
+    ///
+    /// Recorded as the one on screen *now*: the outcome can land while a
+    /// dismissal is still running, and `finishPairing` has to be able to take
+    /// away an alert that has not finished appearing. It does that by clearing
+    /// the property, which this then reads as "no longer wanted" and declines
+    /// to present.
+    private func present(_ alert: UIAlertController) {
+        let previous = pairingAlertOnScreen
+        pairingAlertOnScreen = alert
+
+        let show = { [weak self] in
+            guard self?.pairingAlertOnScreen === alert else { return }
+            self?.present(alert, animated: true)
+        }
+
+        if let previous {
+            previous.dismiss(animated: false, completion: show)
+        } else {
+            show()
+        }
+    }
+
+    private func finishPairing(_ outcome: PairableHostPairing.Outcome) {
+        pairingSession = nil
+        pairingAlertOnScreen?.dismiss(animated: true)
+        pairingAlertOnScreen = nil
+
+        switch outcome {
+        case .paired(let pairingData):
+            do {
+                try JitPairingFile.store(pairingData)
+                JitEnablement.pairingFileArrived()
+            } catch {
+                showPairingFailure(error.localizedDescription)
+            }
+
+        case .cancelled:
+            // Their decision, and the alert is already gone. No comment.
+            break
+
+        case .failed(let reason):
+            showPairingFailure(reason)
+        }
+    }
+
+    private func showPairingFailure(_ reason: String) {
+        status?.present(
+            .init(
+                key: Self.pairingStatusKey,
+                message: "Couldn't pair: \(reason)",
+                state: .symbol("exclamationmark.triangle.fill"),
+                duration: 8))
     }
 
     func makeFrame(keyboardDelta: CGFloat, _ fn: String = #function, _ ln: Int = #line) -> CGRect {
