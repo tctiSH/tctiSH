@@ -138,38 +138,7 @@ download() {
     fi
     if [ -d "$DATA" ]; then
         echo "${GREEN}Patching data ${NAME}...${NC}"
-        cp -r "$DATA/" "$DIR"
-    fi
-}
-
-download() {
-    URL=$1
-    FILE="$(basename $URL)"
-    NAME="${FILE%.tar.*}"
-    TARGET="$BUILD_DIR/$FILE"
-    DIR="$BUILD_DIR/$NAME"
-    PATCH="$PATCHES_DIR/${NAME}.patch"
-    DATA="$PATCHES_DIR/data/${NAME}"
-    if [ -f "$TARGET" -a -z "$REDOWNLOAD" ]; then
-        echo "${GREEN}$TARGET already downloaded! Run with -d to force re-download.${NC}"
-    else
-        echo "${GREEN}Downloading ${URL}...${NC}"
-        curl -L -O "$URL"
-        mv "$FILE" "$TARGET"
-    fi
-    if [ -d "$DIR" ]; then
-        echo "${GREEN}Deleting existing build directory ${DIR}...${NC}"
-        rm -rf "$DIR"
-    fi
-    echo "${GREEN}Unpacking ${NAME}...${NC}"
-    tar -xf "$TARGET" -C "$BUILD_DIR"
-    if [ -f "$PATCH" ]; then
-        echo "${GREEN}Patching ${NAME}...${NC}"
-        patch -d "$DIR" -p1 <"$PATCH"
-    fi
-    if [ -d "$DATA" ]; then
-        echo "${GREEN}Patching data ${NAME}...${NC}"
-        cp -r "$DATA/" "$DIR"
+        cp -r "$DATA/." "$DIR"
     fi
 }
 
@@ -197,6 +166,11 @@ download_all() {
     download $GLIB_SRC
     download $ICONV_SRC
     download $PIXMAN_SRC
+
+    # QEMU last, because it is by far the largest and the one most likely to be
+    # interrupted. download() applies $PATCHES_DIR/qemu-10.0.12-utm.patch on the
+    # way out, which is where every tctiSH change to QEMU lives.
+    download $QEMU_SRC
 }
 
 copy_private_headers() {
@@ -423,21 +397,21 @@ build() {
 
 build_qemu_tcti() {
     NAME="QEMU_TCTI"
-    QEMU_DIR="$BASEDIR/qemu-tcti/qemu_tcti"
 
-    QEMU_CFLAGS="$CFLAGS"
-    QEMU_CXXFLAGS="$CXXFLAGS"
-    QEMU_LDFLAGS="$LDFLAGS"
-    export QEMU_CFLAGS
-    export QEMU_CXXFLAGS
-    export QEMU_LDFLAGS
-    CFLAGS=
-    CXXFLAGS=
-    LDFLAGS=
+    # Out of tree, inside the unpacked source. $QEMU_DIR is the tarball's own
+    # directory; both variants get their own build directory beneath it so the
+    # second does not have to undo the first.
+    BUILD_SUBDIR="$QEMU_DIR/qemu_tcti"
+
+    # QEMU's configure reads $CFLAGS/$CXXFLAGS/$LDFLAGS straight out of the
+    # environment and writes them into its meson cross file. It used to take
+    # them as $QEMU_CFLAGS instead, which is why this function once moved them
+    # aside; that spelling is gone, and moving them aside now builds QEMU with
+    # no -isysroot and no deployment target -- against the macOS SDK, silently.
 
     pwd="$(pwd)"
-    mkdir -p "$QEMU_DIR"
-    cd "$QEMU_DIR"
+    mkdir -p "$BUILD_SUBDIR"
+    cd "$BUILD_SUBDIR"
     echo "${GREEN}Configuring QEMU...${NC}"
     # QEMU's configure defaults objcc to a bare `clang` and lets meson resolve it from $PATH, even
     # though every other binary it writes into the cross file is a full Xcode path. Pass it
@@ -450,29 +424,25 @@ build_qemu_tcti() {
     echo "${GREEN}Installing QEMU...${NC}"
     ninja install
     cd "$pwd"
-
-    CFLAGS="$QEMU_CFLAGS"
-    CXXFLAGS="$QEMU_CXXFLAGS"
-    LDFLAGS="$QEMU_LDFLAGS"
 }
 
 build_qemu_jit() {
     NAME="QEMU_JIT"
-    QEMU_DIR="$BASEDIR/qemu-tcti/qemu_jit"
 
-    QEMU_CFLAGS="$CFLAGS"
-    QEMU_CXXFLAGS="$CXXFLAGS"
-    QEMU_LDFLAGS="$LDFLAGS"
-    export QEMU_CFLAGS
-    export QEMU_CXXFLAGS
-    export QEMU_LDFLAGS
-    CFLAGS=
-    CXXFLAGS=
-    LDFLAGS=
+    # Out of tree, inside the unpacked source. $QEMU_DIR is the tarball's own
+    # directory; both variants get their own build directory beneath it so the
+    # second does not have to undo the first.
+    BUILD_SUBDIR="$QEMU_DIR/qemu_jit"
+
+    # QEMU's configure reads $CFLAGS/$CXXFLAGS/$LDFLAGS straight out of the
+    # environment and writes them into its meson cross file. It used to take
+    # them as $QEMU_CFLAGS instead, which is why this function once moved them
+    # aside; that spelling is gone, and moving them aside now builds QEMU with
+    # no -isysroot and no deployment target -- against the macOS SDK, silently.
 
     pwd="$(pwd)"
-    mkdir -p "$QEMU_DIR"
-    cd "$QEMU_DIR"
+    mkdir -p "$BUILD_SUBDIR"
+    cd "$BUILD_SUBDIR"
     echo "${GREEN}Configuring QEMU-JIT...${NC}"
     # QEMU's configure defaults objcc to a bare `clang` and lets meson resolve it from $PATH, even
     # though every other binary it writes into the cross file is a full Xcode path. Pass it
@@ -487,9 +457,6 @@ build_qemu_jit() {
     cp "libqemu-x86_64-softmmu.dylib" "$PREFIX/lib/libqemu-x86_64-softmmu_jit.dylib"
 
     cd "$pwd"
-    CFLAGS="$QEMU_CFLAGS"
-    CXXFLAGS="$QEMU_CXXFLAGS"
-    LDFLAGS="$QEMU_LDFLAGS"
 }
 
 meson_build() {
@@ -623,7 +590,23 @@ fixup() {
         basefilename=${base%.*}
         libname=${basefilename#lib*}
         dir=$(dirname "$g")
-        if [ "$dir" == "$PREFIX/lib" ]; then
+
+        # Two spellings reach this, because the two QEMU builds get here by
+        # different routes. build_qemu_tcti runs `ninja install`, and meson
+        # rewrites install names on the way, so its dependencies arrive as
+        # "$PREFIX/lib/libfoo.dylib". build_qemu_jit copies the dylib straight
+        # out of the build tree to avoid clobbering the TCTI one, so its
+        # dependencies still carry whatever the linker emitted -- normally
+        # "@rpath/libfoo.dylib".
+        #
+        # Matching only the first meant the JIT build kept raw @rpath names for
+        # anything we ship, which resolve to nothing once the library is inside
+        # a framework: a dlopen failure at runtime, with no build-time sign of
+        # it. Guarded on the library being one of ours -- tested against
+        # $PREFIX/lib rather than against the framework, because fixup_all
+        # builds the frameworks as it walks and a later one would not exist yet.
+        if [ "$dir" == "$PREFIX/lib" ] ||
+            { [ "$dir" == "@rpath" ] && [ -f "$PREFIX/lib/$base" ]; }; then
             if [ "$PLATFORM" == "macos" ]; then
                 newname="@rpath/$libname.framework/Versions/A/$libname"
             else
@@ -698,13 +681,32 @@ PLATFORM_FAMILY_NAME="$PLATFORM_FAMILY_PREFIX"
 # QEMU build flags. Looong.
 QEMU_PLATFORM_BUILD_FLAGS="--disable-debug-info --enable-shared-lib --disable-hvf --disable-cocoa"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-slirp-smbd --disable-curl --disable-lzo"
+# CoreAudio is a macOS framework; the iOS SDK has no CoreAudio/CoreAudio.h, but
+# meson's framework probe finds the framework itself and says yes.
+QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-coreaudio"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-gnutls --disable-vnc --disable-gcrypt"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-nettle --disable-virglrenderer --disable-libusb"
-QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-libssh --disable-zstd --enable-slirp=git"
+QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-libssh --disable-zstd --enable-slirp"
+# Link libslirp into QEMU rather than beside it. QEMU 6.0 built the subproject
+# static; 10.x leaves it to meson's default, which here means a libslirp.0.dylib
+# that would need its own framework embedded in the app and signed with it.
+QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS -Dslirp:default_library=static"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-sdl --disable-snappy --with-coroutine=libucontext"
+# Without --enable-ucontext the libucontext backend is only offered if a system
+# copy turns up through pkg-config, and there is no iOS one. With it, QEMU
+# builds libucontext itself from subprojects/libucontext.wrap -- which is the
+# same utmapp fork this tree used to carry as a git submodule.
+QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --enable-ucontext"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-capstone --disable-gtk"
+# We run with -display none, and the dbus display is the one thing here whose
+# sources are generated by gdbus-codegen -- which emits calls against whatever
+# glib produced it, not the glib we build against.
+QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-dbus-display"
+# No x86_64 machine we build wants a device tree, and the alternative is
+# fetching and building dtc for a library nothing would link.
+QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-fdt"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --enable-virtfs --target-list=x86_64-softmmu"
-QEMU_PLATFORM_TCTI_FLAGS="--enable-tcg-tcti"
+QEMU_PLATFORM_TCTI_FLAGS="--enable-tcg-threaded-interpreter"
 
 # Setup directories
 BASEDIR="$(dirname "$(realpath $0)")"

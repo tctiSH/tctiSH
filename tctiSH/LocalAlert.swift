@@ -24,6 +24,11 @@ enum LocalAlert {
         guard !hasAsked else { return }
         hasAsked = true
 
+        // Before anything can be posted. iOS hands a notification to the frontmost app's delegate
+        // instead of showing it, and drops it if there is no delegate to ask. Without this the one
+        // alert that fires while someone is looking at the app would go nowhere.
+        UNUserNotificationCenter.current().delegate = presenter
+
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) {
             granted, error in
 
@@ -37,6 +42,24 @@ enum LocalAlert {
     }
 
     private static var hasAsked = false
+
+    /// Lets a notification through while the app is foregrounded.
+    ///
+    /// Everything here is worth seeing whether or not the app is on screen: a
+    /// session save that failed, and a saved session that could not be
+    /// restored. Neither has another surface.
+    private final class ForegroundPresenter: NSObject, UNUserNotificationCenterDelegate {
+        func userNotificationCenter(
+            _ center: UNUserNotificationCenter,
+            willPresent notification: UNNotification,
+            withCompletionHandler completionHandler:
+                @escaping (UNNotificationPresentationOptions) -> Void
+        ) {
+            completionHandler([.banner, .sound])
+        }
+    }
+
+    private static let presenter = ForegroundPresenter()
 
     /// Posts one, now or shortly.
     ///

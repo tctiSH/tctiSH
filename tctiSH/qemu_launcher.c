@@ -10,6 +10,7 @@
 //
 
 #include <dlfcn.h>
+#include <os/log.h>
 #include <stdatomic.h>
 #include <limits.h>
 #include <pthread.h>
@@ -49,9 +50,9 @@ extern int ptrace(int request, pid_t pid, caddr_t addr, int data);
 //
 // QEMU internals that we'll use.
 //
-typedef void (*qemu_init_fn)(int argc, const char *argv[], const char *envp[]);
-typedef void (*qemu_main_loop_fn)(void);
-typedef void (*qemu_cleanup_fn)(void);
+typedef void (*qemu_init_fn)(int argc, char **argv);
+typedef int (*qemu_main_loop_fn)(void);
+typedef void (*qemu_cleanup_fn)(int status);
 
 // Structure for passing arguments to our QEMU thread.
 struct qemu_args {
@@ -68,6 +69,33 @@ struct qemu_args {
     char *accel_args;
     bool is_jit;
 };
+
+/// Matches `Log.qemu` on the Swift side, so one filter catches both.
+static os_log_t QemuLauncherLog(void) {
+    static os_log_t log;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        log = os_log_create("io.ara.tctish.qemu", "qemu");
+    });
+    return log;
+}
+
+/// Frees everything `run_background_qemu` allocated for the VM thread.
+static void free_qemu_args(struct qemu_args *args) {
+    free(args->qemu_image);
+    free(args->bios_dir);
+    free(args->kernel_filename);
+    free(args->initrd_filename);
+    free(args->disk_args);
+    free(args->shared_folder_args);
+    free(args->monitor_channel_args);
+    free(args->memory_value);
+    free(args->accel_args);
+    if (args->boot_image_name) {
+        free(args->boot_image_name);
+    }
+    free(args);
+}
 
 /// The QEMU image, once the VM thread has opened it.
 ///
@@ -187,9 +215,7 @@ static void *qemu_thread(void *raw_args) {
     qemu_main_loop_fn qemu_main_loop;
     qemu_cleanup_fn qemu_cleanup;
 
-    // Provide our QEMU command line and environment...
-    char *envp[] = { NULL };
-
+    // Provide our QEMU command line...
     // clang-format off
     char *argv[] = {
         "qemu-system",
@@ -226,13 +252,23 @@ static void *qemu_thread(void *raw_args) {
         "-append", "tcti_disk=file",
 
         // Provide a few cores.
-        "-smp", "cpus=4",
+        //
+        // Spelled out as sockets, because the guest kernel is currently built
+        // without ACPI and so discovers CPUs through the Intel MP table, which
+        // enumerates by socket: extra cores inside one socket are invisible to
+        // it. 
+        //
+        // QEMU used to hand tctiSH that shape for free: machine types up to
+        // pc-i440fx-6.1 set smp_props.prefer_sockets, making a bare `cpus=4`
+        // mean four sockets. 6.2 dropped it, so the same string now means one
+        // socket of four cores and the guest comes up with a single CPU.
+        "-smp", "4,sockets=4,cores=1,threads=1",
 
         // Monitor conection for tctiSH.
         "-monitor", args->monitor_channel_args,
 
         // Monitor conection in-guest tools.
-        "-monitor", "tcp:localhost:10045,server,wait=off",
+        "-monitor", "tcp:localhost:10045,server=on,wait=off",
 
         // Use JIT if we have JIT hacks, and size the code cache if we were asked to.
         "-accel", args->accel_args,
@@ -253,6 +289,13 @@ static void *qemu_thread(void *raw_args) {
 
     // Open the appropriate QEMU framework...
     qemu_dll = dlopen(args->qemu_image, RTLD_NOW);
+    if (qemu_dll == NULL) {
+        const char *reason = dlerror();
+        os_log_error(QemuLauncherLog(), "could not open %{public}s: %{public}s", args->qemu_image,
+                     reason ? reason : "no reason given");
+        free_qemu_args(args);
+        return NULL;
+    }
 
     // ... publish it, so the app can ask the running VM about its code cache ...
     atomic_store(&qemu_image_handle, qemu_dll);
@@ -262,24 +305,23 @@ static void *qemu_thread(void *raw_args) {
     qemu_main_loop = dlsym(qemu_dll, "qemu_main_loop");
     qemu_cleanup = dlsym(qemu_dll, "qemu_cleanup");
 
-    // Finally, run the lightweight VM.
-
-    qemu_init(argc, (const char **)argv, (const char **)envp);
-    qemu_main_loop();
-    qemu_cleanup();
-
-    // Clean up the memory allcoated for this thread.
-    free(args->bios_dir);
-    free(args->kernel_filename);
-    free(args->initrd_filename);
-    free(args->disk_args);
-    free(args->shared_folder_args);
-    free(args->memory_value);
-    free(args->accel_args);
-    if (args->boot_image_name) {
-        free(args->boot_image_name);
+    if (qemu_init == NULL || qemu_main_loop == NULL || qemu_cleanup == NULL) {
+        os_log_error(QemuLauncherLog(),
+                     "%{public}s is missing an entry point (init:%d main_loop:%d cleanup:%d)",
+                     args->qemu_image, qemu_init != NULL, qemu_main_loop != NULL,
+                     qemu_cleanup != NULL);
+        atomic_store(&qemu_image_handle, NULL);
+        dlclose(qemu_dll);
+        free_qemu_args(args);
+        return NULL;
     }
-    free(args);
+
+    // Finally, run the lightweight VM.
+    qemu_init(argc, argv);
+    qemu_cleanup(qemu_main_loop());
+
+    // Clean up the memory allocated for this thread.
+    free_qemu_args(args);
 
     return NULL;
 }
@@ -330,7 +372,7 @@ void run_background_qemu(const char *qemu_path, const char *kernel_path, const c
 
     // Create our monitor argument.
     args->monitor_channel_args = calloc(ARGUMENT_MAX, sizeof(char));
-    snprintf(args->monitor_channel_args, ARGUMENT_MAX, "unix:%s,server,nowait",
+    snprintf(args->monitor_channel_args, ARGUMENT_MAX, "unix:%s,server=on,wait=off",
              monitor_socket_path);
 
     // Create our accelerator argument.

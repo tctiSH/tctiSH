@@ -250,6 +250,21 @@ class ViewController: UIViewController {
         // went wrong, which is the one thing this app ever posts a notification about. Asking at
         // launch would put the prompt in front of someone before the app had done anything.
         LocalAlert.requestPermission()
+
+        // Needs a machine that has finished booting, and does nothing at all unless the QEMU
+        // underneath the app has changed its migration format since the last run.
+        //
+        // This is posted from `connected`'s `didSet`, so it arrives on whichever thread brought the
+        // SSH session up rather than on the main one, and `UIApplication.shared` may only be
+        // touched on the main thread. The work itself then goes off it again, because `delvm` is
+        // not instant on a snapshot worth a hundred megabytes.
+        DispatchQueue.main.async {
+            let qemu = (UIApplication.shared.delegate as? AppDelegate)?.qemu
+
+            DispatchQueue.global(qos: .utility).async {
+                qemu?.discardPreUpgradeSnapshots()
+            }
+        }
     }
 
     /// Says that the session is coming back, after a lock or a spell in the

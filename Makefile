@@ -27,10 +27,12 @@ PODS_MANIFEST     := Pods/Manifest.lock
 
 # -- Building -------------------------------------------------------------------------------------
 
-# Neither of these tracks its submodule: there is no file that reliably changes when a gitlink
-# moves, and guessing wrong costs an hour of QEMU. After bumping qemu-tcti or StikJIT, force the
-# rebuild with `make clean-deps deps` or `make clean-stikjit stikjit`.
-$(QEMU_LIBRARY): build_dependencies.sh
+# QEMU is a release tarball plus a patch file, both named in
+# third-party/dependencies/, so the prerequisites are the things that decide what gets built:
+# the script, the source URL, and our changes to it. StikJIT is still a submodule and still
+# tracks nothing -- after bumping it, force the rebuild with `make clean-stikjit stikjit`.
+$(QEMU_LIBRARY): build_dependencies.sh third-party/dependencies/sources \
+                 $(wildcard third-party/dependencies/*.patch)
 	$(SHELL_WRAPPER) ./build_dependencies.sh
 
 # Pinned by version inside build_idevice.sh, so that is the only prerequisite: a
@@ -85,13 +87,13 @@ endef
 
 # Not ours to reformat, and excluded everywhere. See tmp/plans/autoformatting.md.
 #
-#   qemu-tcti, third-party  submodules; we rebase onto upstream and do not want the conflicts
+#   third-party             submodules and vendored sources, including the QEMU patch
 #   Pods                    vendored by CocoaPods, rewritten by `pod install`
 #   assets                  guest-side build scripts, their own world
 #   patches                 context lines are literal, so reformatting silently breaks them
 #
 # Everything is found through `git ls-files`, which also keeps build output out by construction.
-NOT_OURS := ^(qemu-tcti|third-party|Pods|assets|patches)/
+NOT_OURS := ^(third-party|Pods|assets|patches)/
 
 SWIFT_SOURCES  := $(shell git ls-files '*.swift' | grep -Ev '$(NOT_OURS)')
 C_SOURCES      := $(shell git ls-files '*.c' '*.h' '*.m' '*.mm' | grep -Ev '$(NOT_OURS)')
@@ -246,7 +248,7 @@ clean-idevice: ## Remove the idevice source checkout and its build output
 # config-host.mak, which is the one thing a clean exists to rule out.
 .PHONY: clean-deps
 clean-deps: ## Remove the QEMU sysroot and its build tree (an hour to rebuild)
-	rm -rf $(QEMU_SYSROOT) build-iOS-arm64 qemu-tcti/qemu_tcti qemu-tcti/qemu_jit
+	rm -rf $(QEMU_SYSROOT) build-iOS-arm64
 
 # The two cheap ones. StikJIT and the QEMU sysroot are minutes and an hour respectively, and neither
 # is something you want thrown away by a reflexive `make clean`; that is what distclean is for.

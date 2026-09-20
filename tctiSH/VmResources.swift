@@ -394,6 +394,39 @@ enum CodeCache {
     }
 }
 
+// MARK: - Snapshot compatibility
+
+/// Whether snapshots written by a previous run can still be loaded.
+///
+/// QEMU's migration stream has no compatibility guarantee across versions. A
+/// snapshot taken under one QEMU is not necessarily loadable by another, and
+/// the failure arrives late: device state is partly restored before anything
+/// notices, so it is treated as fatal.
+enum VmSnapshots {
+
+    /// What this build's snapshots are compatible with.
+    static let migrationEpoch = "qemu-10.0.12"
+
+    /// What the last boot wrote here, or empty on a fresh install.
+    static var lastBooted: String {
+        UserDefaults.standard.string(forKey: "last_migration_epoch") ?? ""
+    }
+
+    /// Whether anything on disk was written by an incompatible QEMU.
+    ///
+    /// True on a fresh install as well, where there is simply nothing recorded
+    /// yet.
+    static var changedSinceLastBoot: Bool {
+        lastBooted != migrationEpoch
+    }
+
+    /// Records the epoch, once the stale snapshots have actually been dealt
+    /// with.
+    static func recordBooted() {
+        UserDefaults.standard.set(migrationEpoch, forKey: "last_migration_epoch")
+    }
+}
+
 // MARK: - The plain settings
 
 /// The settings that are simply stored and read back.

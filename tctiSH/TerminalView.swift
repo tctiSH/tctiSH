@@ -54,8 +54,12 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
 
     /// Whether the SSH session is up.
     ///
-    /// Announces the transition, so whoever is telling the user to wait can
-    /// stop. Only the first one: reconnecting after an unlock isn't news.
+    /// Announces the transition once, so whoever is telling the user to wait
+    /// can stop. `didSet` suppresses a repeat of the same value, but this is
+    /// set back to false whenever the session drops, so the notification fires
+    /// again on every reconnect. That is what `terminalWillReconnect`'s pill
+    /// needs in order to be dismissed, but it means an observer doing
+    /// first-boot work has to guard itself.
     var connected: Bool = false {
         didSet {
             guard connected, !oldValue else { return }

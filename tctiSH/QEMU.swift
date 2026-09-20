@@ -160,6 +160,11 @@ public class QEMUInterface {
     /// resuming, and the check is a view's, so the caller makes it.
     @discardableResult
     func performBackgroundSave() -> Bool {
+        // See snapshotWorkLock: this whole sequence has to be atomic against a stale-snapshot
+        // discard, which deletes the very tags this rotates between.
+        Self.snapshotWorkLock.lock()
+        defer { Self.snapshotWorkLock.unlock() }
+
         let tag = getNextInstantResumeTag()
         let started = Date()
 
@@ -526,6 +531,183 @@ public class QEMUInterface {
         return found
     }
 
+    /// The tags QEMU says are on the disk, loadable or not.
+    private func snapshotTagsOnDisk() -> [String]? {
+        guard let response = runMonitorCommand("info snapshots", timeout: Self.monitorReplyDeadline)
+        else {
+            Log.qemu.warn("snapshots: the monitor did not answer 'info snapshots'")
+            return nil
+        }
+
+        var tags: [String] = []
+
+        for line in Self.lines(of: response) {
+            let text = line.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if text.isEmpty || text.hasPrefix("List of") || text.hasPrefix("ID ") {
+                continue
+            }
+
+            // "ID  TAG  VM SIZE  DATE  VM CLOCK  ICOUNT", padded into columns.
+            let fields = text.split(separator: " ", omittingEmptySubsequences: true)
+            if fields.count >= 2 {
+                tags.append(String(fields[1]))
+            }
+        }
+
+        return tags
+    }
+
+    /// The snapshot tags this app writes by itself.
+    private static let ownedSnapshotTags = ["instant_resume_a", "instant_resume_b", "instantboot"]
+
+    /// Clears up snapshots left by a QEMU whose migration stream has moved on.
+    ///
+    /// Call off the main thread, once the shell is up: it talks to the monitor,
+    /// and `savevm`-adjacent commands want a machine that has finished booting.
+    func discardPreUpgradeSnapshots() {
+        guard VmSnapshots.changedSinceLastBoot else { return }
+
+        // Once per process. `connected` goes back to false on a dropped session and true again on
+        // the reconnect, so the notification that brings us here is not as once-only as its comment
+        // suggests.
+        guard
+            Self.discardLock.withLock({
+                defer { Self.discardStarted = true }
+                return !Self.discardStarted
+            })
+        else { return }
+
+        // Both bail-outs below mean "try again", and a slot held by a run that gave up is a slot
+        // that stops this launch ever retrying.
+        var completed = false
+        defer {
+            if !completed {
+                Self.discardLock.withLock { Self.discardStarted = false }
+            }
+        }
+
+        guard Self.snapshotWorkLock.try() else {
+            Log.qemu.note("snapshots: a save is running; leaving the cleanup for next boot")
+            return
+        }
+        defer { Self.snapshotWorkLock.unlock() }
+
+        // No answer means no information. Recording the epoch here would mark the cleanup done on
+        // the strength of a timeout: the snapshots would stay on the disk for ever, and Boot From
+        // Snapshot would still be pointed at one of them when the next launch stopped forcing a
+        // cold boot.
+        guard let onDisk = snapshotTagsOnDisk() else {
+            Log.qemu.warn("snapshots: could not read the disk; leaving the cleanup for next boot")
+            return
+        }
+
+        var discarded: [String] = []
+
+        for tag in onDisk where Self.ownedSnapshotTags.contains(tag) {
+            guard let reply = runMonitorCommand("delvm \(tag)", timeout: Self.monitorReplyDeadline)
+            else {
+                Log.qemu.warn("snapshots: 'delvm \(tag)' did not answer; leaving it")
+                continue
+            }
+
+            if let failure = Self.monitorError(in: reply) {
+                Log.qemu.warn("snapshots: 'delvm \(tag)' refused: \(failure)")
+                continue
+            }
+
+            discarded.append(tag)
+        }
+
+        // Nothing points at a snapshot that is gone.
+        //
+        // Only if it still names one of the stale ones. After a migration-stream change the pointer
+        // is useless even where the delete failed, but it is only ours to clear if it names
+        // something that was on the disk when we looked.
+        let pointer = getResumeImage()
+        if !pointer.isEmpty && onDisk.contains(pointer) {
+            setResumeImage(tag: "")
+        }
+
+        let theirs = onDisk.filter { !Self.ownedSnapshotTags.contains($0) }
+
+        // Stop Boot From Snapshot pointing at something this QEMU cannot read.
+        //
+        // The forced cold boot in `getBootImageName` only covers the launch that does the
+        // discarding. Once the epoch is recorded the override lapses, and the *next* launch would
+        // hand `-loadvm` a snapshot from the old QEMU.
+        var unpointed: String?
+        if AppSetting.resumeBehavior.string == "snapshot_boot" {
+            let named = AppSetting.bootSnapshot.string
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if !named.isEmpty && onDisk.contains(named) {
+                AppSetting.resumeBehavior.set("recovery_boot")
+                unpointed = named
+                Log.qemu.note("snapshots: boot mode moved off '\(named)'; it predates this QEMU")
+            }
+        }
+
+        // Only now. Until this lands the next launch tries again, which is what should happen if
+        // the monitor was not answering.
+        VmSnapshots.recordBooted()
+        completed = true
+
+        guard !discarded.isEmpty || !theirs.isEmpty || unpointed != nil else {
+            Log.qemu.note("snapshots: nothing left by an older QEMU")
+            return
+        }
+
+        Log.qemu.note(
+            "snapshots: discarded \(discarded.joined(separator: ", ")); "
+                + "kept \(theirs.count) of someone else's")
+
+        var body =
+            "tctiSH updated to a newer QEMU, which cannot read sessions saved by the old one. "
+            + "Linux started fresh. Your files and installed packages are untouched."
+
+        if !theirs.isEmpty {
+            let plural = theirs.count == 1 ? "snapshot" : "snapshots"
+            let verb = theirs.count == 1 ? "was" : "were"
+            body +=
+                " \(theirs.count) \(plural) you named yourself ("
+                + theirs.joined(separator: ", ") + ") \(verb) left alone, but cannot be booted "
+                + "from."
+        }
+
+        if let unpointed {
+            body +=
+                " Startup was switched to Recovery Boot, because it was set to boot from "
+                + "'\(unpointed)'."
+        }
+
+        LocalAlert.post(
+            title: "Saved session could not be restored",
+            body: body,
+            id: Self.staleSnapshotAlertId)
+    }
+
+    /// Guards `discardPreUpgradeSnapshots` against running twice over.
+    private static let discardLock = NSLock()
+    private static var discardStarted = false
+
+    /// Held for the whole of a session save, or of a stale-snapshot discard.
+    ///
+    /// `monitorLock` serializes individual commands; this serializes the
+    /// sequences they belong to. A save picks a rotation tag, writes it, checks
+    /// it is loadable, and only then points `resume_image` at it. A discard
+    /// deletes tags and clears that pointer. Both sides use the name
+    /// `instant_resume_a`, so interleaving them means deleting a snapshot from
+    /// underneath the `savevm` that is still writing it.
+    ///
+    /// The discard takes it with `try()` and gives up if a save holds it, which
+    /// is why it doesn't record the epoch on that path.
+    private static let snapshotWorkLock = NSLock()
+
+    /// Identifier for the notification above, so it replaces rather than
+    /// stacks.
+    private static let staleSnapshotAlertId = "stale-snapshot"
+
     /// Get the next 'instant resume' file image. This ensures we never
     /// overwrite an image until our save is complete.
     private func getNextInstantResumeTag() -> String {
@@ -724,6 +906,13 @@ public class QEMUInterface {
 
         // If our memory value has changed, force a recovery boot.
         if memoryValueChanged() {
+            mode = "recovery_boot"
+        }
+
+        // Same for a QEMU whose migration stream has moved on. Every snapshot on the disk predates
+        // it, including one someone typed into Boot From Snapshot, and loading any of them fails
+        // *after* device state has been partly restored.
+        if VmSnapshots.changedSinceLastBoot {
             mode = "recovery_boot"
         }
 

@@ -36,10 +36,15 @@
       };
 
       # We require the following python packages
+      #
+      # tomli is QEMU's; its configure reads pyproject.toml through it on any
+      # Python older than 3.11, where tomllib became part of the standard
+      # library. It can go when the held-back pin below moves past 3.10.
       pythonPackages =
         pkgs: with pkgs; [
           pyparsing
           six
+          tomli
         ];
 
       # Stable Rust: everything except the formatter.
