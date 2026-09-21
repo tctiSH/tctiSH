@@ -1,0 +1,32 @@
+Subject: [PATCH] Do not probe for pipe2
+
+The iOS 27 SDK declares pipe2 for the first time, marked as introduced in
+iOS 27. Anything targeting an earlier iOS gets a weak import, so the call
+in g_unix_open_pipe lands on NULL -- and gwakeup.c reaches it for every
+GWakeup, because Darwin has no eventfd. That is a crash on every device
+below iOS 27.
+
+Removing the probe cannot be done in CFLAGS: meson's has_function writes
+its own `char pipe2 (void);` declaration rather than using the header, so
+the availability attribute never reaches the compiler and the probe says
+yes however hard -Wunguarded-availability-new is turned up. Dropping the
+name from the list is the only place the answer can be changed.
+
+The fallback right below it is plain pipe() plus an fcntl for FD_CLOEXEC,
+non-atomic but perfectly correct, and it is what this build used until the
+SDK bump.
+
+pipe2 is the only entry in this list the iOS 27 SDK puts beyond our 18.0
+deployment target; the rest are either older than that or absent from the
+SDK entirely, so meson's answer for them is already the right one.
+
+--- a/meson.build
++++ b/meson.build
+@@ -720,7 +720,6 @@
+   'memmem',
+   'mmap',
+   'newlocale',
+-  'pipe2',
+   'poll',
+   'prlimit',
+   'readlink',

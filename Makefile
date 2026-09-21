@@ -243,15 +243,17 @@ clean-stikjit: ## Remove the StikJIT framework, its archive and the patched sour
 clean-idevice: ## Remove the idevice source checkout and its build output
 	rm -rf $(IDEVICE_BUILD)
 
-# build_dependencies.sh configures QEMU inside the submodule itself, so those two trees outlive a
-# `rm -rf build-iOS-arm64`. Leaving them means the next build reuses stale objects and a stale
-# config-host.mak, which is the one thing a clean exists to rule out.
+# Both QEMU build trees now live at build-iOS-arm64/<tarball>/qemu_{tcti,jit}, so a single
+# `rm -rf build-iOS-arm64` reaches them. It used to configure inside the qemu-tcti submodule, which
+# outlived that and left stale objects and a stale config-host.mak behind -- the one thing a clean
+# exists to rule out. Removing the tarballs with it also costs a re-download, which is most of why
+# this is not something to reach for casually.
 .PHONY: clean-deps
-clean-deps: ## Remove the QEMU sysroot and its build tree (an hour to rebuild)
+clean-deps: ## Remove the QEMU sysroot and its build tree (~6 minutes to rebuild, plus downloads)
 	rm -rf $(QEMU_SYSROOT) build-iOS-arm64
 
-# The two cheap ones. StikJIT and the QEMU sysroot are minutes and an hour respectively, and neither
-# is something you want thrown away by a reflexive `make clean`; that is what distclean is for.
+# The two cheap ones. StikJIT and the QEMU sysroot are both minutes, but neither is something you
+# want thrown away by a reflexive `make clean`; that is what distclean is for.
 .PHONY: clean
 clean: clean-app clean-rust ## Remove the app and tctictl build output
 

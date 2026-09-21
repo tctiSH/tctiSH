@@ -1,51 +1,40 @@
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs";
-
-    # Pinned separately as the main nixpkgs is deliberately held back for the
-    # QEMU dependency build (glib 2.69 and its patch set), and predates
-    # xcodegen, so host-side tooling that needs something newer comes from here
-    # instead.
+    # One nixpkgs.
     #
-    # TODO: fold this back into the main input once the pin can move with the
-    # QEMU update.
-    nixpkgs-tools.url = "github:NixOS/nixpkgs";
+    # This used to be two, three years apart: the build pinned itself to a 2023
+    # revision for glib 2.69, which needed a meson old enough to accept a 2021
+    # meson.build, and a second `nixpkgs-tools` input supplied everything the
+    # pin was too old for. Following UTM to glib 2.83 is what retired the pin --
+    # it wants meson >= 1.4.0, so the old revision could not have built it
+    # anyway, and the two constraints pointed the same way for the first time.
+    #
+    # `nixpkgs-unstable` rather than the bare `github:NixOS/nixpkgs`, which
+    # resolves to master. The branch only advances once Hydra has built it, so
+    # an update lands on revisions the binary cache already has; master can put
+    # the whole toolchain -- clang, python, rust -- in front of you as a source
+    # build.
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
     # Rust, with the cross targets the repo needs; see rustToolchain below.
-    # Following nixpkgs-tools rather than nixpkgs, because the held-back pin is
-    # from 2023 and nothing modern evaluates against it.
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs-tools";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
   };
   outputs =
     {
       self,
       nixpkgs,
-      nixpkgs-tools,
       rust-overlay,
     }:
     let
       # We can only build on Apple Silicon at the moment
       system = "aarch64-darwin";
-      pkgs = import nixpkgs { inherit system; };
-      toolsPkgs = import nixpkgs-tools {
+      pkgs = import nixpkgs {
         inherit system;
         overlays = [ rust-overlay.overlays.default ];
       };
-
-      # We require the following python packages
-      #
-      # tomli is QEMU's; its configure reads pyproject.toml through it on any
-      # Python older than 3.11, where tomllib became part of the standard
-      # library. It can go when the held-back pin below moves past 3.10.
-      pythonPackages =
-        pkgs: with pkgs; [
-          pyparsing
-          six
-          tomli
-        ];
 
       # Stable Rust: everything except the formatter.
       #
@@ -65,7 +54,7 @@
       # global cargo with `rustup target add` already run, which is exactly the
       # kind of unwritten setup step the flake exists to remove. See also the
       # musl linker below, without which the target is present but unusable.
-      rustToolchain = toolsPkgs.rust-bin.stable.latest.minimal.override {
+      rustToolchain = pkgs.rust-bin.stable.latest.minimal.override {
         extensions = [
           "clippy"
           "llvm-tools"
@@ -94,18 +83,37 @@
         done
       '';
 
-      # Two host tools that build_dependencies.sh checks for by name, and which
-      # were previously coming from wherever the developer happened to have
-      # them -- Homebrew, on the machine this was written on.
+      # Host tools the dependency build may reach for, pinned so that it cannot
+      # matter what the developer happens to have installed.
       #
-      # Only the binaries are exposed. Pulling glib and gettext into the shell
-      # whole would also put their headers and .pc files in front of a build
-      # whose entire job is to cross-compile its own copies of both, and the
-      # failure from getting that wrong would arrive an hour in.
+      # msgfmt is the one that does real work: glib compiles its translation
+      # catalogues with it.
+      #
+      # The glib code generators are here for a different reason -- none of them
+      # is invoked by the current build, and glib 2.83 overrides find_program for
+      # its own mkenums anyway. They are here to *shadow* Homebrew's, which is a
+      # complete glib toolset sitting on $PATH ahead of nothing in particular.
+      # That has bitten this repo before: a Homebrew gdbus-codegen generated
+      # sources against its own glib and emitted a symbol our build did not have.
+      # `--disable-dbus-display` is the fix for that specific case; this is what
+      # stops the next one being decided by `brew upgrade`.
+      #
+      # Note this buys determinism, not version agreement: nixpkgs' glib is
+      # newer than the one we cross-compile, so anything that actually generated
+      # code here would still be generating it with the wrong glib. The answer
+      # then is to stop generating, as dbus-display did.
+      #
+      # Only binaries are exposed, and that is deliberate. Pulling glib and
+      # gettext into the shell whole would put their headers and .pc files in
+      # front of a build whose entire job is to cross-compile its own copies, and
+      # the failure from getting that wrong would arrive deep into a dependency
+      # build.
       hostBuildTools = pkgs.runCommand "tctish-host-build-tools" { } ''
         mkdir -p $out/bin
         ln -s ${pkgs.gettext}/bin/msgfmt $out/bin/msgfmt
-        ln -s ${pkgs.glib.dev}/bin/glib-mkenums $out/bin/glib-mkenums
+        for tool in gdbus-codegen gio-querymodules glib-compile-resources                     glib-compile-schemas glib-genmarshal glib-mkenums; do
+          ln -s ${pkgs.glib.dev}/bin/"$tool" $out/bin/"$tool"
+        done
       '';
 
       # And the following system-level packages in addition to having `xcrun`
@@ -113,25 +121,35 @@
       buildDependencies =
         with pkgs;
         [
+          # gettext's configure probes for bison; the others are meson's and
+          # QEMU's. QEMU builds its own meson into a pyvenv, so the one here is
+          # for the glib build.
           bison
-          libgpg-error
-          (python3.withPackages pythonPackages)
+          python3
           meson
           ninja
+
+          # meson resolves [wrap-git] subprojects by shelling out to git --
+          # QEMU's libucontext and slirp, at configure time. Before this was
+          # listed, it came from the nix-darwin system profile, which the
+          # shellHook below now removes from $PATH.
+          git
         ]
         ++ [
           hostBuildTools
 
           # Generates StikJIT's Xcode project; see build_stikjit.sh.
-          toolsPkgs.xcodegen
+          pkgs.xcodegen
 
-          # Both targets are synchronized root groups. The pinned nixpkgs ships
-          # CocoaPods 1.13.0 on Xcodeproj 1.23.0, which has no such ISA and aborts
-          # `pod install` with "attempted to initialize an object with unknown ISA
+          # Both targets are synchronized root groups, so CocoaPods has to be
+          # new enough to know the PBXFileSystemSynchronizedRootGroup ISA.
+          # CocoaPods 1.13.0 on Xcodeproj 1.23.0 -- what the old 2023 pin shipped
+          # -- has no such ISA and aborts `pod install` with "attempted to
+          # initialize an object with unknown ISA
           # `PBXFileSystemSynchronizedRootGroup`". It fails loudly rather than
-          # corrupting anything, but it does fail. This one is CocoaPods 1.16.2 on
-          # Xcodeproj 1.27.0, verified to round-trip both targets intact.
-          toolsPkgs.cocoapods
+          # corrupting anything, but it does fail. 1.16.2 on Xcodeproj 1.27.0 was
+          # verified to round-trip both targets intact.
+          pkgs.cocoapods
 
           rustBinaries
           nightlyRustfmt
@@ -143,12 +161,12 @@
       # formatting and friends, every one of which is nightly-gated. A stable
       # rustfmt does not error on them -- it warns and carries on formatting to
       # its own defaults, so the config would look applied and not be.
-      nightlyRustfmt = toolsPkgs.rust-bin.nightly.latest.rustfmt;
+      nightlyRustfmt = pkgs.rust-bin.nightly.latest.rustfmt;
 
       # Everything `make format` drives, minus swift-format and clang-format,
       # which come from the active Xcode toolchain via `xcrun` so that they match
       # what the IDE applies on save. See tmp/plans/autoformatting.md.
-      formatters = with toolsPkgs; [
+      formatters = with pkgs; [
         dprint # Markdown, JSON, TOML, YAML
         nixfmt # Nix (RFC 166 style)
         ruff # Python
@@ -173,6 +191,41 @@
         # The directory is rustc's own triple, `aarch64-apple-darwin`, which is
         # spelled differently to nix's `aarch64-darwin`.
         CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER = "${rustToolchain}/lib/rustlib/aarch64-apple-darwin/bin/rust-lld";
+
+        # Everything the build resolves by bare name comes from this flake or
+        # from Apple. The inherited $PATH is filtered rather than replaced, so
+        # Xcode and the base system keep working -- xcrun, otool,
+        # install_name_tool, xcodebuild, codesign, plutil, sysctl -- while
+        # Homebrew, /usr/local, the nix-darwin system profile and per-user bin
+        # directories cannot decide what a build picks up.
+        #
+        # This is not hypothetical. Homebrew ships a complete glib toolset, and a
+        # Homebrew gdbus-codegen once generated QEMU sources against its own glib
+        # and emitted a symbol our build did not have. pkg-config was the same
+        # story quieter: build_dependencies.sh builds its own into
+        # $PREFIX/host/bin exactly to keep host .pc files out, and Homebrew's sat
+        # in front of it on $PATH regardless.
+        #
+        # Two consequences worth knowing. `git` and `curl` now resolve to
+        # different binaries than before -- nixpkgs' git, Apple's curl -- so a
+        # per-process firewall like Little Snitch will ask about them afresh.
+        # And `nix` itself is dropped, which is fine because the Makefile only
+        # reaches for it when IN_NIX_SHELL is unset.
+        shellHook = ''
+          _tctish_path=""
+          _tctish_oldifs="$IFS"
+          IFS=":"
+          for _tctish_dir in $PATH; do
+            case "$_tctish_dir" in
+              /nix/store/* | /usr/bin | /bin | /usr/sbin | /sbin                 | /Library/Apple/usr/bin | /System/Cryptexes/*                 | /var/run/com.apple.security.cryptexd/*)
+                _tctish_path="$_tctish_path:$_tctish_dir"
+                ;;
+            esac
+          done
+          IFS="$_tctish_oldifs"
+          export PATH="''${_tctish_path#:}"
+          unset _tctish_path _tctish_oldifs _tctish_dir
+        '';
       };
     };
 }

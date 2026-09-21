@@ -60,21 +60,9 @@ usage() {
     exit 1
 }
 
-python_module_test() {
-    python3 -c "import $1"
-}
-
 check_env() {
     command -v python3 >/dev/null 2>&1 || {
         echo >&2 "${RED}You must install 'python3' on your host machine.${NC}"
-        exit 1
-    }
-    python_module_test six >/dev/null 2>&1 || {
-        echo >&2 "${RED}'six' not found in your Python 3 installation.${NC}"
-        exit 1
-    }
-    python_module_test pyparsing >/dev/null 2>&1 || {
-        echo >&2 "${RED}'pyparsing' not found in your Python 3 installation.${NC}"
         exit 1
     }
     command -v meson >/dev/null 2>&1 || {
@@ -83,14 +71,6 @@ check_env() {
     }
     command -v msgfmt >/dev/null 2>&1 || {
         printf >&2 '%b\n' "${RED}You must install 'gettext' on your host machine.\n\t'msgfmt' needs to be in your \$PATH as well.${NC}"
-        exit 1
-    }
-    command -v glib-mkenums >/dev/null 2>&1 || {
-        printf >&2 '%b\n' "${RED}You must install 'glib-utils' on your host machine.\n\t'glib-mkenums' needs to be in your \$PATH as well.${NC}"
-        exit 1
-    }
-    command -v gpg-error-config >/dev/null 2>&1 || {
-        printf >&2 '%b\n' "${RED}You must install 'libgpg-error' on your host machine.\n\t'gpg-error-config' needs to be in your \$PATH as well.${NC}"
         exit 1
     }
     command -v xcrun >/dev/null 2>&1 || {
@@ -142,29 +122,57 @@ download() {
     fi
 }
 
-clone() {
-    REPO="$1"
-    COMMIT="$2"
-    NAME="$(basename $REPO)"
-    DIR="$BUILD_DIR/$NAME"
-    if [ -d "$DIR" -a -z "$REDOWNLOAD" ]; then
-        echo "${GREEN}$DIR already downloaded! Run with -d to force re-download.${NC}"
-    else
-        rm -rf "$DIR"
-        echo "${GREEN}Cloning ${URL}...${NC}"
-        mkdir "$DIR"
-        git -C "$DIR" init
-        git -C "$DIR" remote add origin "$REPO"
-    fi
-    git -C "$DIR" fetch --depth 1 origin "$COMMIT"
-    git -C "$DIR" checkout "$COMMIT"
+# Meson resolves a [wrap-file] by looking in the subproject's packagecache before
+# it reaches for the network, and checks the wrap's source_hash/patch_hash either
+# way. Seeding that directory means every file this build fetches is named in
+# third-party/dependencies/sources and pulled by the same curl, instead of two of
+# them being fetched by meson out of a file inside the glib tarball.
+#
+# What makes it worth the machinery rather than just letting meson do it: the
+# wrap gives source_url a source_fallback_url, but gives patch_url *no* fallback
+# at all, so the patch has exactly one host. A failure there lands several
+# minutes into a dependency build, after four good downloads, and takes the whole
+# run with it.
+#
+# It is a judgement call, not a necessity -- meson fetches both files perfectly
+# well when the network is behaving. Deleting this function and the two
+# PCRE2_* entries in sources would leave a working build.
+seed_packagecache() {
+    SEED_DIR="$1"
+    shift
+    SEED_CACHE="$SEED_DIR/subprojects/packagecache"
+    mkdir -p "$SEED_CACHE"
+    for url in "$@"; do
+        seed_file="$(basename "$url")"
+        seed_target="$BUILD_DIR/$seed_file"
+        if [ -f "$seed_target" -a -z "$REDOWNLOAD" ]; then
+            echo "${GREEN}$seed_target already downloaded! Run with -d to force re-download.${NC}"
+        else
+            echo "${GREEN}Downloading ${url}...${NC}"
+            # Into place only once curl has succeeded. Writing straight to
+            # $seed_target would leave a truncated file behind on an interrupted
+            # download, and the next run would skip re-fetching it and hand meson
+            # a bad hash -- which reads as a corrupt wrap rather than a failed
+            # download. download() avoids this the same way.
+            curl -L -o "$seed_target.part" "$url"
+            mv "$seed_target.part" "$seed_target"
+        fi
+        cp "$seed_target" "$SEED_CACHE/$seed_file"
+    done
 }
 
 download_all() {
     [ -d "$BUILD_DIR" ] || mkdir -p "$BUILD_DIR"
     download $PKG_CONFIG_SRC
-    download $GLIB_SRC
+    download $FFI_SRC
     download $ICONV_SRC
+    download $GETTEXT_SRC
+    download $GLIB_SRC
+
+    # After download $GLIB_SRC, which re-extracts the tree this writes into.
+    GLIB_FILE="$(basename $GLIB_SRC)"
+    seed_packagecache "$BUILD_DIR/${GLIB_FILE%.tar.*}" "$PCRE2_SRC" "$PCRE2_PATCH_SRC"
+
     download $PIXMAN_SRC
 
     # QEMU last, because it is by far the largest and the one most likely to be
@@ -225,6 +233,12 @@ generate_meson_cross() {
     echo "ranlib = [$(meson_quote $RANLIB)]" >>$cross
     echo "strip = [$(meson_quote $STRIP), '-x']" >>$cross
     echo "python = ['$(which python3)']" >>$cross
+    # No glib-mkenums or glib-compile-resources here, though UTM's cross file
+    # names both. glib overrides find_program for its own mkenums unconditionally
+    # -- it is a Python script, so cross-compiling does not stop it running -- and
+    # nothing in this tree invokes glib-compile-resources. Tested: glib 2.83
+    # builds with both entries absent *and* both tools removed from $PATH, and the
+    # exported symbols of libglib, libgobject and libgio are identical either way.
     echo "[host_machine]" >>$cross
     case $PLATFORM in
         ios*)
@@ -301,89 +315,23 @@ build_pkg_config() {
     export PATH="$PREFIX/host/bin:$PATH"
 }
 
-build_openssl() {
-    URL=$1
-    shift 1
-    FILE="$(basename $URL)"
-    NAME="${FILE%.tar.*}"
-    DIR="$BUILD_DIR/$NAME"
-    pwd="$(pwd)"
-
-    TOOLCHAIN_PATH="$(dirname $(xcrun --sdk $SDK -find clang))"
-    PATH="$PATH:$TOOLCHAIN_PATH"
-    CROSS_TOP="$(xcrun --sdk $SDK --show-sdk-platform-path)/Developer" # for openssl
-    CROSS_SDK="$SDKNAME$SDKVERSION.sdk"                                # for openssl
-    export CROSS_TOP
-    export CROSS_SDK
-    export PATH
-    case $ARCH in
-        armv7 | armv7s)
-            OPENSSL_CROSS=iphoneos-cross
-            ;;
-        arm64)
-            OPENSSL_CROSS=ios64-cross
-            ;;
-        i386)
-            OPENSSL_CROSS=darwin-i386-cc
-            ;;
-        x86_64)
-            OPENSSL_CROSS=darwin64-x86_64-cc
-            ;;
-    esac
-    case $PLATFORM in
-        ios | ios-tci)
-            case $ARCH in
-                armv7 | armv7s)
-                    OPENSSL_CROSS=iphoneos-cross
-                    ;;
-                arm64)
-                    OPENSSL_CROSS=ios64-cross
-                    ;;
-                i386 | x86_64)
-                    OPENSSL_CROSS=iossimulator64-cross
-                    ;;
-            esac
-            ;;
-        macos)
-            case $ARCH in
-                arm64)
-                    OPENSSL_CROSS=darwin64-arm64-cc
-                    ;;
-                i386)
-                    OPENSSL_CROSS=darwin-i386-cc
-                    ;;
-                x86_64)
-                    OPENSSL_CROSS=darwin64-x86_64-cc
-                    ;;
-            esac
-            ;;
-    esac
-    if [ -z "$OPENSSL_CROSS" ]; then
-        echo "${RED}Unsupported configuration for OpenSSL $PLATFORM, $ARCH${NC}"
-        exit 1
-    fi
-
-    cd "$DIR"
-    if [ -z "$REBUILD" ]; then
-        echo "${GREEN}Configuring ${NAME}...${NC}"
-        ./Configure $OPENSSL_CROSS no-dso no-hw no-engine --prefix="$PREFIX" $@
-    fi
-    echo "${GREEN}Building ${NAME}...${NC}"
-    make -j$NCPU
-    echo "${GREEN}Installing ${NAME}...${NC}"
-    make install
-    cd "$pwd"
-}
-
+# Takes either a source URL, resolved to the directory download() unpacked it
+# into, or a directory outright -- which is how gettext gets built from one
+# subdirectory of its tarball. meson_build() below has taken both all along;
+# this just matches it.
 build() {
-    URL=$1
+    SRCDIR="$1"
     shift 1
-    FILE="$(basename $URL)"
-    NAME="${FILE%.tar.*}"
-    DIR="$BUILD_DIR/$NAME"
+    case $SRCDIR in
+        http* | ftp*)
+            FILE="$(basename $SRCDIR)"
+            SRCDIR="$BUILD_DIR/${FILE%.tar.*}"
+            ;;
+    esac
+    NAME="$(basename $SRCDIR)"
     pwd="$(pwd)"
 
-    cd "$DIR"
+    cd "$SRCDIR"
     if [ -z "$REBUILD" ]; then
         echo "${GREEN}Configuring ${NAME}...${NC}"
         ./configure --prefix="$PREFIX" --host="$CHOST" $@
@@ -488,65 +436,61 @@ meson_build() {
     cd "$pwd"
 }
 
-build_angle() {
-    OLD_PATH=$PATH
-    export PATH="$(realpath "$BUILD_DIR/depot_tools.git"):$OLD_PATH"
-    pwd="$(pwd)"
-    cd "$BUILD_DIR/angle.git"
-    DEPOT_TOOLS_UPDATE=0 python3 scripts/bootstrap.py
-    DEPOT_TOOLS_UPDATE=0 gclient sync
-    case $PLATFORM in
-        ios*)
-            TARGET_OS="ios"
-            IOS_BUILD_ARGS="ios_enable_code_signing=false ios_deployment_target=\"$IOS_SDKMINVER\""
-            if [ "$PLATFORM" == "ios_simulator" ]; then
-                IOS_BUILD_ARGS="$IOS_BUILD_ARGS target_environment=\"simulator\""
-            else
-                IOS_BUILD_ARGS="$IOS_BUILD_ARGS target_environment=\"device\""
-            fi
-            ;;
-        macos)
-            TARGET_OS="mac"
-            ;;
-    esac
-    case $ARCH in
-        armv7 | armv7s)
-            TARGET_CPU="arm"
-            ;;
-        arm64)
-            TARGET_CPU="arm64"
-            ;;
-        i386)
-            TARGET_CPU="x86"
-            ;;
-        x86_64)
-            TARGET_CPU="x64"
-            ;;
-    esac
-    # FIXME: remove this hack when SwiftShader is fixed
-    sed -i.old 's/"-Wloop-analysis"/"-Wloop-analysis", "-Wno-deprecated-declarations"/g' "build/config/compiler/BUILD.gn"
-    gn gen "--args=is_debug=false angle_build_all=false angle_enable_metal=true $IOS_BUILD_ARGS target_os=\"$TARGET_OS\" target_cpu=\"$TARGET_CPU\"" utm_build
-    ninja -C utm_build -j $NCPU
-    if [ "$TARGET_OS" == "ios" ]; then
-        cp -a "utm_build/libEGL.framework/libEGL" "$PREFIX/lib/libEGL.dylib"
-        cp -a "utm_build/libGLESv2.framework/libGLESv2" "$PREFIX/lib/libGLESv2.dylib"
-    else
-        cp -a "utm_build/libEGL.dylib" "$PREFIX/lib/libEGL.dylib"
-        cp -a "utm_build/libGLESv2.dylib" "$PREFIX/lib/libGLESv2.dylib"
-    fi
-    # FIXME: above
-    mv "build/config/compiler/BUILD.gn.old" "build/config/compiler/BUILD.gn"
-    # -headerpad_max_install_names is broken and these still fail on long paths so we just make sure they run at the end with a short path
-    #install_name_tool -id "$PREFIX/lib/libEGL.dylib" "$PREFIX/lib/libEGL.dylib"
-    #install_name_tool -id "$PREFIX/lib/libGLESv2.dylib" "$PREFIX/lib/libGLESv2.dylib"
-    rsync -a "include/" "$PREFIX/include"
-    cd "$pwd"
-    export PATH=$OLD_PATH
-}
-
 build_qemu_dependencies() {
+    # Order matters, and follows UTM's. libffi and libintl are both hard
+    # dependencies of glib's meson.build -- dependency('libffi') and
+    # dependency('intl') -- which resolve through $PREFIX/host/bin/pkg-config
+    # and -L$PREFIX/lib, so they have to be installed before glib configures.
+    # Miss either and meson falls back to a wrap: libffi.wrap is a git clone of
+    # a gstreamer fork, and proxy-libintl.wrap is a stub that resolves nothing.
+    #
+    # gettext wants libiconv, so iconv sits between them.
+    build $FFI_SRC
     build $ICONV_SRC
-    meson_build $GLIB_SRC -Dtests=false
+
+    # strchrnul (iOS 18.4) and pipe2 (iOS 27) are both past our 18.0 deployment
+    # target, so the linker weak-links them and the call lands on NULL. gnulib
+    # probes by writing its own `char pipe2 ();` rather than including the
+    # header, so the availability attribute never reaches the compiler and
+    # -Werror=unguarded-availability-new cannot correct the answer -- it only
+    # fires later, on gnulib's own use of the function it was told exists.
+    # `future` is how gnulib spells "the OS will have it one day, use your
+    # replacement"; it is what these two variables exist for.
+    #
+    # Checked against the whole of gettext's ac_cv_func_*=yes set: these are the
+    # only two the iOS 27 SDK puts beyond 18.0. strchrnul is copied from UTM,
+    # which hit it first; pipe2 is ours, and is the same SDK change that the
+    # glib patch works around.
+    #
+    # Only gettext-runtime is built, which is a standalone autoconf package
+    # inside the tarball. glib wants libintl and libintl.h; nothing in this tree
+    # wants anything else gettext builds, and gettext-tools is almost all of it
+    # -- 189s and 27MB installed for the whole thing against 42s and 1.6MB for
+    # this, and six dylibs that fixup_all turns into frameworks against one.
+    #
+    # It also means UTM's gettext patch is not needed: both of its hunks are in
+    # libtextstyle/ and gettext-tools/, neither of which a runtime-only
+    # configure enters. Verified by building it both ways -- same installed
+    # headers, same libintl. This is the one real divergence from UTM here, so
+    # if a future gettext bump misbehaves, try their whole-tree configure and
+    # their patch before anything else.
+    GETTEXT_FILE="$(basename $GETTEXT_SRC)"
+    gl_cv_onwards_func_strchrnul=future gl_cv_onwards_func_pipe2=future \
+        build "$BUILD_DIR/${GETTEXT_FILE%.tar.*}/gettext-runtime" \
+        --disable-java --disable-c++ --disable-libasprintf
+
+    # -Dsysprof=disabled stops meson cloning the sysprof subproject from
+    # gitlab.gnome.org while configuring -- glib's sysprof.wrap is a wrap-git,
+    # so unlike pcre2 there is no hash to check and nothing to seed, and it is a
+    # network fetch in the middle of the build for a profiler this never uses.
+    # With it, glib configures with zero git clones; exported symbols unchanged.
+    #
+    # -Ddtrace=disabled is UTM's, and is *not* load-bearing: glib builds happily
+    # with /usr/sbin/dtrace found, and the exported symbols are identical either
+    # way. Kept for parity with UTM and because generating DTrace probes for iOS
+    # is pointless, not because anything breaks without it.
+    meson_build $GLIB_SRC -Dtests=false -Ddtrace=disabled -Dsysprof=disabled
+
     build $PIXMAN_SRC
 }
 
@@ -671,7 +615,7 @@ CFLAGS_MINVER="-miphoneos-version-min=$SDKMINVER"
 #
 # It does not reach meson, whose has_function writes its own declaration rather than using the
 # header, so the availability attribute never gets near the compiler. glib is the one thing
-# here built that way, and its pipe2 is dropped in third-party/dependencies/glib-2.69.0.patch.
+# here built that way, and its pipe2 is dropped in third-party/dependencies/glib-2.83.0.patch.
 CFLAGS_AVAILABILITY="-Werror=unguarded-availability-new"
 PLATFORM_FAMILY_PREFIX="iOS"
 CFLAGS_TARGET=

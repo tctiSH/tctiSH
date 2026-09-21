@@ -2,30 +2,16 @@
   "nodes": {
     "nixpkgs": {
       "locked": {
-        "lastModified": 1695856304,
-        "narHash": "sha256-61ADXZFrB3mpbnHoIhpyBT3k/VSY0qOEiOdxv7hjGCQ=",
+        "lastModified": 1789724158,
+        "narHash": "sha256-nlKgrm0dsVhOSopKheVBCcOpiIticufPPVLdVOI0euA=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "bdca9c5b0c7286b3298c323202a14e77862ea1a1",
+        "rev": "0a3468a402c449992505b6a9fc5b06580141b750",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
-        "repo": "nixpkgs",
-        "type": "github"
-      }
-    },
-    "nixpkgs-tools": {
-      "locked": {
-        "lastModified": 1789213289,
-        "narHash": "sha256-ogGRNOwBiQKByTzAJE2lxlpMaUgKyMXrBmhMmlMQt50=",
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "bd7f334c043ec40ee61997ba857d1a97dbfc87df",
-        "type": "github"
-      },
-      "original": {
-        "owner": "NixOS",
+        "ref": "nixpkgs-unstable",
         "repo": "nixpkgs",
         "type": "github"
       }
@@ -33,14 +19,13 @@
     "root": {
       "inputs": {
         "nixpkgs": "nixpkgs",
-        "nixpkgs-tools": "nixpkgs-tools",
         "rust-overlay": "rust-overlay"
       }
     },
     "rust-overlay": {
       "inputs": {
         "nixpkgs": [
-          "nixpkgs-tools"
+          "nixpkgs"
         ]
       },
       "locked": {

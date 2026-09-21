@@ -23,11 +23,14 @@ The steps are wired together: `make build` depends on the QEMU sysroot, the Stik
 the Pods, and each of those is a rule on the file it produces rather than a phony target -- so they
 run once and then stay quiet. Running the numbered steps by hand is only for doing one in isolation.
 
-Neither `deps` nor `stikjit` watches its submodule. There is no file that reliably changes when a
-gitlink moves, and a wrong guess costs an hour of QEMU, so after bumping `qemu-tcti` or `StikJIT`
-force it: `make clean-deps deps`, or `make clean-stikjit stikjit`.
+`deps` watches the files that decide what it builds (`build_dependencies.sh`, the source URLs in
+`third-party/dependencies/sources`, and the patches beside them) so editing any of those is enough
+to trigger a rebuild. `stikjit` cannot do the same, because it tracks a submodule and no file
+reliably changes when a gitlink moves; after bumping StikJIT, force it with
+`make clean-stikjit stikjit`.
 
-Clone with submodules, or fix one you already have:
+StikJIT is the only submodule a `make` target builds from; `third-party/SwiftTerm` is the other one,
+consumed by Xcode directly. Clone with submodules, or fix one you already have:
 
 ```sh
 git submodule update --init --recursive
@@ -39,8 +42,12 @@ git submodule update --init --recursive
 make deps
 ```
 
-Builds QEMU and its libraries into `sysroot-iOS-arm64/`. Slow, and only needed when the QEMU
-submodule moves.
+Builds QEMU and its libraries into `sysroot-iOS-arm64/`. About six minutes from scratch once the
+tarballs are cached, and only needed when something under `third-party/dependencies/` changes.
+
+It fetches from the network while it runs: five source tarballs up front, then two git clones part
+way through, for QEMU's `libucontext` and `slirp` meson subprojects. Behind a per-process firewall
+those clones are the part that will stall.
 
 ### 2. StikJIT
 
@@ -75,9 +82,9 @@ make build
 Or just open `tctiSH.xcworkspace` in Xcode.
 
 `make clean` removes the app and `tctictl` output. `make distclean` also throws away the StikJIT
-framework and the QEMU sysroot, which is minutes and an hour to rebuild respectively -- hence the
-split. There is no `clean-pods`, because `Pods/` is checked in and removing it would read as 67
-deleted files rather than a clean slate.
+framework and the QEMU sysroot, which are minutes apiece to rebuild -- hence the split. There is no
+`clean-pods`, because `Pods/` is checked in and removing it would read as 67 deleted files rather
+than a clean slate.
 
 Minimum deployment target is **iOS 18.0**, kept in step across the app, the helper extension, the
 pods and the StikJIT build. `build_stikjit.sh` reads it out of the project rather than keeping a

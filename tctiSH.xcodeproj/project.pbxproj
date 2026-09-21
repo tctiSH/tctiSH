@@ -23,12 +23,12 @@
 		8DF5F03C28C1BCEC00FB1F1C /* gthread-2.0.0.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F02F28C1BCEA00FB1F1C /* gthread-2.0.0.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		8DF5F03D28C1BCEC00FB1F1C /* iconv.2.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03028C1BCEA00FB1F1C /* iconv.2.framework */; };
 		8DF5F03E28C1BCED00FB1F1C /* iconv.2.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03028C1BCEA00FB1F1C /* iconv.2.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		8DF5F03F28C1BCED00FB1F1C /* intl.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03128C1BCEA00FB1F1C /* intl.framework */; };
-		8DF5F04028C1BCED00FB1F1C /* intl.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03128C1BCEA00FB1F1C /* intl.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		8DF5F03F28C1BCED00FB1F1C /* intl.8.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03128C1BCEA00FB1F1C /* intl.8.framework */; };
+		8DF5F04028C1BCED00FB1F1C /* intl.8.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03128C1BCEA00FB1F1C /* intl.8.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		8DF5F04128C1BCED00FB1F1C /* pixman-1.0.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03228C1BCEB00FB1F1C /* pixman-1.0.framework */; };
 		8DF5F04228C1BCEE00FB1F1C /* pixman-1.0.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03228C1BCEB00FB1F1C /* pixman-1.0.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		8DF5F04328C1BCEE00FB1F1C /* ffi.7.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03328C1BCEB00FB1F1C /* ffi.7.framework */; };
-		8DF5F04428C1BCEE00FB1F1C /* ffi.7.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03328C1BCEB00FB1F1C /* ffi.7.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		8DF5F04328C1BCEE00FB1F1C /* ffi.8.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03328C1BCEB00FB1F1C /* ffi.8.framework */; };
+		8DF5F04428C1BCEE00FB1F1C /* ffi.8.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03328C1BCEB00FB1F1C /* ffi.8.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		8DF5F04528C1BCEF00FB1F1C /* charset.1.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03428C1BCEB00FB1F1C /* charset.1.framework */; };
 		8DF5F04628C1BCEF00FB1F1C /* charset.1.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03428C1BCEB00FB1F1C /* charset.1.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		8DF5F04728C1BCF000FB1F1C /* gobject-2.0.0.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF5F03528C1BCEB00FB1F1C /* gobject-2.0.0.framework */; };
@@ -71,9 +71,9 @@
 				8DF5F03828C1BCEC00FB1F1C /* gmodule-2.0.0.framework in Embed Frameworks */,
 				8D4939E728C770DD00F57421 /* qemu-x86_64-softmmu_jit.framework in Embed Frameworks */,
 				8DF5F03E28C1BCED00FB1F1C /* iconv.2.framework in Embed Frameworks */,
-				8DF5F04428C1BCEE00FB1F1C /* ffi.7.framework in Embed Frameworks */,
+				8DF5F04428C1BCEE00FB1F1C /* ffi.8.framework in Embed Frameworks */,
 				8DF5F04228C1BCEE00FB1F1C /* pixman-1.0.framework in Embed Frameworks */,
-				8DF5F04028C1BCED00FB1F1C /* intl.framework in Embed Frameworks */,
+				8DF5F04028C1BCED00FB1F1C /* intl.8.framework in Embed Frameworks */,
 				8DF5F04628C1BCEF00FB1F1C /* charset.1.framework in Embed Frameworks */,
 				8DF5F04A28C1BCF100FB1F1C /* gio-2.0.0.framework in Embed Frameworks */,
 			);
@@ -116,9 +116,9 @@
 		8DF5F02E28C1BCEA00FB1F1C /* glib-2.0.0.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "glib-2.0.0.framework"; path = "sysroot-iOS-arm64/Frameworks/glib-2.0.0.framework"; sourceTree = "<group>"; };
 		8DF5F02F28C1BCEA00FB1F1C /* gthread-2.0.0.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "gthread-2.0.0.framework"; path = "sysroot-iOS-arm64/Frameworks/gthread-2.0.0.framework"; sourceTree = "<group>"; };
 		8DF5F03028C1BCEA00FB1F1C /* iconv.2.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = iconv.2.framework; path = "sysroot-iOS-arm64/Frameworks/iconv.2.framework"; sourceTree = "<group>"; };
-		8DF5F03128C1BCEA00FB1F1C /* intl.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = intl.framework; path = "sysroot-iOS-arm64/Frameworks/intl.framework"; sourceTree = "<group>"; };
+		8DF5F03128C1BCEA00FB1F1C /* intl.8.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = intl.8.framework; path = "sysroot-iOS-arm64/Frameworks/intl.8.framework"; sourceTree = "<group>"; };
 		8DF5F03228C1BCEB00FB1F1C /* pixman-1.0.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "pixman-1.0.framework"; path = "sysroot-iOS-arm64/Frameworks/pixman-1.0.framework"; sourceTree = "<group>"; };
-		8DF5F03328C1BCEB00FB1F1C /* ffi.7.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ffi.7.framework; path = "sysroot-iOS-arm64/Frameworks/ffi.7.framework"; sourceTree = "<group>"; };
+		8DF5F03328C1BCEB00FB1F1C /* ffi.8.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ffi.8.framework; path = "sysroot-iOS-arm64/Frameworks/ffi.8.framework"; sourceTree = "<group>"; };
 		8DF5F03428C1BCEB00FB1F1C /* charset.1.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = charset.1.framework; path = "sysroot-iOS-arm64/Frameworks/charset.1.framework"; sourceTree = "<group>"; };
 		8DF5F03528C1BCEB00FB1F1C /* gobject-2.0.0.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "gobject-2.0.0.framework"; path = "sysroot-iOS-arm64/Frameworks/gobject-2.0.0.framework"; sourceTree = "<group>"; };
 		8DF5F03628C1BCEB00FB1F1C /* gio-2.0.0.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "gio-2.0.0.framework"; path = "sysroot-iOS-arm64/Frameworks/gio-2.0.0.framework"; sourceTree = "<group>"; };
@@ -164,9 +164,9 @@
 			files = (
 				AD7C1A4000000040005A2252 /* StikJIT.xcframework in Frameworks */,
 				8DF5F03D28C1BCEC00FB1F1C /* iconv.2.framework in Frameworks */,
-				8DF5F04328C1BCEE00FB1F1C /* ffi.7.framework in Frameworks */,
+				8DF5F04328C1BCEE00FB1F1C /* ffi.8.framework in Frameworks */,
 				8D2AC18E28C7EF2D005DB7D4 /* Atomics in Frameworks */,
-				8DF5F03F28C1BCED00FB1F1C /* intl.framework in Frameworks */,
+				8DF5F03F28C1BCED00FB1F1C /* intl.8.framework in Frameworks */,
 				8DF5F04928C1BCF000FB1F1C /* gio-2.0.0.framework in Frameworks */,
 				8DA7A63728C19A4900FDBD78 /* SwiftTerm in Frameworks */,
 				8DF5F03728C1BCEB00FB1F1C /* gmodule-2.0.0.framework in Frameworks */,
@@ -196,14 +196,14 @@
 				AD7C1A0800000008005A2252 /* StikJIT.xcframework */,
 				8D4939E528C770DD00F57421 /* qemu-x86_64-softmmu_jit.framework */,
 				8DF5F03428C1BCEB00FB1F1C /* charset.1.framework */,
-				8DF5F03328C1BCEB00FB1F1C /* ffi.7.framework */,
+				8DF5F03328C1BCEB00FB1F1C /* ffi.8.framework */,
 				8DF5F03628C1BCEB00FB1F1C /* gio-2.0.0.framework */,
 				8DF5F02E28C1BCEA00FB1F1C /* glib-2.0.0.framework */,
 				8DF5F02D28C1BCEA00FB1F1C /* gmodule-2.0.0.framework */,
 				8DF5F03528C1BCEB00FB1F1C /* gobject-2.0.0.framework */,
 				8DF5F02F28C1BCEA00FB1F1C /* gthread-2.0.0.framework */,
 				8DF5F03028C1BCEA00FB1F1C /* iconv.2.framework */,
-				8DF5F03128C1BCEA00FB1F1C /* intl.framework */,
+				8DF5F03128C1BCEA00FB1F1C /* intl.8.framework */,
 				8DF5F03228C1BCEB00FB1F1C /* pixman-1.0.framework */,
 				8DF5F02828C1BCC800FB1F1C /* qemu-x86_64-softmmu.framework */,
 				C9FFBC130DA1A3B7A450025B /* Pods_tctiSH.framework */,
