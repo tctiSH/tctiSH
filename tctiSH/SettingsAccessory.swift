@@ -25,7 +25,14 @@ final class SettingsAccessory: UIInputView {
         UIDevice.current.userInterfaceIdiom == .phone ? 36 : 48
     }
 
-    private let inner: UIView
+    /// The bar this wraps.
+    ///
+    /// Exposed because SwiftTerm reads the Ctrl key's state from the terminal's
+    /// accessory view, and finds it only if that view *is* a
+    /// `TerminalAccessory`. Wrapped, it is not, so the terminal has to be told
+    /// where the bar went. See `TctiTermView.insertText(_:)`.
+    let terminalAccessory: TerminalAccessory
+
     private let button = UIButton(type: .system)
     private let present: () -> Void
 
@@ -47,8 +54,8 @@ final class SettingsAccessory: UIInputView {
         terminal.inputAccessoryView = SettingsAccessory(wrapping: accessory, present: present)
     }
 
-    private init(wrapping inner: UIView, present: @escaping () -> Void) {
-        self.inner = inner
+    private init(wrapping inner: TerminalAccessory, present: @escaping () -> Void) {
+        self.terminalAccessory = inner
         self.present = present
 
         super.init(
@@ -90,7 +97,7 @@ final class SettingsAccessory: UIInputView {
             width: Self.buttonWidth,
             height: content.height)
 
-        inner.frame = CGRect(
+        terminalAccessory.frame = CGRect(
             x: content.minX,
             y: content.minY,
             width: max(0, content.width - Self.buttonWidth),

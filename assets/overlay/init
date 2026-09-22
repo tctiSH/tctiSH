@@ -1,0 +1,190 @@
+#!/bin/sh
+
+make_misc_dev() {
+	TARGET=$1
+	NAME=$2
+
+	# Find the minor number for our device node...
+	MAJOR=10
+	MINOR=$(cat /proc/misc | grep $NAME | cut -d " "  -f 1)
+
+	# ... and create our node file.
+	mknod $TARGET c $MAJOR $MINOR
+}
+
+
+# Set up our basic device environment.
+mount -t devtmpfs  none /dev
+mkdir -p /dev/pts
+mount -t devpts    none /dev/pts
+mount -t proc	   none /proc
+mount -t sysfs	   none /sys
+
+# Set up networking.
+ifconfig eth0 192.168.100.100
+ip route add default via 192.168.100.2 dev eth0
+
+# Create the mount points for our final union filesystem...
+mkdir -p /var/tcti-rootfs/ro-root
+mkdir -p /var/tcti-rootfs/rw-ios
+mkdir -p /var/tcti-rootfs/rw-union
+
+# Prepare root to be used as aprt of our unionfs.
+mount --bind / /var/tcti-rootfs/ro-root
+
+# Create our connection to our real filesystem contianer.
+if grep "tcti_disk=file" /proc/cmdline; then
+	# If we're using a file backend (e.g. for development), mount it.
+	#
+	# /dev/vda comes from devtmpfs, mounted above. This used to be a hand-rolled
+	# `mknod /dev/ios0 b 254 0`, which worked only because virtio-blk happened to
+	# land on major 254 -- the major is allocated dynamically at registration, so
+	# nothing guarantees it, and the failure mode is a device node pointing at
+	# nothing.
+	#
+	# The mkfs path should never run: empty.qcow ships with a made ext4 on it, so
+	# that a first launch does not pay for formatting 200 GiB under emulation.
+	# What follows is a safety net, and it is written to be safe in the direction
+	# that matters -- it will decline to format far more readily than it will
+	# destroy something.
+	#
+	# It used to test `[ $MOUNTSTAT == 255 ]`, which is not a status mount
+	# returns: busybox gives 1 on failure and util-linux gives 32. So the branch
+	# was dead, and a failed mount fell through silently -- the overlay's upper
+	# layer would end up on the initramfs tmpfs, the guest would look entirely
+	# normal, and every write would vanish at the next boot.
+	#
+	# The obvious repair, `-ne 0`, is worse than the bug: mount also fails for a
+	# dirty filesystem, for a feature this kernel does not implement, and for a
+	# transient device error. Formatting in response to any of those destroys the
+	# user's data to fix a problem they did not have.
+	#
+	# So the question asked is not "did the mount fail" but "is there anything
+	# there at all", which is what blkid answers.
+	#
+	# Its *output* is tested rather than its exit status, and that is not
+	# fussiness: blkid here is the busybox applet, which exits 0 whether or not it
+	# recognises anything. Checking the status instead makes every disk look
+	# occupied -- which fails safe, but turns a genuinely blank disk into a guest
+	# that silently never persists anything. Found by testing it.
+	if ! mount /dev/vda /var/tcti-rootfs/rw-ios; then
+		if [ -n "$(blkid /dev/vda 2>/dev/null)" ]; then
+			echo "--------------------------------------------------------------------------"
+			echo "The persistent disk has a filesystem, but it could not be mounted."
+			echo ""
+			echo "Refusing to reformat it: the data is probably still there, and this"
+			echo "may just need an fsck. Changes made in this session will NOT persist."
+			echo "--------------------------------------------------------------------------"
+		else
+			echo "--------------------------------------------------------------------------"
+			echo "The persistent disk holds no filesystem. Creating one."
+			echo "--------------------------------------------------------------------------"
+
+			mkfs.ext4 /dev/vda
+
+			if mount /dev/vda /var/tcti-rootfs/rw-ios; then
+				echo "Persistent disk created and mounted."
+			else
+				echo "----------------------------------------------------------------------"
+				echo "The disk was formatted but still will not mount. Changes made in this"
+				echo "session will NOT persist."
+				echo "----------------------------------------------------------------------"
+			fi
+		fi
+	fi
+
+else
+	echo "--------------DISK BACKEND NOT YET IMPLEMENTED!--------------"
+	echo ""
+	echo "Dropping you into an environment where changes will not persist."
+	echo ""
+	echo "-------------------------------------------------------------"
+fi
+
+# Create a home directory for root.
+mkdir -p /var/tcti-rootfs/rw-ios/userroot/root
+chmod 700 /var/tcti-rootfs/rw-ios/userroot/root
+
+# Create an SSH directory for root, and populate it with our default key.
+mkdir -p /var/tcti-rootfs/rw-ios/userroot/root/.ssh
+cp /etc/dropbear/placeholder_key.pub /var/tcti-rootfs/rw-ios/userroot/root/.ssh/authorized_keys
+chmod -R 600 /var/tcti-rootfs/rw-ios/userroot/root/.ssh
+
+
+# ... and finally, mount together our union.
+mkdir -p /var/tcti-rootfs/rw-ios/work
+mkdir -p /var/tcti-rootfs/rw-ios/userroot
+mount -t overlay overlay \
+	-o lowerdir=/var/tcti-rootfs/ro-root,upperdir=/var/tcti-rootfs/rw-ios/userroot,workdir=/var/tcti-rootfs/rw-ios/work \
+	/var/tcti-rootfs/rw-union
+
+# Splork our procfs and sysfs into our new root.
+mount -t proc		none /var/tcti-rootfs/rw-union/proc
+mount -t sysfs		none /var/tcti-rootfs/rw-union/sys
+mount -t devtmpfs	none /var/tcti-rootfs/rw-union/dev
+
+# The pseudo-filesystems the 6.18 kernel's new capabilities are reached through.
+# None of these costs anything at runtime -- they are virtual, with no threads,
+# no timers and no I/O; mounting them only makes an interface visible. The work
+# behind tracing and memory accounting is paid for by having the features
+# compiled in at all, which already happened, and by actually using them.
+#
+#   tracefs     ftrace, kprobes, uprobes and the tracepoints BPF attaches to.
+#               Without it /sys/kernel/tracing is an empty directory.
+#   bpffs       where BPF maps and programs are pinned. libbpf and bpftool both
+#               expect it at this path, and object pinning simply fails without.
+#   cgroup2     required to attach any cgroup-scoped BPF program, and what makes
+#               CONFIG_MEMCG reachable. Mounting alone enables no controllers;
+#               that is a separate, explicit step via cgroup.subtree_control.
+#   securityfs  where the LSM interface, including BPF LSM, appears.
+#   debugfs     0700 because it exposes a great deal of kernel internals. Some
+#               older tooling still reaches tracing through it rather than
+#               through tracefs.
+mount -t tracefs    none /var/tcti-rootfs/rw-union/sys/kernel/tracing
+mount -t bpf        none /var/tcti-rootfs/rw-union/sys/fs/bpf
+mount -t cgroup2    none /var/tcti-rootfs/rw-union/sys/fs/cgroup
+mount -t securityfs none /var/tcti-rootfs/rw-union/sys/kernel/security
+mount -t debugfs -o mode=700 none /var/tcti-rootfs/rw-union/sys/kernel/debug
+
+# Ensure we can create psuedoterminals.
+#
+# -p because devtmpfs may already have provided it, which it does on a current
+# kernel; without it the boot prints a spurious "File exists" every time.
+mkdir -p /var/tcti-rootfs/rw-union/dev/pts
+mount -t devpts none /var/tcti-rootfs/rw-union/dev/pts
+
+# Always overcommit memory.
+#
+# The kernel's default (mode 0) refuses any single private mapping larger than
+# RAM plus swap up front, however little of it would ever be touched. The guest
+# has no swap and is often given only a gibibyte, so programs that reserve large
+# ranges and use little of them fail at the reservation: Lean asks for a 1 GiB
+# thread stack, gets ENOMEM, and reports "failed to create thread: Resource
+# temporarily unavailable". A desktop with more memory than that never sees it.
+#
+# This cannot cost the phone anything. QEMU caps guest RAM at -m, and iOS only
+# charges the app for guest pages actually touched; overcommit changes what
+# Linux agrees to reserve, not what the guest can use. What it changes inside
+# the guest is that running out is met by the OOM killer rather than by a failed
+# allocation -- which the default mode does not prevent either, since it only
+# catches a single oversized request, not many ordinary ones.
+#
+# Here rather than in /etc/sysctl.conf because nothing in this boot reads that:
+# busybox init has no sysctl step. The setting is global, so the namespace this
+# runs in does not matter.
+echo 1 >/proc/sys/vm/overcommit_memory
+
+# Emulation hack: replace our random and urandom devices with a direct call
+# up to the _host_'s version of these files, since the host has more entropy.
+rm \
+	/var/tcti-rootfs/rw-union/dev/random  \
+	/var/tcti-rootfs/rw-union/dev/urandom
+make_misc_dev /var/tcti-rootfs/rw-union/dev/random hw_random
+make_misc_dev /var/tcti-rootfs/rw-union/dev/urandom hw_random
+
+# Emulation: try to mount /ios_host, if possible.
+#mkdir /var/tcti-rootfs/rw-union/ios_host
+#mount -t 9p -o trans=virtio shared /var/tcti-rootfs/rw-union/ios_host -oversion=9p2000.L
+
+# Finally, pass control to real init.
+exec chroot /var/tcti-rootfs/rw-union /sbin/init

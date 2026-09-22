@@ -1,0 +1,20 @@
+[4;37mWelcone to tctiSH![0m
+
+tctiSH starts with a minimal Alpine Linux
+environment, with few packages. You'll want to
+add packages to get started. See the Alpine 
+wiki for more details on using Alpine: 
+<http://wiki.alpinelinux.org/>.
+
+You can add packages using `apk add`. You can
+search the available packages using `apk search`.
+
+Examples:
+
+	apk search clang
+	apk add neovim
+
+You can change this message in /etc/tcti_motd.
+
+[0;37mHave fun! <3[0m
+

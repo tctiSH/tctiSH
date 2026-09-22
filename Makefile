@@ -10,7 +10,7 @@ endif
 
 .PHONY: help
 help:
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
 # -- Artifacts ------------------------------------------------------------------------------------
 
@@ -23,7 +23,14 @@ STIKJIT_BUILD     := build-StikJIT
 STIKJIT_FRAMEWORK := $(STIKJIT_BUILD)/StikJIT.xcframework/Info.plist
 IDEVICE_BUILD     := build-idevice
 IDEVICE_LIBRARY   := $(IDEVICE_BUILD)/out/libidevice_ffi.a
+LIBSSH2_BUILD     := build-libssh2
+LIBSSH2_LIBRARY   := $(LIBSSH2_BUILD)/out/libssh2.a
 PODS_MANIFEST     := Pods/Manifest.lock
+TCTICTL_TARGET    := x86_64-unknown-linux-musl
+TCTICTL_BINARY    := utils/tctictl/target/$(TCTICTL_TARGET)/release/tctictl
+GUEST_INITRD      := assets/initrd.img
+GUEST_DISK        := assets/empty.qcow
+GUEST_KERNEL      := assets/bzImage
 
 # -- Building -------------------------------------------------------------------------------------
 
@@ -43,14 +50,67 @@ $(IDEVICE_LIBRARY): build_idevice.sh
 $(STIKJIT_FRAMEWORK): build_stikjit.sh $(wildcard patches/*.patch) $(IDEVICE_LIBRARY)
 	$(SHELL_WRAPPER) ./build_stikjit.sh
 
-$(PODS_MANIFEST): Podfile
+# Pinned by version and hash inside build_libssh2.sh, so again the script is the only prerequisite.
+# No $(SHELL_WRAPPER): it needs Xcode's iOS SDK and nothing the devshell adds.
+$(LIBSSH2_LIBRARY): build_libssh2.sh
+	./build_libssh2.sh
+
+# The vendored SwiftSH podspec is an input too: it is where the pod learns to look in
+# build-libssh2/out, and a change to it means nothing until `pod install` regenerates the project.
+#
+# The touch is because pod install leaves Manifest.lock alone when its content would not change, and
+# for a podspec that is any edit the parsed spec cannot see a comment, for example. Without it the
+# manifest stays older than its input and every `make build` runs pod install again.
+$(PODS_MANIFEST): Podfile third-party/SwiftSH/SwiftSH.podspec
 	$(SHELL_WRAPPER) pod install
+	touch $@
+
+# -- The guest ------------------------------------------------------------------------------------
+
+# initrd.img and empty.qcow stay checked in, because they are what the app bundles and because the
+# packages rootfs.lock pins are deleted from Alpine's CDN within weeks of being superseded -- so a
+# tree that could only build them would eventually be a tree that could not.
+#
+# They are still rules on the files they produce, so a change to the overlay or the lock rebuilds
+# them and a clean tree stays quiet. Note the consequence: these two are the only targets that need
+# the container runtime, and only when something they depend on has actually moved.
+#
+# No $(SHELL_WRAPPER) on either. Both re-exec themselves into a container, and the devshell's $PATH
+# filter would take Homebrew's `container` away from them -- the scripts look in Homebrew's prefix
+# themselves so that running under `nix develop` works anyway, but there is nothing here they want
+# from the devshell.
+$(TCTICTL_BINARY): $(wildcard utils/tctictl/src/*.rs) utils/tctictl/Cargo.toml
+	$(SHELL_WRAPPER) cargo build --release --manifest-path utils/tctictl/Cargo.toml \
+		--target $(TCTICTL_TARGET)
+
+# tctictl is an input to the image rather than something copied in afterwards, so it is a
+# prerequisite and not a separate step.
+$(GUEST_INITRD): assets/build_rootfs.sh assets/rootfs.lock $(TCTICTL_BINARY) \
+                 $(shell find assets/overlay assets/scripts -type f 2>/dev/null)
+	./assets/build_rootfs.sh
+
+# Nothing but the script decides what this contains.
+$(GUEST_DISK): assets/build_disk.sh
+	./assets/build_disk.sh
+
+# The kernel is deliberately *not* a prerequisite of `build`, which is where it parts company with
+# the two rules above. Those take about a second, so depending on them is free insurance against
+# shipping a stale image; this one is tens of minutes, and a fresh clone has no reliable mtimes to
+# reason from.
+#
+# The consequence is real and worth knowing: after editing tctish.config you must run `make guest`
+# (or this target) yourself. `make build` will not notice.
+$(GUEST_KERNEL): assets/build_kernel.sh assets/kernel/tctish.config assets/kernel/flake.lock assets/kernel/flake.nix
+	./assets/build_kernel.sh
 
 .PHONY: deps
 deps: $(QEMU_LIBRARY) ## Build QEMU and its libraries into sysroot-iOS-arm64/ (slow)
 
 .PHONY: idevice
 idevice: $(IDEVICE_LIBRARY) ## Build idevice's FFI library for iOS from source
+
+.PHONY: libssh2
+libssh2: $(LIBSSH2_LIBRARY) ## Build libssh2 and OpenSSL for iOS, for the vendored SwiftSH pod
 
 .PHONY: stikjit
 stikjit: $(STIKJIT_FRAMEWORK) ## Build build-StikJIT/StikJIT.xcframework from the patched submodule copy
@@ -61,13 +121,32 @@ pods: $(PODS_MANIFEST) ## Install the CocoaPods dependencies
 # Always the workspace, never the bare project: tctiSH.xcodeproj on its own cannot build the Pods
 # targets, and fails with "Unable to resolve module dependency: 'Socket'" -- which looks like a
 # project-format problem and isn't.
+.PHONY: guest
+guest: $(GUEST_INITRD) $(GUEST_DISK) $(GUEST_KERNEL) ## Build the whole guest image: kernel, rootfs and blank disk (needs `container`)
+
+.PHONY: kernel
+kernel: $(GUEST_KERNEL) ## Build just the guest kernel into assets/bzImage (slow)
+
+.PHONY: kernel-config
+kernel-config: ## Resolve the guest kernel config and report the delta, without building
+	./assets/build_kernel.sh --config-only
+
+# Runs on the host rather than in a container, so it goes through the devshell like everything else
+# that needs a pinned tool: QEMU, in this case.
+.PHONY: boot-guest
+boot-guest: ## Boot the guest image locally and drop into a shell (see --help for options)
+	$(SHELL_WRAPPER) ./assets/boot_guest.sh $(ARGS)
+
+.PHONY: rootfs-lock
+rootfs-lock: ## Re-resolve the guest's Alpine packages and rewrite assets/rootfs.lock
+	./assets/build_rootfs.sh --lock
+
 .PHONY: build
-build: $(QEMU_LIBRARY) $(STIKJIT_FRAMEWORK) $(PODS_MANIFEST) ## Build the app for a generic iOS device
+build: $(QEMU_LIBRARY) $(STIKJIT_FRAMEWORK) $(LIBSSH2_LIBRARY) $(PODS_MANIFEST) $(GUEST_INITRD) $(GUEST_DISK) ## Build the app for a generic iOS device
 	xcodebuild -workspace tctiSH.xcworkspace -scheme tctiSH -destination 'generic/platform=iOS' build
 
 .PHONY: tctictl
-tctictl: ## Build the guest-side tctictl and repack it into initrd.img
-	$(SHELL_WRAPPER) ./utils/tctictl/build_and_copy.sh
+tctictl: $(TCTICTL_BINARY) ## Build the guest-side tctictl, which `make guest` consumes
 
 # -- Formatting -----------------------------------------------------------------------------------
 
@@ -99,7 +178,14 @@ SWIFT_SOURCES  := $(shell git ls-files '*.swift' | grep -Ev '$(NOT_OURS)')
 C_SOURCES      := $(shell git ls-files '*.c' '*.h' '*.m' '*.mm' | grep -Ev '$(NOT_OURS)')
 SHELL_SOURCES  := $(shell git ls-files '*.sh' | grep -Ev '$(NOT_OURS)')
 PYTHON_SOURCES := $(shell git ls-files '*.py' | grep -Ev '$(NOT_OURS)')
-NIX_SOURCES    := $(shell git ls-files '*.nix' | grep -Ev '$(NOT_OURS)')
+# Nix gets a narrower exclusion than the rest. The `assets/` entry in NOT_OURS is about guest-side
+# shell scripts having their own conventions; a Nix flake is ours wherever it happens to sit, and
+# assets/kernel/flake.nix pins the kernel toolchain. The wildcard is there as well as `git ls-files`
+# so that a flake is formatted before its first commit rather than after it -- $(sort) dedupes the
+# two sources once it is tracked.
+NOT_OURS_NIX   := ^(third-party|Pods|patches)/
+NIX_SOURCES    := $(sort $(shell git ls-files '*.nix' | grep -Ev '$(NOT_OURS_NIX)') \
+                         $(wildcard assets/kernel/*.nix))
 RUBY_SOURCES   := $(shell git ls-files 'Podfile' '*.rb' | grep -Ev '$(NOT_OURS)')
 RUST_SOURCES   := $(shell git ls-files '*.rs' | grep -Ev '$(NOT_OURS)')
 
@@ -221,7 +307,7 @@ lint: format-check clippy ## Run all the linting tasks
 
 # -- Cleaning -------------------------------------------------------------------------------------
 
-# There is deliberately no clean-pods: Pods/ is checked in, so removing it would show up as 67
+# There is deliberately no clean-pods: Pods/ is checked in, so removing it would show up as a page of
 # deleted tracked files rather than as a clean slate. `make pods` regenerates it in place.
 
 .PHONY: clean-app
@@ -243,11 +329,24 @@ clean-stikjit: ## Remove the StikJIT framework, its archive and the patched sour
 clean-idevice: ## Remove the idevice source checkout and its build output
 	rm -rf $(IDEVICE_BUILD)
 
+# Keeps nothing, tarballs included; they are re-fetched and re-checked against their pinned hashes.
+.PHONY: clean-libssh2
+clean-libssh2: ## Remove the libssh2 and OpenSSL build tree and its downloads
+	rm -rf $(LIBSSH2_BUILD)
+
 # Both QEMU build trees now live at build-iOS-arm64/<tarball>/qemu_{tcti,jit}, so a single
 # `rm -rf build-iOS-arm64` reaches them. It used to configure inside the qemu-tcti submodule, which
 # outlived that and left stale objects and a stale config-host.mak behind -- the one thing a clean
 # exists to rule out. Removing the tarballs with it also costs a re-download, which is most of why
 # this is not something to reach for casually.
+#
+# By far the largest build tree here: an unpacked kernel source, an object tree with full debug
+# info, and the tarball. The toolchain volume is another ~3.6 GB, and lives in the container
+# runtime's storage rather than in this directory so `--clean-all` is what reaches it.
+.PHONY: clean-kernel
+clean-kernel: ## Remove the kernel build tree and the pinned toolchain volume
+	./assets/build_kernel.sh --clean-all
+
 .PHONY: clean-deps
 clean-deps: ## Remove the QEMU sysroot and its build tree (~6 minutes to rebuild, plus downloads)
 	rm -rf $(QEMU_SYSROOT) build-iOS-arm64
@@ -258,7 +357,7 @@ clean-deps: ## Remove the QEMU sysroot and its build tree (~6 minutes to rebuild
 clean: clean-app clean-rust ## Remove the app and tctictl build output
 
 .PHONY: distclean
-distclean: clean clean-stikjit clean-idevice clean-deps ## Remove everything, including the slow QEMU and StikJIT builds
+distclean: clean clean-stikjit clean-idevice clean-libssh2 clean-deps clean-kernel ## Remove everything, including the slow QEMU, StikJIT and kernel builds
 
 # -- Utility --------------------------------------------------------------------------------------
 

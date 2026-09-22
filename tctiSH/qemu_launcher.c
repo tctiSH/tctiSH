@@ -206,6 +206,102 @@ size_t qemu_code_cache_grow(size_t target) {
     return fn ? fn(target) : 0;
 }
 
+/// The parts of the QEMU command line that define the *shape* of the machine.
+///
+/// Everything here is a literal, and everything dynamic (paths, sizes, the
+/// snapshot tag) is deliberately outside it. That split is what lets
+/// `qemu_machine_signature()` describe the machine without dragging in values
+/// that differ between installs or between launches.
+///
+/// **A snapshot is only loadable into the machine it was taken from.** Adding a
+/// device here, or changing the topology, invalidates every snapshot in
+/// existence, handled automatically, because the signature below is
+/// derived from this list rather than maintained beside it.
+///
+/// Order within the list does not matter: QEMU resolves `-device` back-references
+/// like `drive=drive1` and `netdev=net0` by id, not by position.
+// clang-format off
+#define TCTISH_MACHINE_ARGS                                                                        \
+    /* We're a terminal; we don't display anything. */                                             \
+    "-display", "none",                                                                            \
+                                                                                                   \
+    /* Networking. Debug note: one can remove the 127.0.0.1 below to make SSH'ing the VM           \
+       possible from the debug host. This isn't recommended for debug builds. */                   \
+    "-device", "virtio-net-pci,id=net1,netdev=net0",                                               \
+    "-netdev", "user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100,"                      \
+               "hostfwd=tcp:127.0.0.1:10022-:22",                                                  \
+                                                                                                   \
+    /* Provide our host RNG to our guest; to speed up entropy generation. */                       \
+    "-device", "virtio-rng-pci",                                                                   \
+                                                                                                   \
+    /* The controller for the disk; the -drive that backs it carries a path and is separate. */    \
+    "-device", "virtio-blk-pci,id=disk1,drive=drive1",                                             \
+                                                                                                   \
+    /* Kernel command line; tells our image how to handle disk images. This variant selects        \
+       the provided qcow disk file. */                                                             \
+    "-append", "tcti_disk=file",                                                                   \
+                                                                                                   \
+    /* Provide a few cores.                                                                        \
+                                                                                                   \
+       Plain, and deliberately so. This used to be spelled out as                                  \
+       `4,sockets=4,cores=1,threads=1` to work around a guest kernel built without ACPI, which     \
+       discovered CPUs through the Intel MP table: that enumerates by socket, so cores inside a    \
+       socket were invisible. QEMU had handed us the matching shape for free until pc-i440fx-6.2   \
+       dropped smp_props.prefer_sockets, at which point the same string started meaning one        \
+       socket of four cores and the guest came up with one CPU.                                    \
+                                                                                                   \
+       The 6.18 kernel enables CONFIG_ACPI, so discovery comes from the MADT and the topology no   \
+       longer has to be spelled out. Verified under TCG: a plain `-smp 4` gives nproc == 4. */     \
+    "-smp", "4",                                                                                   \
+                                                                                                   \
+    /* Monitor connection for in-guest tools. */                                                   \
+    "-monitor", "tcp:localhost:10045,server=on,wait=off",                                          \
+                                                                                                   \
+    /* Consumes the -fsdev qemu_thread passes separately, which carries the host path. */          \
+    "-device", "virtio-9p-pci,fsdev=fsdev0,mount_tag=shared"
+// clang-format on
+
+const char *qemu_machine_signature(void) {
+    static const char *const parts[] = { TCTISH_MACHINE_ARGS };
+
+    // Comfortably more than the ~354 bytes the current list needs. Built under
+    // dispatch_once rather than a flag, because this is reached both from the
+    // main thread at launch and from the boot queue when the epoch is recorded.
+    // Those two would write identical bytes, so the race is benign -- but a
+    // benign data race is still a data race, and the file already has this idiom.
+    static char joined[4096];
+    static dispatch_once_t once;
+
+    dispatch_once(&once, ^{
+        size_t used = 0;
+
+        for (size_t i = 0; i < ARRAY_SIZE(parts); i++) {
+            int written =
+                snprintf(joined + used, sizeof(joined) - used, "%s%s", i == 0 ? "" : " ", parts[i]);
+
+            // Truncation would make two different machines share a signature,
+            // and sharing one is the single failure this must not have: it
+            // would resume a snapshot into a machine that cannot hold it.
+            //
+            // The fallback still varies with the number of arguments, so that
+            // adding or removing a device is noticed even here, where a fixed
+            // string would quietly make every machine look alike.
+            if (written < 0 || (size_t)written >= sizeof(joined) - used) {
+                os_log_error(QemuLauncherLog(),
+                             "machine signature exceeds %zu bytes; snapshot staleness detection "
+                             "is degraded",
+                             sizeof(joined));
+                snprintf(joined, sizeof(joined), "overflow-%zu", ARRAY_SIZE(parts));
+                return;
+            }
+
+            used += (size_t)written;
+        }
+    });
+
+    return joined;
+}
+
 /// Core thread that runs our background QEMU.
 static void *qemu_thread(void *raw_args) {
     struct qemu_args *args = raw_args;
@@ -223,59 +319,33 @@ static void *qemu_thread(void *raw_args) {
         // Tell QEMU where any option ROMS it might want are hiding.
         "-L", args->bios_dir,
 
-        // We're a terminal; we don't display anything.
-        "-display", "none",
-
-        // Guest memory.
+        // Guest memory. Not part of TCTISH_MACHINE_ARGS even though it is
+        // migrated, because it is a user setting with its own staleness check:
+        // see VmMemory.changedSinceLastBoot.
         "-m", args->memory_value,
 
-        // Networking.
-        //
-        // Debug note: one can remove the 127.0.0.1 from the above string to make SSH'ing the VM possible
-        // from the debug host. This isn't recommended for debug builds.
-        "-device", "virtio-net-pci,id=net1,netdev=net0",
-        "-netdev", "user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100,hostfwd=tcp:127.0.0.1:10022-:22",
+        // Everything that defines the shape of the machine. Kept in one list so
+        // that qemu_machine_signature() describes exactly what is built.
+        TCTISH_MACHINE_ARGS,
 
-        // Provide our host RNG to our guest; to speed up entropy generation.
-        "-device", "virtio-rng-pci",
-
-        // Provide the disk we'll be working with.
-        "-device", "virtio-blk-pci,id=disk1,drive=drive1",
+        // The disk, the kernel and the ramdisk. Paths rather than shape: they
+        // differ per install, and what is *in* the kernel and initrd is covered
+        // by VmSnapshots.guestEpoch, which digests them.
         "-drive", args->disk_args,
-
-        // Select our kernel and ramdisk.
         "-kernel", args->kernel_filename,
         "-initrd", args->initrd_filename,
 
-        // Kernel command line; tells our image how to handle disk images.
-        // This variant selects the provided qcow disk file.
-        "-append", "tcti_disk=file",
-
-        // Provide a few cores.
-        //
-        // Spelled out as sockets, because the guest kernel is currently built
-        // without ACPI and so discovers CPUs through the Intel MP table, which
-        // enumerates by socket: extra cores inside one socket are invisible to
-        // it. 
-        //
-        // QEMU used to hand tctiSH that shape for free: machine types up to
-        // pc-i440fx-6.1 set smp_props.prefer_sockets, making a bare `cpus=4`
-        // mean four sockets. 6.2 dropped it, so the same string now means one
-        // socket of four cores and the guest comes up with a single CPU.
-        "-smp", "4,sockets=4,cores=1,threads=1",
-
-        // Monitor conection for tctiSH.
+        // Monitor connection for tctiSH. A socket path, so install-specific.
         "-monitor", args->monitor_channel_args,
 
-        // Monitor conection in-guest tools.
-        "-monitor", "tcp:localhost:10045,server=on,wait=off",
-
-        // Use JIT if we have JIT hacks, and size the code cache if we were asked to.
+        // Use JIT if we have JIT hacks, and size the code cache if we were asked
+        // to. Never migrated -- see CodeCache -- so deliberately not part of the
+        // machine signature.
         "-accel", args->accel_args,
 
-        // Share in our core shared folder, always.
+        // Share in our core shared folder, always. The fsdev carries a host
+        // path; the device that consumes it is in TCTISH_MACHINE_ARGS.
         "-fsdev", args->shared_folder_args,
-        "-device", "virtio-9p-pci,fsdev=fsdev0,mount_tag=shared",
 
         // These _must_ be last.
         "-loadvm", args->boot_image_name

@@ -163,6 +163,18 @@
       # its own defaults, so the config would look applied and not be.
       nightlyRustfmt = pkgs.rust-bin.nightly.latest.rustfmt;
 
+      # Running the guest locally, which `assets/boot_guest.sh` drives.
+      #
+      # This is QEMU-the-emulator for the *host*. It is not the QEMU the app
+      # ships: that one is cross-compiled for iOS by build_dependencies.sh, links
+      # against the TCTI backend, and cannot run here. They are different builds
+      # of the same project, and the distinction is worth keeping in mind when
+      # reading a local boot -- it exercises the guest image, not TCTI.
+      #
+      # qemu-img comes along, which is what makes a working copy of the shipped
+      # disk possible without a second tool.
+      guestTools = [ pkgs.qemu ];
+
       # Everything `make format` drives, minus swift-format and clang-format,
       # which come from the active Xcode toolchain via `xcrun` so that they match
       # what the IDE applies on save. See tmp/plans/autoformatting.md.
@@ -181,7 +193,7 @@
       # up and injects -mmacos-version-min, conflicts with -miphoneos-version-min
       # and breaks the ObjC probe. This build must use only the Xcode toolchain.
       devShells.${system}.default = pkgs.mkShellNoCC {
-        packages = buildDependencies ++ formatters;
+        packages = buildDependencies ++ formatters ++ guestTools;
 
         # Apple's `ld` does not understand GNU linker options, so linking the
         # musl target with it fails on `--as-needed`. rustc ships an lld that

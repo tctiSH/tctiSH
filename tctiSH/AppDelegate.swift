@@ -45,6 +45,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     /// waits for a restart but never costs the session.
     static var codeCacheChanged = false
 
+    /// Whether the machine this build makes differs from the one the last
+    /// snapshot was taken of.
+    ///
+    /// Covers all three of QEMU's migration version, the machine's shape, and
+    /// the bundled kernel and initramfs (see `VmSnapshots`). Any of them moving
+    /// means the saved session describes a machine we can no longer build, so
+    /// it is discarded rather than half-restored.
+    static var snapshotEpochChanged = false
+
     /// When `didFinishLaunchingWithOptions` began.
     ///
     /// The launch screen stays up until the first frame is drawn, so every
@@ -109,6 +118,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // launch's values over the top of them.
         AppDelegate.memoryValueChanged = qemu!.memoryValueChanged()
         AppDelegate.codeCacheChanged = CodeCache.changedSinceLastBoot
+        AppDelegate.snapshotEpochChanged = VmSnapshots.changedSinceLastBoot
         AppDelegate.isFirstBoot = qemu!.isFirstBoot()
 
         // Listens on a socket and does not care whether the VM is up yet, so it stays here where

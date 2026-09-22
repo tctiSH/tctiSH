@@ -1,0 +1,5 @@
+dropbear.@dropbear[0]=dropbear
+dropbear.@dropbear[0].enable=1
+dropbear.@dropbear[0].RootPasswordAuth='on'
+dropbear.@dropbear[0].PasswordAuth='on'
+dropbear.@dropbear[0].Port='22'

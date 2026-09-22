@@ -14,4 +14,5 @@ sysroot-iOS-arm64/
 build-iOS-arm64/
 build-StikJIT/
 build-idevice/
-
+build-libssh2/
+build-kernel/

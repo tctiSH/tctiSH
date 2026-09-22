@@ -1,0 +1,23 @@
+# /etc/inittab
+
+# Put a getty on the serial port.
+#
+# One, not two. There used to be a second on ttyS1, carried over from the 2022
+# image, but QEMU gives this machine a single UART: /dev/ttyS1 is one of the
+# 8250 driver's placeholder ports with no hardware behind it, so login exited at
+# once and init restarted it, every second, for the life of the VM. Each restart
+# was two syslog lines, which on the phone meant a log rotation every few minutes
+# and a steady trickle of writes to flash for nothing.
+#
+# A getty belongs beside the device that backs it. Add one when the port exists.
+ttyS0::respawn:/bin/busybox login -f root
+
+# Shut down cleanly when the host asks. QEMU's `system_powerdown` asserts the
+# ACPI power button; the kernel turns that into an input event and this is what
+# listens for it. Without it the request is received and ignored.
+::respawn:/usr/bin/tctish-powerbtn
+
+# Start an ssh server that we can access from QEMU.
+::respawn:/sbin/syslogd -n -S -s 12 -b 8
+::respawn:/usr/sbin/dropbear -RF
+

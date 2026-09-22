@@ -5,6 +5,7 @@
 //  Copyright © 2026 Ara Adkins.
 //
 
+import CryptoKit
 import Foundation
 
 /// Renders sizes held in MiB.
@@ -57,6 +58,24 @@ enum Mebibytes {
 
         return Int(pages) * Int(getpagesize())
     }
+
+    /// How much RAM this device was sold with, in MiB: the reported figure
+    /// rounded up to a whole GiB.
+    ///
+    /// `_SC_PHYS_PAGES` counts what the kernel manages, which is always
+    /// somewhat less than what is fitted, so a 12 GiB phone does not report 12
+    /// GiB. That matters wherever a proportion of "the device" is meant, since
+    /// the shortfall is enough to push a result across a boundary. Fitted RAM
+    /// comes in whole gibibytes, so rounding up recovers it.
+    ///
+    /// Only for proportions. Anything accounting for what actually fits wants
+    /// `hostPhysicalMemory` itself.
+    static var hostInstalledMemory: Int {
+        let physical = hostPhysicalMemory / (1024 * 1024)
+        guard physical > 0 else { return 0 }
+
+        return (physical + 1023) / 1024 * 1024
+    }
 }
 
 extension String {
@@ -92,10 +111,12 @@ enum VmMemory {
     ///
     /// Two limits, whichever is encountered first:
     ///
-    /// * **Half of Physical RAM:** Guest pages are committed lazily, so `-m 8G`
+    /// * **Half of Installed RAM:** Guest pages are committed lazily, so `-m 8G`
     ///   does not cost 8 GiB on the spot, but a guest that runs for a while
-    ///   fills its page cache and drifts toward the limit anyway, so the ceiling
-    ///   has to be picked as though it will.
+    ///   fills its page cache and drifts toward the limit anyway, so the
+    ///   ceiling has to be picked as though it will. Half of what the device
+    ///   was sold with rather than of what it reports as the reported figure is always a
+    ///   little short.
     /// * **Remaining After System and Code Cache.** The code cache is the term
     ///   that makes this worth computing rather than hard-coding: under TXM
     ///   every page of it is written during blessing, so it is fully resident
@@ -117,7 +138,7 @@ enum VmMemory {
         // recommendations about.
         guard physical > 0 else { return defaultSize }
 
-        let half = physical / 2
+        let half = Mebibytes.hostInstalledMemory / 2
         let remaining = physical - reservedForTheSystem - CodeCache.residentSize(blessed: blessed)
 
         // Never recommend nothing at all: a device tight enough to fail both tests can still run
@@ -398,32 +419,149 @@ enum CodeCache {
 
 /// Whether snapshots written by a previous run can still be loaded.
 ///
-/// QEMU's migration stream has no compatibility guarantee across versions. A
-/// snapshot taken under one QEMU is not necessarily loadable by another, and
-/// the failure arrives late: device state is partly restored before anything
-/// notices, so it is treated as fatal.
+/// A snapshot is a migration stream: the whole machine, including guest RAM
+/// with a kernel already running in it. It is loadable only by something that
+/// builds the same machine. Three separate things can break that, and the
+/// failure always arrives late as device state is partly restored before
+/// anything notices, so all three are treated as fatal and force a cold boot.
+///
+/// The epoch is the concatenation of all three. Any change to any of them makes
+/// this build's epoch differ from what the last boot recorded, which is what
+/// `changedSinceLastBoot` reports.
 enum VmSnapshots {
 
-    /// What this build's snapshots are compatible with.
+    /// QEMU's migration stream version.
+    ///
+    /// Hand-maintained; bump on a QEMU upgrade. There is no compatibility
+    /// guarantee across versions.
     static let migrationEpoch = "qemu-10.0.12"
+
+    /// The shape of the machine QEMU is told to build.
+    ///
+    /// Derived, not declared: `qemu_machine_signature()` returns the literal
+    /// portion of the QEMU command line (the devices, the topology, the guest
+    /// command line) built from the very list `qemu_thread` hands to QEMU.
+    /// Adding a device or changing the topology therefore invalidates stale
+    /// snapshots on its own, with nobody having to remember to say so.
+    ///
+    /// A snapshot records the state of each device, so restoring one into a
+    /// differently-shaped machine fails. The change that prompted this was
+    /// dropping `-smp 4,sockets=4,cores=1,threads=1` for a plain `-smp 4`,
+    /// which the 6.18 kernel's `CONFIG_ACPI` made correct -- an edit that looks
+    /// cosmetic and invalidates every snapshot in existence.
+    static var machineEpoch: String {
+        shortDigest(of: Data(String(cString: qemu_machine_signature()).utf8))
+    }
+
+    /// The first eight bytes of a SHA-256, as hex.
+    ///
+    /// Truncated as this is not a security boundary: the input is our own build
+    /// rather than anything an attacker supplies, and 64 bits is far past where
+    /// an accidental collision between two machine definitions is worth
+    /// worrying about.
+    private static func shortDigest(of data: Data) -> String {
+        SHA256.hash(data: data).prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// A digest of the guest kernel and initramfs actually bundled.
+    ///
+    /// Derived rather than hand-maintained, because this is the component that
+    /// moves most often and is the one that would certainly be forgotten. The
+    /// snapshot contains a running instance of *this* kernel; resuming it under
+    /// a different one is not meaningful even when QEMU permits it.
+    ///
+    /// Digesting 15 MB is not free, so it is cached against a key that is cheap
+    /// to compute and changes whenever the files could have: the bundle's path,
+    /// the app version and the two file sizes. A normal launch reads the cached
+    /// value and touches neither file.
+    ///
+    /// The path is what makes that true. iOS gives every install its own
+    /// container, so a new build always misses the cache and is digested once.
+    /// Version and sizes alone would not do it during development, where the
+    /// version stays put between builds and a rebuilt image can compress to
+    /// exactly the old size, and this would then describe the _previous_ guest,
+    /// and a snapshot of it would be resumed into the new one.
+    static var guestEpoch: String {
+        let bundle = Bundle.main
+        let version = bundle.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+
+        // Built the same way QEMUInterface builds them, deliberately: digesting a file QEMU is not
+        // actually given would describe the wrong machine, and `path(forResource:)` searches in
+        // ways a literal path does not.
+        guard let resources = bundle.resourcePath else {
+            Log.qemu.warn("snapshot epoch: no resource path; staleness detection is degraded")
+            return "guest-absent"
+        }
+
+        let kernel = resources + "/bzImage"
+        let initrd = resources + "/initrd.img"
+
+        guard FileManager.default.fileExists(atPath: kernel),
+            FileManager.default.fileExists(atPath: initrd)
+        else {
+            // Loud, because the quiet version of this is a constant that never changes -- which
+            // would silently switch off exactly the check this property exists to make.
+            Log.qemu.warn(
+                "snapshot epoch: guest images missing from the bundle; staleness "
+                    + "detection is degraded")
+            return "guest-absent"
+        }
+
+        let sizeOf: (String) -> Int = { path in
+            (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int ?? 0
+        }
+        let cacheKey = "\(resources)|\(version)|\(sizeOf(kernel))|\(sizeOf(initrd))"
+
+        let defaults = UserDefaults.standard
+        if defaults.string(forKey: "guest_epoch_key") == cacheKey,
+            let cached = defaults.string(forKey: "guest_epoch_value")
+        {
+            return cached
+        }
+
+        var hasher = SHA256()
+        for path in [kernel, initrd] {
+            guard
+                let data = try? Data(contentsOf: URL(fileURLWithPath: path), options: .mappedIfSafe)
+            else {
+                Log.qemu.warn(
+                    "snapshot epoch: could not read \(path); staleness detection is "
+                        + "degraded")
+                return "guest-unreadable"
+            }
+            hasher.update(data: data)
+        }
+        let digest = hasher.finalize().prefix(8).map { String(format: "%02x", $0) }.joined()
+
+        defaults.set(cacheKey, forKey: "guest_epoch_key")
+        defaults.set(digest, forKey: "guest_epoch_value")
+        return digest
+    }
+
+    /// Everything a snapshot has to agree with, as one string.
+    static var epoch: String {
+        "\(migrationEpoch)+\(machineEpoch)+\(guestEpoch)"
+    }
 
     /// What the last boot wrote here, or empty on a fresh install.
     static var lastBooted: String {
-        UserDefaults.standard.string(forKey: "last_migration_epoch") ?? ""
+        UserDefaults.standard.string(forKey: "last_snapshot_epoch") ?? ""
     }
 
-    /// Whether anything on disk was written by an incompatible QEMU.
+    /// Whether anything on disk was written by a build that made a different
+    /// machine.
     ///
     /// True on a fresh install as well, where there is simply nothing recorded
-    /// yet.
+    /// yet, and true exactly once for everyone upgrading from a build that
+    /// recorded only the QEMU version under the old `last_migration_epoch` key.
     static var changedSinceLastBoot: Bool {
-        lastBooted != migrationEpoch
+        lastBooted != epoch
     }
 
     /// Records the epoch, once the stale snapshots have actually been dealt
     /// with.
     static func recordBooted() {
-        UserDefaults.standard.set(migrationEpoch, forKey: "last_migration_epoch")
+        UserDefaults.standard.set(epoch, forKey: "last_snapshot_epoch")
     }
 }
 

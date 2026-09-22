@@ -1,0 +1,77 @@
+#!/bin/sh
+#
+# Powers the guest down when the ACPI power button is pressed.
+#
+# QEMU's `system_powerdown` -- what boot_guest.sh sends on exit -- asserts the
+# virtual power button. The 6.18 kernel turns that into an input event, which it
+# could not do at all before CONFIG_ACPI_BUTTON was enabled. But receiving is not
+# acting: the event is delivered to userspace and sits there unless something is
+# listening. Without this, `system_powerdown` does nothing and the VM has to be
+# killed, which is a plug-pull the ext4 journal then has to recover from.
+#
+# The app does not send it. A session there ends with iOS killing the process,
+# and what survives is the saved snapshot, not a shutdown; the app's only reset
+# is `system_reset`, for a recovery boot. This matters for the host-side loop
+# today, and for the app only if it ever grows a "shut down" of its own.
+#
+# Not acpid, though busybox has one. acpid's default event source is
+# /proc/acpi/event, an interface the kernel removed years ago, and its config
+# format is a guessing game against a reimplementation. The event itself is four
+# input_event structs on a character device -- reading one is less machinery than
+# configuring a daemon to read it for us.
+#
+# Started from /etc/inittab as a respawn, so it costs nothing while blocked and
+# comes back if it ever exits without powering down.
+#
+set -eu
+
+# Find the power button by name rather than assuming event0.
+#
+# The same lesson as the disk: `mknod /dev/ios0 b 254 0` worked for years because
+# virtio-blk happened to land on major 254. Input device numbering is likewise
+# allocation order, and this one is only event0 today because nothing else
+# registers first -- enable a virtio input device and it would not be.
+find_power_button() {
+    for sysdev in /sys/class/input/event*; do
+        [ -e "$sysdev" ] || continue
+
+        if [ "$(cat "$sysdev/device/name" 2>/dev/null)" = "Power Button" ]; then
+            # /sys/class/input/eventN is the sysfs node; the character device
+            # it describes lives at /dev/input/eventN. Getting this wrong gives
+            # a path that does not exist, dd fails, and -e takes the script down
+            # silently -- which is exactly what it did the first time.
+            echo "/dev/input/$(basename "$sysdev")"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+BUTTON="$(find_power_button)" || {
+    echo "tctish-powerbtn: no power button input device; not watching" >&2
+
+    # Sleep rather than exit: inittab respawns this, and a tight loop of failures
+    # would fill the log and the console with the same line for ever.
+    sleep 3600
+    exit 0
+}
+
+# Block until something arrives. Any event from this device is the button being
+# pressed -- it has nothing else to report -- so there is nothing to parse. The
+# read size matters though: evdev rejects a read shorter than one input_event,
+# which on x86_64 is 24 bytes.
+read_bytes="$(dd if="$BUTTON" bs=24 count=1 2>/dev/null | wc -c)"
+
+# A short read is the device going away, not a button press, and powering the
+# machine off in response to one would be a bad way to find that out. Exit
+# instead and let init respawn us, after a pause so that a device which has
+# genuinely vanished does not become a spin.
+if [ "$read_bytes" -lt 24 ]; then
+    echo "tctish-powerbtn: short read from $BUTTON; not treating it as a press" >&2
+    sleep 5
+    exit 1
+fi
+
+echo "tctish-powerbtn: power button pressed, shutting down" >&2
+exec poweroff

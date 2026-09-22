@@ -29,6 +29,19 @@ bool jit_debugger_tracing(void);
 /// for the latter.
 bool jit_may_map_executable(void);
 
+/// A stable description of the machine QEMU is told to build.
+///
+/// The devices, the topology and the guest command line but nothing that
+/// varies between installs or between launches, so no paths, no sizes and not
+/// the snapshot tag.
+///
+/// Derived from the same list the command line is built from, so adding a device
+/// or changing the topology changes this automatically. That matters because a
+/// snapshot is only loadable into the machine it was taken from; see
+/// `VmSnapshots` on the Swift side, which digests this to decide whether a saved
+/// session can still be resumed.
+const char *qemu_machine_signature(void);
+
 /// Runs QEMU in a background thread, providing our shell.
 ///
 /// `tb_size_mib` is the TCG code cache size in MiB, or 0 to let QEMU size the

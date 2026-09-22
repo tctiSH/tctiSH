@@ -193,6 +193,59 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
 
     }
 
+    // MARK: The accessory bar's Ctrl key
+
+    /// Sends the keystroke that follows the accessory bar's Ctrl as a control
+    /// code.
+    ///
+    /// SwiftTerm applies Ctrl itself, but finds the modifier through
+    /// `inputAccessoryView as? TerminalAccessory`. `SettingsAccessory` wraps
+    /// that bar to put the settings button beside it, so the cast fails, the
+    /// Ctrl button toggles state that nothing reads, and Ctrl+C arrives in the
+    /// guest as a plain "c". This reads the modifier from the wrapped bar
+    /// instead.
+    ///
+    /// Only the keystroke after Ctrl is handled here. Every other one goes to
+    /// SwiftTerm untouched, input-method composition included.
+    public override func insertText(_ text: String) {
+        guard let accessory = (inputAccessoryView as? SettingsAccessory)?.terminalAccessory,
+            accessory.controlModifier
+        else {
+            super.insertText(text)
+            return
+        }
+
+        accessory.controlModifier = false
+
+        // A key with no control form is dropped, which is what SwiftTerm does with one.
+        if let code = Self.controlCode(for: text) {
+            send([code])
+        }
+    }
+
+    /// The control code for a single typed character, or nil if it has none.
+    ///
+    /// SwiftTerm's own mapping (`applyControlToEventCharacters`), reproduced
+    /// because it is internal to that module. Kept identical to it, so that
+    /// Ctrl from the bar means exactly what it would have meant unwrapped.
+    private static func controlCode(for text: String) -> UInt8? {
+        let bytes = Array(text.utf8)
+        guard bytes.count == 1 else { return nil }
+
+        let byte = bytes[0]
+        switch byte {
+        case UInt8(ascii: "A")...UInt8(ascii: "Z"): return byte - 0x40
+        case UInt8(ascii: "a")...UInt8(ascii: "z"): return byte - 0x60
+        case UInt8(ascii: "\\"): return 0x1c
+        case UInt8(ascii: "_"): return 0x1f
+        case UInt8(ascii: "]"): return 0x1d
+        case UInt8(ascii: "["): return 0x1b
+        case UInt8(ascii: "^"), UInt8(ascii: "6"): return 0x1e
+        case UInt8(ascii: " "): return 0
+        default: return nil
+        }
+    }
+
     /// Sets up use of the user's theme.
     func setUpTheming() {
         // FIXME: have this be user-specifiable

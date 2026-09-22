@@ -561,7 +561,11 @@ public class QEMUInterface {
     /// The snapshot tags this app writes by itself.
     private static let ownedSnapshotTags = ["instant_resume_a", "instant_resume_b", "instantboot"]
 
-    /// Clears up snapshots left by a QEMU whose migration stream has moved on.
+    /// Clears up snapshots that describe a machine this build no longer makes.
+    ///
+    /// Not only a QEMU upgrade: the epoch also covers the machine's shape and
+    /// the bundled guest kernel, so a new kernel or a changed device list lands
+    /// here too. See `VmSnapshots`.
     ///
     /// Call off the main thread, once the shell is up: it talks to the monitor,
     /// and `savevm`-adjacent commands want a machine that has finished booting.
@@ -644,7 +648,8 @@ public class QEMUInterface {
             if !named.isEmpty && onDisk.contains(named) {
                 AppSetting.resumeBehavior.set("recovery_boot")
                 unpointed = named
-                Log.qemu.note("snapshots: boot mode moved off '\(named)'; it predates this QEMU")
+                Log.qemu.note(
+                    "snapshots: boot mode moved off '\(named)'; it predates this build")
             }
         }
 
@@ -654,7 +659,7 @@ public class QEMUInterface {
         completed = true
 
         guard !discarded.isEmpty || !theirs.isEmpty || unpointed != nil else {
-            Log.qemu.note("snapshots: nothing left by an older QEMU")
+            Log.qemu.note("snapshots: nothing left by an earlier build")
             return
         }
 
@@ -663,8 +668,8 @@ public class QEMUInterface {
                 + "kept \(theirs.count) of someone else's")
 
         var body =
-            "tctiSH updated to a newer QEMU, which cannot read sessions saved by the old one. "
-            + "Linux started fresh. Your files and installed packages are untouched."
+            "tctiSH has been updated, and sessions saved by the previous version cannot be "
+            + "resumed. Linux started fresh. Your files and installed packages are untouched."
 
         if !theirs.isEmpty {
             let plural = theirs.count == 1 ? "snapshot" : "snapshots"
@@ -909,9 +914,10 @@ public class QEMUInterface {
             mode = "recovery_boot"
         }
 
-        // Same for a QEMU whose migration stream has moved on. Every snapshot on the disk predates
-        // it, including one someone typed into Boot From Snapshot, and loading any of them fails
-        // *after* device state has been partly restored.
+        // Same when the machine itself has moved: a newer QEMU's migration stream, a changed device
+        // list or topology, or a different guest kernel. Every snapshot on the disk describes the
+        // old machine, including one someone typed into Boot From Snapshot, and loading any of them
+        // fails *after* device state has been partly restored.
         if VmSnapshots.changedSinceLastBoot {
             mode = "recovery_boot"
         }

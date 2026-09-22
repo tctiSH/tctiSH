@@ -1,4 +1,4 @@
-"""Reflows Swift and Rust line comments to a fixed width.
+"""Reflows Swift, Rust and YAML line comments to a fixed width.
 
 None of the formatters this project runs will do it, which was established by
 testing rather than by reading documentation:
@@ -27,10 +27,17 @@ first; neither can undo the other.
 
 Usage:
 
-    python3 reflow_comments.py [--width N] [--doc-width N] [--check] FILE...
+    python3 reflow_comments.py [--width N] [--doc-width N] [--lines A:B]... [--check] FILE...
 
 Doc comments get their own width because they are read as prose, in a popover or
 on a docs page, rather than scanned alongside the code they sit above.
+
+`--lines A:B` confines the reflow to lines A to B, 1-based and inclusive, and may
+be repeated; it is how Dialect formats the comments it adds to files it does not
+own, such as its LispKit fork. A run of comment lines is split wherever it
+crosses the edge of a range, and only the parts inside are refilled, so a line
+outside every range is never touched. With several files, the ranges apply to
+each of them.
 
 `--check` writes nothing and exits non-zero if any file would change, printing a
 diff of what it would have done.
@@ -38,7 +45,6 @@ diff of what it would have done.
 
 import argparse
 import difflib
-import io
 import os
 import re
 import sys
@@ -109,6 +115,7 @@ class Language:
         strings_span_lines=False,
         rust_raw_strings=False,
         swift_raw_strings=False,
+        block_scalars=False,
     ):
         self.name = name
         #: Longest first, or `///` is read as `//` with a stray slash.
@@ -118,6 +125,9 @@ class Language:
         self.strings_span_lines = strings_span_lines
         self.rust_raw_strings = rust_raw_strings
         self.swift_raw_strings = swift_raw_strings
+        #: YAML carries arbitrary text in `|` and `>` blocks, where `#` is not a
+        #: comment. Set for YAML, which uses its own scanner entirely.
+        self.block_scalars = block_scalars
         self.comment = re.compile(
             r"^(?P<indent>[ \t]*)(?P<marker>" + "|".join(self.markers) + r")(?P<rest>.*)$"
         )
@@ -139,7 +149,64 @@ RUST = Language(
     rust_raw_strings=True,
 )
 
-LANGUAGES = {".swift": SWIFT, ".rs": RUST}
+YAML = Language(
+    name="YAML",
+    markers=["#"],
+    #: YAML has no doc-comment convention, so everything fills to --width.
+    doc_markers=[],
+    block_scalars=True,
+)
+
+#: This file is shared verbatim between tctiSH and Dialect, so every language
+#: stays defined here whether or not the project using it has such sources.
+#: Keep the two copies identical and improvements move freely between them.
+LANGUAGES = {".swift": SWIFT, ".rs": RUST, ".yml": YAML, ".yaml": YAML}
+
+
+#: Opens a block scalar: `key: |`, `- >`, `key: |-`, `key: >2`, optionally with a
+#: trailing comment. Everything indented under one of these is literal text.
+BLOCK_SCALAR = re.compile(r"[|>](?:[0-9]|[+-]){0,2}[ \t]*(?:#.*)?$")
+
+
+def scan_yaml_comment_starts(lines):
+    """Returns, per line, whether it begins a full-line YAML comment.
+
+    YAML needs its own scanner rather than the character walk below, because the
+    hazard is different in kind. There are no string-delimiter rules to carry
+    across lines; there are block scalars, whose contents are arbitrary text.
+    A `run: |` step holding a shell script would otherwise have its `#` lines
+    read as YAML comments and rewrapped, silently corrupting the script.
+
+    Known limitation: a `#` at the start of a continuation line of a multi-line
+    *quoted* scalar is treated as a comment. That construction is vanishingly
+    rare, and the alternative is a full YAML parse.
+    """
+    starts = [False] * len(lines)
+    in_block = False
+    block_indent = 0
+
+    for number, line in enumerate(lines):
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+
+        if in_block:
+            # Blank lines belong to the block; dedenting to the opener's level
+            # or further ends it.
+            if not stripped:
+                continue
+            if indent > block_indent:
+                continue
+            in_block = False
+
+        if stripped.startswith("#"):
+            starts[number] = True
+            continue
+
+        if BLOCK_SCALAR.search(line):
+            in_block = True
+            block_indent = indent
+
+    return starts
 
 
 def display_width(indent):
@@ -156,6 +223,9 @@ def scan_for_comment_starts(lines, language):
     file as characters, carrying string and block-comment state across the line
     boundaries.
     """
+    if language.block_scalars:
+        return scan_yaml_comment_starts(lines)
+
     starts = [False] * len(lines)
     block_depth = 0
     open_multiline = False
@@ -322,10 +392,17 @@ def reflow_run(rests, indent, marker, width):
     return output
 
 
-def reflow(text, language, width, doc_width):
-    """Returns `text` with every reflowable comment paragraph refilled."""
+def reflow(text, language, width, doc_width, ranges=None):
+    """Returns `text` with every reflowable comment paragraph refilled.
+
+    `ranges`, if given, is a list of `(first, last)` line numbers, 1-based and
+    inclusive: only comment lines inside one of them are refilled.
+    """
     lines = text.split("\n")
     starts = scan_for_comment_starts(lines, language)
+
+    def in_range(index):
+        return ranges is None or any(first <= index + 1 <= last for first, last in ranges)
 
     output = []
     index = 0
@@ -341,18 +418,39 @@ def reflow(text, language, width, doc_width):
 
         # A run is broken by a change of either, so a `///` block below a `//`
         # one, or a differently indented continuation, is reflowed separately.
+        # So is one that crosses the edge of a range, and the part outside is
+        # reproduced exactly as it was.
+        inside = in_range(index)
+        begin = index
         rests = []
         while index < len(lines) and starts[index]:
             current = language.comment.match(lines[index])
             if current["indent"] != indent or current["marker"] != marker:
                 break
+            if in_range(index) != inside:
+                break
             rests.append(current["rest"])
             index += 1
+
+        if not inside:
+            output.extend(lines[begin:index])
+            continue
 
         target = doc_width if marker in language.doc_markers else width
         output.extend(reflow_run(rests, indent, marker, target))
 
     return "\n".join(output)
+
+
+def line_range(value):
+    """Parses `A:B` for `--lines`."""
+    try:
+        first, last = (int(part) for part in value.split(":"))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected A:B, got {value!r}") from None
+    if not 1 <= first <= last:
+        raise argparse.ArgumentTypeError(f"expected 1 <= A <= B, got {value!r}")
+    return (first, last)
 
 
 def main(argv=None):
@@ -364,6 +462,13 @@ def main(argv=None):
         type=int,
         default=None,
         help="columns to fill doc comments to; defaults to --width",
+    )
+    parser.add_argument(
+        "--lines",
+        action="append",
+        type=line_range,
+        metavar="A:B",
+        help="refill only comments within lines A to B (1-based, inclusive); repeatable",
     )
     parser.add_argument(
         "--check",
@@ -381,10 +486,10 @@ def main(argv=None):
             print(f"reflow-comments: {path}: unsupported file type", file=sys.stderr)
             return 2
 
-        with io.open(path, encoding="utf-8", newline="") as handle:
+        with open(path, encoding="utf-8", newline="") as handle:
             original = handle.read()
 
-        updated = reflow(original, language, args.width, doc_width)
+        updated = reflow(original, language, args.width, doc_width, args.lines)
         if updated == original:
             continue
 
@@ -400,7 +505,7 @@ def main(argv=None):
                 )
             )
         else:
-            with io.open(path, "w", encoding="utf-8", newline="") as handle:
+            with open(path, "w", encoding="utf-8", newline="") as handle:
                 handle.write(updated)
 
     return 1 if (args.check and changed) else 0

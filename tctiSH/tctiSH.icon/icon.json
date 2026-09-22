@@ -1,4 +1,8 @@
 {
+  "features" : [
+    "refractivity",
+    "specular-location"
+  ],
   "fill" : {
     "automatic-gradient" : "display-p3:0.20112,0.46153,0.94594,1.00000"
   },
@@ -74,8 +78,10 @@
           }
         },
         {
+          "glass" : true,
           "image-name" : "Simple Main Window.svg",
-          "name" : "Simple Main Window"
+          "name" : "Simple Main Window",
+          "opacity" : 1
         }
       ],
       "name" : "Main Window V2",
@@ -86,13 +92,19 @@
           0
         ]
       },
+      "refractivity" : {
+        "depth" : 0,
+        "enabled" : true,
+        "strength" : 1
+      },
       "shadow" : {
         "kind" : "neutral",
         "opacity" : 0.5
       },
+      "specular" : "outside",
       "translucency" : {
         "enabled" : true,
-        "value" : 0.3
+        "value" : 0.4
       }
     },
     {
@@ -126,11 +138,16 @@
       ],
       "lighting" : "individual",
       "name" : "Mini Windows",
+      "refractivity" : {
+        "depth" : 0,
+        "enabled" : true,
+        "strength" : 1
+      },
       "shadow" : {
         "kind" : "layer-color",
         "opacity" : 0.5
       },
-      "specular" : true,
+      "specular" : "outside",
       "translucency" : {
         "enabled" : true,
         "value" : 0.4

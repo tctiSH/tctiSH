@@ -107,6 +107,18 @@ class ViewController: UIViewController {
             tv.feed(text: "This will take ~20 seconds or so.\r\n\r\n")
         }
 
+        // An updated app can mean an updated guest kernel, an updated QEMU, or a different machine
+        // shape while a snapshot is a whole machine, including a kernel already running in its RAM.
+        // None of those can be resumed into. Says "updated" rather than naming which, because the
+        // distinction is ours and not the user's.
+        else if AppDelegate.snapshotEpochChanged {
+            tv.feed(text: "tctiSH has been updated, so we'll need to\r\n")
+            tv.feed(text: "re-create our 'instant boot' environment,\r\n")
+            tv.feed(text: "just this once after the update.\r\n\r\n")
+
+            tv.feed(text: "This will take ~20 seconds or so.\r\n\r\n")
+        }
+
         // If the user has just changed the amount of memory in the VM, they'll need a full boot to
         // re-populate the environment. Let them know.
         else if AppDelegate.memoryValueChanged {
