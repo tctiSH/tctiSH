@@ -52,7 +52,7 @@ enum JitEnablement {
             /// A pre-TXM device where the ptrace hack didn't take.
             case ptraceRefused
 
-            /// No LocalDevVPN tunnel, so no way to reach a debugger.
+            /// No loopback VPN tunnel, so no way to reach a debugger.
             case noTunnel
 
             /// Nothing at `JitPairingFile.url`.
@@ -67,7 +67,7 @@ enum JitEnablement {
                 case .declinedForThisLaunch: return "a quick action asked for a JITless launch"
                 case .txmUnknown: return "could not tell whether TXM is present"
                 case .ptraceRefused: return "the ptrace hack was refused"
-                case .noTunnel: return "no LocalDevVPN tunnel"
+                case .noTunnel: return "no loopback VPN tunnel"
                 case .noPairingFile: return "no pairing file at \(JitPairingFile.url.path)"
                 case .attachTimedOut:
                     return String(format: "no debugger attached within %.0fs", attachDeadline)

@@ -185,6 +185,15 @@ enum VmMemory {
         Mebibytes.qemuArgument(selected)
     }
 
+    /// The `-m` the running VM was booted with, exactly as QEMU was handed it.
+    ///
+    /// Not `qemuArgument`, which is the setting as it stands: that can move
+    /// while the VM runs, and a session saved afterwards is still the old size.
+    /// Nil only before any boot has been recorded.
+    static var bootedArgument: String? {
+        UserDefaults.standard.string(forKey: "last_memory")
+    }
+
     /// What the VM was last actually booted with.
     private static var lastBooted: Int {
         guard let stored = UserDefaults.standard.string(forKey: "last_memory"),
@@ -541,6 +550,22 @@ enum VmSnapshots {
     /// Everything a snapshot has to agree with, as one string.
     static var epoch: String {
         "\(migrationEpoch)+\(machineEpoch)+\(guestEpoch)"
+    }
+
+    /// What a saved session records about the machine that saved it, and has to
+    /// match to be resumed: `epoch`, plus the guest RAM size.
+    ///
+    /// Kept with each disk's resume pointer, where `epoch` alone is only
+    /// recorded once for the app. The resume pointers are per disk, so an app
+    /// wide record only ever speaks for the disk that was open when it changed:
+    /// switch disks, then change memory or update tctiSH, and the other disk's
+    /// session would be resumed into a machine that can't hold it.
+    ///
+    /// RAM is here and not in `epoch` because changing it isn't an upgrade:
+    /// nothing needs discarding, and the snapshot is good again if the size is
+    /// changed back.
+    static func resumeStamp(memory: String) -> String {
+        "\(epoch)+ram-\(memory)"
     }
 
     /// What the last boot wrote here, or empty on a fresh install.

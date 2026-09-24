@@ -1,0 +1,171 @@
+diff --git a/Sources/DDISession.swift b/Sources/DDISession.swift
+index fd88cf3..aba6d72 100644
+--- a/Sources/DDISession.swift
++++ b/Sources/DDISession.swift
+@@ -64,6 +64,117 @@ final class DDISession {
+         return deviceCount > 0
+     }
+ 
++    /// Takes every developer disk image off the device.
++    ///
++    /// Both kinds: the DDI cryptex, which stays installed and is grafted again
++    /// at every boot, and whatever the image mounter has mounted, which lasts
++    /// until the next reboot. The cryptex goes first, as its graft may be what
++    /// the image mounter is reporting.
++    ///
++    /// Only a tunnel that can't be made throws. Past that, every step is tried
++    /// whatever became of the ones before it, and what failed is collected in
++    /// `failures`: stopping at the first would hide what had already gone.
++    func removeAll() throws -> DDIRemoval {
++        let tunnel = try makeTunnel()
++        defer { tunnel.free() }
++
++        var removal = DDIRemoval()
++
++        do {
++            removal.cryptexVersion = try uninstallCryptex(over: tunnel)
++        } catch {
++            removal.failures.append("uninstalling the DDI cryptex: \(error.localizedDescription)")
++        }
++
++        do {
++            try unmountImages(over: tunnel, into: &removal)
++        } catch {
++            removal.failures.append("querying the image mounter: \(error.localizedDescription)")
++        }
++
++        return removal
++    }
++
++    /// Uninstalls the DDI cryptex, returning the version that was installed, or
++    /// nil if there wasn't one.
++    private func uninstallCryptex(over tunnel: Tunnel) throws -> String? {
++        var installed: UnsafeMutablePointer<InstalledCryptexC>?
++        try IdeviceFFI.check("failed to query installed DDI cryptex") {
++            cryptexd_installed_ddi(tunnel.adapter, tunnel.handshake, &installed)
++        }
++
++        guard let installed else { return nil }
++        defer { cryptexd_free_installed_cryptex(installed) }
++        let identifier = String(cString: installed.pointee.identifier)
++
++        var client: OpaquePointer?
++        try IdeviceFFI.check("failed to connect to cryptexd") {
++            cryptexd_connect_rsd(tunnel.adapter, tunnel.handshake, &client)
++        }
++        guard let client else { throw StikJITError.debugProxyUnavailable }
++
++        // A nil version uninstalls all of them, not just the one reported; one left behind would
++        // be grafted again at the next boot. Consumes the client.
++        try IdeviceFFI.check("failed to uninstall DDI cryptex") {
++            identifier.withCString { cryptexd_uninstall(client, $0, nil) }
++        }
++
++        return installed.pointee.version.map { String(cString: $0) } ?? "unknown"
++    }
++
++    /// Unmounts whatever the image mounter reports.
++    ///
++    /// Carries on past a path that won't unmount, recording it in `failures`,
++    /// so that one refusal doesn't leave the rest mounted. Only connecting and
++    /// listing throw.
++    private func unmountImages(over tunnel: Tunnel, into removal: inout DDIRemoval) throws {
++        var client: OpaquePointer?
++        try IdeviceFFI.check("failed to connect to image mounter") {
++            image_mounter_connect_rsd(tunnel.adapter, tunnel.handshake, &client)
++        }
++        guard let client else { throw StikJITError.debugProxyUnavailable }
++        defer { image_mounter_free(client) }
++
++        var devices: UnsafeMutablePointer<plist_t?>?
++        var deviceCount = 0
++        try IdeviceFFI.check("failed to fetch mounted devices") {
++            image_mounter_copy_devices(client, &devices, &deviceCount)
++        }
++
++        // Read out before anything is unmounted, so the list is freed however that goes.
++        var mountPaths: [String] = []
++        if let devices {
++            for index in 0..<deviceCount {
++                if let path = plist_dict_get_item(devices[index], "MountPath"),
++                   let string = plist_get_string_ptr(path, nil) {
++                    mountPaths.append(String(cString: string))
++                }
++                plist_free(devices[index])
++            }
++            idevice_data_free(
++                UnsafeMutableRawPointer(devices).assumingMemoryBound(to: UInt8.self),
++                UInt(deviceCount * MemoryLayout<plist_t?>.stride))
++        }
++
++        // `isMounted` counts any entry at all as mounted, so one without a path still has to go,
++        // or this would leave the device looking exactly as it found it. `/System/Developer` is
++        // where a DDI mounts.
++        if deviceCount > 0 && mountPaths.isEmpty {
++            mountPaths = ["/System/Developer"]
++        }
++
++        for path in mountPaths {
++            do {
++                try IdeviceFFI.check("failed to unmount \(path)") {
++                    path.withCString { image_mounter_unmount_image(client, $0) }
++                }
++                removal.unmountedPaths.append(path)
++            } catch {
++                removal.failures.append("unmounting \(path): \(error.localizedDescription)")
++            }
++        }
++    }
++
+     func mountDDI(from directoryPath: String, progress: @escaping (Double) -> Void) throws {
+         progress(0)
+         var assets: OpaquePointer?
+diff --git a/Sources/StikJIT+DDIRemoval.swift b/Sources/StikJIT+DDIRemoval.swift
+new file mode 100644
+index 0000000..7c43841
+--- /dev/null
++++ b/Sources/StikJIT+DDIRemoval.swift
+@@ -0,0 +1,43 @@
++import Foundation
++
++/// What `StikJIT.removeDDIs` took off a device.
++public struct DDIRemoval: Sendable {
++
++    /// The version of the DDI cryptex that was uninstalled, or nil if none was
++    /// installed.
++    public var cryptexVersion: String?
++
++    /// Where the image mounter had images mounted that have been unmounted.
++    public var unmountedPaths: [String] = []
++
++    /// What couldn't be removed, one message per step that failed.
++    ///
++    /// Every step is attempted regardless, so a removal with failures may
++    /// still have removed something; the two properties above say what.
++    public var failures: [String] = []
++
++    /// Whether anything was removed.
++    public var removedAnything: Bool {
++        cryptexVersion != nil || !unmountedPaths.isEmpty
++    }
++}
++
++extension StikJIT {
++
++    /// Removes every developer disk image from the device.
++    ///
++    /// For testing preparation from scratch. A device that has ever had the DDI
++    /// cryptex installed -- by Xcode, or by `mountDDI` -- grafts it again at
++    /// every boot, so rebooting doesn't get back to a device that needs one.
++    ///
++    /// Throws only if the device can't be reached at all. Anything that fails
++    /// past that is reported in the result's `failures` instead.
++    ///
++    /// Leaves the downloaded files alone; `resetCachedDDI(at:)` is for those.
++    public static func removeDDIs(
++        pairingFile: URL,
++        configuration: Configuration = .default
++    ) throws -> DDIRemoval {
++        try DDISession(pairingFilePath: pairingFile.path, configuration: configuration).removeAll()
++    }
++}

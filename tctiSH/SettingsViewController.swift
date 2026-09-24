@@ -455,7 +455,7 @@ private final class OptionListViewController<Value: Equatable>: SettingsListView
 /// Everything the app lets the user change is here, with only the OS-level
 /// settings living within the app's portion of the settings app.
 final class SettingsViewController: SettingsListViewController,
-    UIAdaptivePresentationControllerDelegate
+    UIAdaptivePresentationControllerDelegate, UIGestureRecognizerDelegate
 {
 
     /// The settings whose changes cost something, as they were on entry.
@@ -472,6 +472,13 @@ final class SettingsViewController: SettingsListViewController,
     }
 
     private let onEntry = Entry()
+
+    /// Whether three taps on the title have brought up the debug tools.
+    ///
+    /// For the life of the process rather than saved: they're for testing
+    /// tctiSH, and shouldn't still be sitting there the next time someone opens
+    /// Settings for the usual reasons.
+    private static var debugToolsRevealed = false
 
     /// Puts the settings sheet up over whatever is on screen.
     static func present(from presenter: UIViewController) {
@@ -516,10 +523,41 @@ final class SettingsViewController: SettingsListViewController,
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             systemItem: .done,
             primaryAction: UIAction { [weak self] _ in self?.done() })
+
+        // On the bar rather than on a title view of our own, as the large title isn't a view we get
+        // to supply. The bar is shared with every screen pushed over this one, hence the check in
+        // `revealDebugTools`.
+        let reveal = UITapGestureRecognizer(target: self, action: #selector(revealDebugTools))
+        reveal.numberOfTapsRequired = 3
+        reveal.cancelsTouchesInView = false
+        reveal.delegate = self
+        navigationController?.navigationBar.addGestureRecognizer(reveal)
+    }
+
+    @objc private func revealDebugTools() {
+        guard navigationController?.topViewController === self, !Self.debugToolsRevealed else {
+            return
+        }
+
+        Log.ui.note("settings: debug tools revealed")
+        Self.debugToolsRevealed = true
+        reload()
+    }
+
+    /// Keeps the taps off the bar's buttons, so Done is never held up waiting
+    /// to see whether a second and third tap are coming.
+    func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool
+    {
+        var view = touch.view
+        while let current = view {
+            if current is UIControl { return false }
+            view = current.superview
+        }
+        return true
     }
 
     fileprivate override func buildSections() -> [SettingsSection] {
-        [
+        var sections = [
             SettingsSection(
                 header: "Virtual Machine",
                 footer:
@@ -611,6 +649,23 @@ final class SettingsViewController: SettingsListViewController,
                         select: { Self.openSystemSettings() })
                 ]),
         ]
+
+        if Self.debugToolsRevealed {
+            sections.append(
+                SettingsSection(
+                    header: nil,
+                    footer: nil,
+                    rows: [
+                        SettingsRow(
+                            id: "debug-tools",
+                            title: "Debug Tools",
+                            symbol: "ladybug",
+                            accessory: .disclosure,
+                            select: { [weak self] in self?.push(DebugToolsViewController()) })
+                    ]))
+        }
+
+        return sections
     }
 
     // MARK: The fixed choices
@@ -658,7 +713,7 @@ final class SettingsViewController: SettingsListViewController,
             OptionListViewController(
                 title: "JIT Mode",
                 footer:
-                    "JIT is much faster, but needs external support from LocalDevVPN and may not always be available. Turning off JIT will be slower but should always work.",
+                    "JIT is much faster, but needs external support from a loopback VPN and may not always be available. Turning off JIT will be slower but should always work.",
                 options: Self.jitOptions,
                 selected: { AppSetting.jitMode.string },
                 choose: { AppSetting.jitMode.set($0) }))
@@ -738,6 +793,134 @@ final class SettingsViewController: SettingsListViewController,
     private static func list(_ items: [String]) -> String {
         guard items.count > 1 else { return items.first ?? "" }
         return items.dropLast().joined(separator: ", ") + " and " + (items.last ?? "")
+    }
+}
+
+// MARK: - Debug tools
+
+/// Tools for testing tctiSH itself, behind three taps on the Settings title.
+private final class DebugToolsViewController: SettingsListViewController {
+
+    /// Set while a removal is under way, so it can't be started twice.
+    ///
+    /// Static rather than per screen: a removal outlives the screen that
+    /// started it if someone goes back, and one opened afresh mustn't offer to
+    /// start another.
+    private static var removing = false
+
+    /// The Debug Tools screen on show, which is where a removal reports back.
+    ///
+    /// Not necessarily the one that started it, for the same reason.
+    private static weak var onScreen: DebugToolsViewController?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        title = "Debug Tools"
+        navigationItem.largeTitleDisplayMode = .never
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        Self.onScreen = self
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        if Self.onScreen === self { Self.onScreen = nil }
+    }
+
+    fileprivate override func buildSections() -> [SettingsSection] {
+        [
+            SettingsSection(
+                header: "Developer Disk Image",
+                footer:
+                    "Uninstalls every DDI from this device and deletes tctiSH's downloaded copy, "
+                    + "so the next launch has to fetch and mount one itself, and starts without JIT "
+                    + "while it does. Rebooting isn't enough on its own: an installed DDI comes back "
+                    + "at every boot.",
+                rows: [
+                    SettingsRow(
+                        id: "remove-ddis",
+                        title: "Remove All DDIs",
+                        detail: Self.removing ? "Removing…" : nil,
+                        symbol: "trash",
+                        select: Self.removing ? nil : { [weak self] in self?.confirmRemoval() })
+                ])
+        ]
+    }
+
+    private func confirmRemoval() {
+        let alert = UIAlertController(
+            title: "Remove All DDIs?",
+            message: "JIT keeps working until tctiSH is closed, though the code cache can't grow "
+                + "any further. The launch after that starts without JIT, while the DDI is "
+                + "downloaded and mounted again.",
+            preferredStyle: .alert)
+
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(
+            UIAlertAction(title: "Remove", style: .destructive) { [weak self] _ in
+                self?.removeAll()
+            })
+
+        present(alert, animated: true)
+    }
+
+    private func removeAll() {
+        // Removing goes through the same tunnel as JIT, so it needs the same pairing file.
+        guard let pairingData = JitPairingFile.read() else {
+            report(
+                title: "No Pairing File", message: "Removing a DDI needs the pairing file JIT uses."
+            )
+            return
+        }
+
+        Self.removing = true
+        reload()
+
+        // The fallback for reporting, if nobody is on a Debug Tools screen by the time this
+        // finishes but the settings sheet is still up.
+        weak var sheet = navigationController
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let outcome = DdiPreparation.removeAll(pairingData: pairingData)
+
+            DispatchQueue.main.async {
+                Self.removing = false
+                Self.onScreen?.reload()
+
+                let (title, message) =
+                    switch outcome {
+                    case .removed(let message): ("DDIs Removed", message)
+                    case .failed(let reason): ("Couldn't Remove DDIs", reason)
+                    }
+
+                // With the sheet gone too there is nobody to tell, and the outcome is in the log.
+                guard let presenter = Self.onScreen ?? sheet, presenter.viewIfLoaded?.window != nil
+                else {
+                    return
+                }
+
+                Self.report(title: title, message: message, from: presenter)
+            }
+        }
+    }
+
+    private func report(title: String, message: String) {
+        Self.report(title: title, message: message, from: self)
+    }
+
+    /// Shows an alert from `presenter`, or from whatever it is already showing.
+    private static func report(title: String, message: String, from presenter: UIViewController) {
+        var top = presenter
+        while let presented = top.presentedViewController {
+            top = presented
+        }
+
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        top.present(alert, animated: true)
     }
 }
 

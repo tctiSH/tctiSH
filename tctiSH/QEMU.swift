@@ -192,8 +192,10 @@ public class QEMUInterface {
             return false
         }
 
-        // Only now, and only having been told the snapshot is really there.
-        setResumeImage(tag: tag)
+        // Only having been told the snapshot is really there. Stamped with the machine that is
+        // running, which is what the snapshot holds; see `resumeStamp`.
+        let stamp = VmMemory.bootedArgument.map { VmSnapshots.resumeStamp(memory: $0) } ?? ""
+        setResumeImage(tag: tag, stamp: stamp)
         Self.lastSaveFailed = false
 
         // Including anything `reportSaveRanOutOfTime` left queued. The assertion running out did
@@ -927,9 +929,25 @@ public class QEMUInterface {
             let resume_image = getResumeImage()
             if isFirstBoot() {
                 return nil
-            } else {
-                return resume_image
             }
+
+            // The machine-wide checks above only notice a change on the launch after it, and only
+            // for this disk. This one travels with the session, so it holds for any disk however
+            // long ago things changed. A session saved before stamps existed has none, and cold
+            // boots once.
+            //
+            // The pointer is left alone, as a mismatch is never resumed and the next save replaces
+            // it anyway.
+            let saved = getResumeStamp()
+            let wanted = VmSnapshots.resumeStamp(memory: VmMemory.qemuArgument)
+            guard saved == wanted else {
+                Log.qemu.note(
+                    "resume: '\(resume_image)' was saved by a different machine "
+                        + "(\(saved.isEmpty ? "unstamped" : saved), now \(wanted)); cold booting")
+                return nil
+            }
+
+            return resume_image
         case "snapshot_boot":
             // Blank means no snapshot was named, which is a cold boot rather than a request to
             // resume from one called "". QEMU survives being asked for that but there's nothing to
@@ -1067,15 +1085,19 @@ public class QEMUInterface {
 
     /// Sets a property from the disk-image metadata store.
     private func setImageProperty(diskName: String, property: String, value: String) {
+        setImageProperties(diskName: diskName, [property: value])
+    }
+
+    /// Sets several properties in the disk-image metadata store at once.
+    private func setImageProperties(diskName: String, _ properties: [String: String]) {
 
         // Get the current image-store...
         let imageStore =
             UserDefaults.standard.dictionary(forKey: "images") as? [String: [String: String]]
         var images = imageStore ?? [:]
 
-        // ... update the relevant property value ...
-        images[diskName] = images[diskName] ?? [:]
-        images[diskName]![property] = value
+        // ... update the relevant property values ...
+        images[diskName, default: [:]].merge(properties) { _, new in new }
 
         // ... and save it back to our configuration.
         UserDefaults.standard.set(images, forKey: "images")
@@ -1095,11 +1117,22 @@ public class QEMUInterface {
         return getImageProperty(diskName: diskName, property: "resume_image", defaultValue: "")
     }
 
-    /// Sets the name of the save-state to be used for resuming a VM in "persist
-    /// state" mode.
-    private func setResumeImage(tag: String, diskName: String? = nil) {
+    /// The `VmSnapshots.resumeStamp` recorded with the resume image, or empty
+    /// if none was.
+    private func getResumeStamp(diskName: String? = nil) -> String {
         let diskName = diskName ?? getDiskName()
-        setImageProperty(diskName: diskName, property: "resume_image", value: tag)
+        return getImageProperty(diskName: diskName, property: "resume_stamp", defaultValue: "")
+    }
+
+    /// Sets the name of the save-state to be used for resuming a VM in "persist
+    /// state" mode, and the stamp of the machine that saved it.
+    ///
+    /// Both in one write, so a pointer is never seen with another session's
+    /// stamp. Anything that isn't a save leaves the stamp empty, which never
+    /// matches, and a pointer without one is never resumed.
+    private func setResumeImage(tag: String, stamp: String = "", diskName: String? = nil) {
+        let diskName = diskName ?? getDiskName()
+        setImageProperties(diskName: diskName, ["resume_image": tag, "resume_stamp": stamp])
     }
 
     /// Ensures we have a connection to our VM over the QEMU management

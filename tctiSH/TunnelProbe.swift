@@ -1,6 +1,6 @@
 //
 //  TunnelProbe.swift
-//  Detection for the LocalDevVPN tunnel used to enable JIT on iOS 26+.
+//  Detection for the loopback VPN tunnel used to enable JIT on iOS 26+.
 //
 //  Copyright © 2026 Ara Adkins.
 //
@@ -24,18 +24,18 @@ enum TunnelProbeResult {
 }
 
 /// Checks whether the device's remote-service-discovery endpoint is reachable
-/// over the LocalDevVPN tunnel.
+/// over the loopback VPN tunnel.
 ///
 /// This is the first gate of JIT enablement: without the tunnel there is no way
 /// to attach a debugger, and we fall back to TCTI. Deliberately reimplemented
 /// rather than borrowed from StikJIT as its probe is internal.
 enum TunnelProbe {
 
-    /// The endpoint LocalDevVPN exposes; matches StikJIT's defaults.
+    /// The endpoint the loopback VPN exposes; matches StikJIT's defaults.
     static let defaultAddress = "10.7.0.1"
     static let defaultPort: UInt16 = 49152
 
-    /// The network LocalDevVPN works on, as a dotted prefix.
+    /// The network the loopback VPN works on, as a dotted prefix.
     ///
     /// The /16 rather than the endpoint's own /24, as the two don't match.
     static let tunnelNetworkPrefix = "10.7."
@@ -152,8 +152,9 @@ enum TunnelProbe {
 
     /// Probes the tunnel and reports what happened to the log.
     ///
-    /// Diagnostic only for now: nothing branches on the result yet, while we
-    /// establish whether LocalDevVPN can be detected reliably.
+    /// The gate in front of anything that needs the tunnel: JIT enablement at
+    /// launch, and removing DDIs from the debug tools. Both give up on an
+    /// unavailable result rather than wait for StikJIT to fail more obscurely.
     @discardableResult
     static func probeAndReport() -> TunnelProbeResult {
         let tunnels = activeTunnelInterfaces()
@@ -170,8 +171,9 @@ enum TunnelProbe {
             return .unavailable(reason: "no tunnel interface", elapsed: 0)
         }
 
-        // A `utun` by name alone is not a LocalDevVPN tunnel: Tailscale answers to that description
-        // perfectly well so we run additional probes to avoid waiting the entire timeout.
+        // A `utun` by name alone is not a loopback VPN tunnel: Tailscale answers to that
+        // description perfectly well so we run additional probes to avoid waiting the entire
+        // timeout.
         guard tunnels.contains(where: { $0.address.hasPrefix(tunnelNetworkPrefix) }) else {
             Log.network.note("tunnel: nothing on \(tunnelNetwork), so not probing")
             return .unavailable(reason: "no tunnel interface on \(tunnelNetwork)", elapsed: 0)

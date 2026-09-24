@@ -7,7 +7,7 @@
 
 import Foundation
 
-/// The pairing file used to talk to this device over the LocalDevVPN tunnel.
+/// The pairing file used to talk to this device over the loopback VPN tunnel.
 ///
 /// The location matches StikJIT's recommendation, so a file placed there by any
 /// of the usual routes is picked up without further configuration. tctiSH
