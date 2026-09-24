@@ -39,6 +39,20 @@ public class QEMUInterface {
     private var monitorSocket: Socket?
     private var monitorSocketPath: String?
 
+    /// The disk this launch runs from, fixed when the interface is made.
+    ///
+    /// Not the setting, which can be changed while the VM runs: Settings says a
+    /// new name takes effect the next time tctiSH opens, and until then
+    /// everything written about a disk (the saved session, the persistent
+    /// mounts) belongs to the one the VM actually has open. Reading the setting
+    /// each time instead pointed another disk at a snapshot that is only on
+    /// this one. A `let`, so any thread can read it.
+    let disk: String
+
+    init() {
+        disk = Self.diskNameSetting()
+    }
+
     /// Start our background QEMU thread.
     func startQemuThread(forceRecoveryBoot: Bool = false) {
 
@@ -53,11 +67,6 @@ public class QEMUInterface {
         // ... get a disk to run with ...
         let diskPath = getPersistentStore().path
         Log.fs.note("disk path: \(diskPath)")
-
-        // Kept for Debug Tools, which needs to know which disk the monitor is talking about. The
-        // setting can be changed while this one runs.
-        let diskName = getDiskName()
-        DispatchQueue.main.async { self.runningDisk = diskName }
 
         // ... figure out which image we'll be restoring state from ...
         let bootImageName = getBootImageName(forceRecoveryBoot: forceRecoveryBoot)
@@ -105,10 +114,6 @@ public class QEMUInterface {
         // Finally, recreate our persistent mounts, so they're available in the VM.
         recreatePersistentMounts()
     }
-
-    /// The disk this launch is running from. Main thread only, like
-    /// `bootedFromResumeImage`.
-    private(set) var runningDisk: String?
 
     /// Whether this launch was told to resume from `resume_image`.
     ///
@@ -757,7 +762,7 @@ public class QEMUInterface {
     /// overwrite an image until our save is complete.
     private func getNextInstantResumeTag() -> String {
         let current = getImageProperty(
-            diskName: getDiskName(), property: "resume_image", defaultValue: "b")
+            diskName: disk, property: "resume_image", defaultValue: "b")
 
         if current.last == "b" {
             return "instant_resume_a"
@@ -832,7 +837,7 @@ public class QEMUInterface {
 
         // ... and associate it with this image.
         let slot = getNextMountSlotName()
-        setImageProperty(diskName: getDiskName(), property: slot, value: serializedString)
+        setImageProperty(diskName: disk, property: slot, value: serializedString)
     }
 
     /// Returns the next ImageProperty name appropriate for storing a
@@ -863,7 +868,7 @@ public class QEMUInterface {
     private func getMountInfo(slotName: String, disk: String? = nil) -> DiskMountInfo? {
 
         // Fetch any data stored in the current mount slot.
-        let diskName = disk ?? getDiskName()
+        let diskName = disk ?? self.disk
         let serializedString = getImageProperty(
             diskName: diskName, property: slotName, defaultValue: "")
         let serializedData = Data(serializedString.utf8)
@@ -1010,7 +1015,7 @@ public class QEMUInterface {
     /// one is stored as "" which shadows the registered default, so the
     /// fallback below would never be reached and the session would silently
     /// move to a disk called ".qcow".
-    private func getDiskName() -> String {
+    private static func diskNameSetting() -> String {
         let stored = UserDefaults.standard.string(forKey: "disk_name")?
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -1025,7 +1030,7 @@ public class QEMUInterface {
 
     /// Returns the URL to a qcow image that will acts as our persistent store.
     private func getPersistentStore() -> URL {
-        let diskName = getDiskName()
+        let diskName = disk
 
         // Figure out where our persistent store would be located.
         let targetURL = getDatastoreURL(diskName, fileExtension: "qcow")
@@ -1151,14 +1156,14 @@ public class QEMUInterface {
     /// Gets the name of the save-state to be used for resuming a VM in "persist
     /// state" mode.
     private func getResumeImage(diskName: String? = nil) -> String {
-        let diskName = diskName ?? getDiskName()
+        let diskName = diskName ?? disk
         return getImageProperty(diskName: diskName, property: "resume_image", defaultValue: "")
     }
 
     /// The `VmSnapshots.resumeStamp` recorded with the resume image, or empty
     /// if none was.
     private func getResumeStamp(diskName: String? = nil) -> String {
-        let diskName = diskName ?? getDiskName()
+        let diskName = diskName ?? disk
         return getImageProperty(diskName: diskName, property: "resume_stamp", defaultValue: "")
     }
 
@@ -1169,7 +1174,7 @@ public class QEMUInterface {
     /// stamp. Anything that isn't a save leaves the stamp empty, which never
     /// matches, and a pointer without one is never resumed.
     private func setResumeImage(tag: String, stamp: String = "", diskName: String? = nil) {
-        let diskName = diskName ?? getDiskName()
+        let diskName = diskName ?? disk
         setImageProperties(diskName: diskName, ["resume_image": tag, "resume_stamp": stamp])
     }
 
@@ -1277,12 +1282,8 @@ extension QEMUInterface {
 
     /// Every disk's saved session: each disk image in the data store, and any
     /// disk the metadata store still remembers. The running disk comes first.
-    ///
-    /// Main thread only, for `runningDisk`.
     func savedSessions() -> [SavedSession] {
-        dispatchPrecondition(condition: .onQueue(.main))
-
-        let running = runningDisk ?? getDiskName()
+        let running = disk
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
 
         let images =
