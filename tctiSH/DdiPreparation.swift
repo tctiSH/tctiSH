@@ -35,10 +35,10 @@ enum DdiPreparation {
             + "/PersonalizedImages/Xcode_iOS_DDI_Cryptex")!
 
     /// The two cryptex-only files come last as a cache from before 1.6.0 holds
-    /// the *personalized* image under the same three names, and
-    /// it's the absence of these two that marks it stale. Each download is
-    /// moved into place only once complete, so finding the last one means the
-    /// rest are current too.
+    /// the *personalized* image under the same three names, and it's the
+    /// absence of these two that marks it stale. Each download is moved into
+    /// place only once complete, so finding the last one means the rest are
+    /// current too.
     private static func downloads(for paths: DDIPaths) -> [(name: String, destination: String)] {
         [
             ("BuildManifest.plist", paths.manifestPath),
@@ -209,14 +209,40 @@ enum DdiPreparation {
         return .removed(said.joined(separator: " "))
     }
 
+    /// Whether the device has a DDI mounted, for Debug Tools. Blocking.
+    static func isMounted(pairingData: Data) throws -> Bool {
+        let pairingFile = try stage(pairingData, as: "ddi-status-pairing")
+        defer { try? FileManager.default.removeItem(at: pairingFile) }
+
+        return try StikJIT.isDDIMounted(pairingFile: pairingFile)
+    }
+
+    /// How much of the DDI is downloaded.
+    enum CacheState {
+        case complete
+        case partial
+        case none
+    }
+
+    /// What `run` would find on disk, for Debug Tools.
+    static var cacheState: CacheState {
+        if cached(paths) { return .complete }
+
+        let anything = downloads(for: paths).contains {
+            FileManager.default.fileExists(atPath: $0.destination)
+        }
+        return anything ? .partial : .none
+    }
+
     /// Writes the pairing data out as a file, which is what StikJIT reads.
     ///
-    /// Removing it is the caller's business, once StikJIT is done with it. Each
-    /// caller names its own, as preparing and removing can overlap and neither
-    /// should delete the other's out from under it.
+    /// Removing it is the caller's business, once StikJIT is done with it.
+    /// Every call gets a file of its own: preparing, removing and the status
+    /// check can all overlap, as can two of any one of them, and none should
+    /// delete another's out from under it.
     private static func stage(_ pairingData: Data, as name: String) throws -> URL {
         let pairingFile = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("\(name)-\(getpid()).plist")
+            .appendingPathComponent("\(name)-\(UUID().uuidString).plist")
 
         try pairingData.write(to: pairingFile, options: .atomic)
         return pairingFile

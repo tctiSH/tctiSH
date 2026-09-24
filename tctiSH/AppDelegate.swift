@@ -72,6 +72,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     ) -> Bool {
         AppDelegate.launchStarted = Date()
 
+        // First, so that nothing this launch logs, and nothing QEMU prints, is missed. A debugger
+        // this early is Xcode's, and its console is reading stderr.
+        LogFile.start(captureStderr: !jit_debugger_tracing())
+
         // Has to happen before launching finishes, and costs nothing if pairing is never used.
         PairingKeepAlive.register()
 

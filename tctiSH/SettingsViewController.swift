@@ -677,7 +677,7 @@ final class SettingsViewController: SettingsListViewController,
         SettingsOption(title: "Reboot", value: "clean_boot"),
     ]
 
-    private static let jitOptions = [
+    fileprivate static let jitOptions = [
         SettingsOption(title: "JIT When Possible", value: "jit_when_possible"),
         SettingsOption(title: "Never JIT", value: "never_jit"),
     ]
@@ -689,7 +689,7 @@ final class SettingsViewController: SettingsListViewController,
     /// Falls back to the stored value itself, so a setting left holding
     /// something this build no longer offers shows what it is rather than
     /// showing nothing.
-    private static func label(_ options: [SettingsOption<String>], for setting: AppSetting)
+    fileprivate static func label(_ options: [SettingsOption<String>], for setting: AppSetting)
         -> String
     {
         let value = setting.string
@@ -798,6 +798,53 @@ final class SettingsViewController: SettingsListViewController,
 
 // MARK: - Debug tools
 
+extension UIViewController {
+
+    /// Shows an alert from this controller, or from whatever it is already
+    /// showing.
+    fileprivate func showAlert(title: String, message: String) {
+        var top: UIViewController = self
+        while let presented = top.presentedViewController {
+            top = presented
+        }
+
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        top.present(alert, animated: true)
+    }
+
+    /// Asks before doing something that can't be taken back.
+    fileprivate func confirm(
+        title: String, message: String, action: String, _ perform: @escaping () -> Void
+    ) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: action, style: .destructive) { _ in perform() })
+        present(alert, animated: true)
+    }
+
+    /// Offers files through the share sheet, anchored to `item` on iPad.
+    fileprivate func share(_ files: [URL], from item: UIBarButtonItem?) {
+        let existing = files.filter { FileManager.default.fileExists(atPath: $0.path) }
+        guard !existing.isEmpty else {
+            showAlert(title: "Nothing to Share", message: "There are no log files yet.")
+            return
+        }
+
+        let sheet = UIActivityViewController(activityItems: existing, applicationActivities: nil)
+        sheet.popoverPresentationController?.barButtonItem = item
+        present(sheet, animated: true)
+    }
+}
+
+/// When something happened, for a row's detail.
+private let debugTimeFormat: DateFormatter = {
+    let format = DateFormatter()
+    format.dateStyle = .medium
+    format.timeStyle = .medium
+    return format
+}()
+
 /// Tools for testing tctiSH itself, behind three taps on the Settings title.
 private final class DebugToolsViewController: SettingsListViewController {
 
@@ -812,6 +859,9 @@ private final class DebugToolsViewController: SettingsListViewController {
     ///
     /// Not necessarily the one that started it, for the same reason.
     private static weak var onScreen: DebugToolsViewController?
+
+    /// When a memory warning was last simulated, this process.
+    private static var lastMemoryWarning: Date?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -831,7 +881,29 @@ private final class DebugToolsViewController: SettingsListViewController {
     }
 
     fileprivate override func buildSections() -> [SettingsSection] {
-        [
+        let hasPairingFile = JitPairingFile.exists
+
+        return [
+            SettingsSection(
+                header: "JIT",
+                footer: "Deleting the pairing file makes the next launch run without JIT and ask "
+                    + "for a new one. Until then the code cache can't grow.",
+                rows: [
+                    SettingsRow(
+                        id: "jit-status",
+                        title: "JIT Status",
+                        symbol: "bolt",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.push(JitStatusViewController()) }),
+                    SettingsRow(
+                        id: "delete-pairing",
+                        title: "Delete Pairing File",
+                        detail: hasPairingFile ? nil : "None",
+                        symbol: "key",
+                        select: hasPairingFile
+                            ? { [weak self] in self?.confirmPairingDeletion() } : nil),
+                ]),
+
             SettingsSection(
                 header: "Developer Disk Image",
                 footer:
@@ -846,31 +918,95 @@ private final class DebugToolsViewController: SettingsListViewController {
                         detail: Self.removing ? "Removing…" : nil,
                         symbol: "trash",
                         select: Self.removing ? nil : { [weak self] in self?.confirmRemoval() })
-                ])
+                ]),
+
+            SettingsSection(
+                header: "Virtual Machine",
+                footer: "A simulated warning is the one UIKit posts under real pressure, so tctiSH "
+                    + "responds as it would to that: any pending code cache expansion is called "
+                    + "off, and a Dynamic cache above what a warning allows is shrunk. The "
+                    + "system's own pressure level is untouched.",
+                rows: [
+                    SettingsRow(
+                        id: "saved-sessions",
+                        title: "Saved Sessions",
+                        symbol: "camera",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.push(SavedSessionsViewController()) }),
+                    SettingsRow(
+                        id: "memory-warning",
+                        title: "Simulate Memory Warning",
+                        detail: Self.lastMemoryWarning.map {
+                            "Sent \(DateFormatter.localizedString(from: $0, dateStyle: .none, timeStyle: .medium))"
+                        },
+                        symbol: "memorychip",
+                        select: { [weak self] in self?.simulateMemoryWarning() }),
+                ]),
+
+            SettingsSection(
+                header: nil,
+                footer: nil,
+                rows: [
+                    SettingsRow(
+                        id: "logs",
+                        title: "Logs",
+                        symbol: "doc.text",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.push(LogsViewController()) })
+                ]),
         ]
     }
 
+    // MARK: Pairing file
+
+    private func confirmPairingDeletion() {
+        confirm(
+            title: "Delete Pairing File?",
+            message: "JIT keeps working until tctiSH is closed. The next launch runs without it, "
+                + "and asks for a new pairing file.",
+            action: "Delete"
+        ) { [weak self] in
+            do {
+                try FileManager.default.removeItem(at: JitPairingFile.url)
+                Log.fs.note("debug: deleted the pairing file")
+            } catch {
+                self?.showAlert(
+                    title: "Couldn't Delete Pairing File", message: error.localizedDescription)
+            }
+
+            self?.reload()
+        }
+    }
+
+    // MARK: Memory
+
+    private func simulateMemoryWarning() {
+        Log.ui.note("debug: simulating a memory warning")
+        NotificationCenter.default.post(
+            name: UIApplication.didReceiveMemoryWarningNotification, object: UIApplication.shared)
+
+        Self.lastMemoryWarning = Date()
+        reload()
+    }
+
+    // MARK: Removing DDIs
+
     private func confirmRemoval() {
-        let alert = UIAlertController(
+        confirm(
             title: "Remove All DDIs?",
             message: "JIT keeps working until tctiSH is closed, though the code cache can't grow "
                 + "any further. The launch after that starts without JIT, while the DDI is "
                 + "downloaded and mounted again.",
-            preferredStyle: .alert)
-
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(
-            UIAlertAction(title: "Remove", style: .destructive) { [weak self] _ in
-                self?.removeAll()
-            })
-
-        present(alert, animated: true)
+            action: "Remove"
+        ) { [weak self] in
+            self?.removeAll()
+        }
     }
 
     private func removeAll() {
         // Removing goes through the same tunnel as JIT, so it needs the same pairing file.
         guard let pairingData = JitPairingFile.read() else {
-            report(
+            showAlert(
                 title: "No Pairing File", message: "Removing a DDI needs the pairing file JIT uses."
             )
             return
@@ -902,25 +1038,476 @@ private final class DebugToolsViewController: SettingsListViewController {
                     return
                 }
 
-                Self.report(title: title, message: message, from: presenter)
+                presenter.showAlert(title: title, message: message)
+            }
+        }
+    }
+}
+
+// MARK: - Debug tools: JIT status
+
+/// Everything JIT depends on, checked afresh each time the screen appears.
+private final class JitStatusViewController: SettingsListViewController {
+
+    /// What the checks that need the device found, or nil while they run.
+    private struct DeviceChecks {
+        var tunnel: String
+        var ddi: String
+    }
+
+    private var checks: DeviceChecks?
+    private var checking = false
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        title = "JIT Status"
+        navigationItem.largeTitleDisplayMode = .never
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            image: UIImage(systemName: "arrow.clockwise"),
+            primaryAction: UIAction { [weak self] _ in self?.check() })
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        check()
+    }
+
+    /// Runs the checks that go to the device. Both can take seconds, the tunnel
+    /// probe's timeout especially, so off the main thread.
+    private func check() {
+        guard !checking else { return }
+        checking = true
+        checks = nil
+        reload()
+
+        let pairingData = JitPairingFile.read()
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let probe = TunnelProbe.probeAndReport()
+
+            let tunnel: String
+            switch probe {
+            case .available(let elapsed):
+                tunnel = String(format: "Connected (%.0f ms)", elapsed * 1000)
+            case .unavailable:
+                tunnel = "Not connected"
+            }
+
+            let ddi: String
+            if !probe.isAvailable {
+                ddi = "Unknown: no tunnel"
+            } else if let pairingData {
+                do {
+                    ddi =
+                        try DdiPreparation.isMounted(pairingData: pairingData)
+                        ? "Mounted" : "Not mounted"
+                } catch {
+                    ddi = "Unknown: \(error.localizedDescription)"
+                }
+            } else {
+                ddi = "Unknown: no pairing file"
+            }
+
+            DispatchQueue.main.async {
+                self?.checks = DeviceChecks(tunnel: tunnel, ddi: ddi)
+                self?.checking = false
+                self?.reload()
             }
         }
     }
 
-    private func report(title: String, message: String) {
-        Self.report(title: title, message: message, from: self)
-    }
-
-    /// Shows an alert from `presenter`, or from whatever it is already showing.
-    private static func report(title: String, message: String, from presenter: UIViewController) {
-        var top = presenter
-        while let presented = top.presentedViewController {
-            top = presented
+    fileprivate override func buildSections() -> [SettingsSection] {
+        let cache: String
+        switch DdiPreparation.cacheState {
+        case .complete: cache = "Complete"
+        case .partial: cache = "Partial"
+        case .none: cache = "None"
         }
 
-        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
-        top.present(alert, animated: true)
+        return [
+            SettingsSection(
+                header: "This Launch",
+                footer: nil,
+                rows: [
+                    SettingsRow(
+                        id: "outcome",
+                        title: "JIT",
+                        detail: JitEnablement.outcome?.status.message ?? "Deciding…"),
+                    SettingsRow(
+                        id: "mode",
+                        title: "Execution Mode",
+                        detail: SettingsViewController.label(
+                            SettingsViewController.jitOptions, for: .jitMode)),
+                ]),
+
+            SettingsSection(
+                header: "Requirements",
+                footer: "Under TXM, JIT needs all of these: the loopback VPN for a tunnel to the "
+                    + "device, the pairing file to authenticate it, and a mounted DDI for the "
+                    + "debugger. Without TXM, it needs none of them.",
+                rows: [
+                    SettingsRow(
+                        id: "txm", title: "TXM", detail: TxmPresence.current.description.capitalized
+                    ),
+                    SettingsRow(
+                        id: "tunnel", title: "Loopback VPN", detail: checks?.tunnel ?? "Checking…"),
+                    SettingsRow(
+                        id: "pairing",
+                        title: "Pairing File",
+                        detail: JitPairingFile.exists ? "Present" : "Missing"),
+                    SettingsRow(id: "ddi", title: "DDI", detail: checks?.ddi ?? "Checking…"),
+                    SettingsRow(id: "cache", title: "Downloaded DDI", detail: cache),
+                ]),
+        ]
+    }
+}
+
+// MARK: - Debug tools: saved sessions
+
+/// Each disk's saved session, and the snapshots on the one that's running.
+private final class SavedSessionsViewController: SettingsListViewController {
+
+    /// The running disk's snapshots, or nil while they're being listed.
+    private var snapshots: [String]?
+
+    /// Set when the monitor didn't answer.
+    private var listingFailed = false
+
+    /// Which listing is the latest. Two can be in flight, from a refresh
+    /// straight after a delete, and the one asked first can answer last.
+    private var listing = 0
+
+    private var qemu: QEMUInterface? {
+        (UIApplication.shared.delegate as? AppDelegate)?.qemu
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        title = "Saved Sessions"
+        navigationItem.largeTitleDisplayMode = .never
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            image: UIImage(systemName: "arrow.clockwise"),
+            primaryAction: UIAction { [weak self] _ in self?.listSnapshots() })
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        listSnapshots()
+    }
+
+    /// Asks the monitor, which can take seconds, so off the main thread.
+    private func listSnapshots() {
+        guard let qemu else { return }
+
+        snapshots = nil
+        listingFailed = false
+        listing += 1
+        reload()
+
+        let asked = listing
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let tags = qemu.snapshotsOnRunningDisk()
+
+            DispatchQueue.main.async {
+                guard let self, self.listing == asked else { return }
+
+                self.snapshots = tags ?? []
+                self.listingFailed = tags == nil
+                self.reload()
+            }
+        }
+    }
+
+    fileprivate override func buildSections() -> [SettingsSection] {
+        guard let qemu else {
+            return [
+                SettingsSection(
+                    header: nil,
+                    footer: nil,
+                    rows: [SettingsRow(id: "no-vm", title: "The VM isn't running")])
+            ]
+        }
+
+        let sessions = qemu.savedSessions()
+        var sections = sessions.map(section(for:))
+
+        if let running = sessions.first(where: \.isRunning) {
+            sections.append(snapshotSection(for: running))
+        }
+
+        let lastSaved = QEMUInterface.lastSavedAt
+        let lastFailed = QEMUInterface.lastSaveFailedAt
+
+        // Whichever happened later. A save that ran out of time and then finished anyway only
+        // records its success, so this doesn't call that one a failure.
+        let lastAttempt: String
+        if let lastFailed, lastSaved.map({ lastFailed > $0 }) ?? true {
+            lastAttempt = "Failed \(debugTimeFormat.string(from: lastFailed))"
+        } else {
+            lastAttempt = lastSaved == nil ? "–" : "Succeeded"
+        }
+
+        sections.append(
+            SettingsSection(
+                header: "Saving",
+                footer: "A saved session is resumed only if the machine that saved it had this "
+                    + "stamp, which is what the next launch will build: "
+                    + QEMUInterface.wantedStamp,
+                rows: [
+                    SettingsRow(
+                        id: "last-saved",
+                        title: "Last Saved",
+                        detail: lastSaved.map { debugTimeFormat.string(from: $0) } ?? "Never"),
+                    SettingsRow(
+                        id: "last-attempt",
+                        title: "Last Attempt",
+                        detail: lastAttempt),
+                ]))
+
+        return sections
+    }
+
+    private func section(for session: QEMUInterface.SavedSession) -> SettingsSection {
+        let hasSession = !session.tag.isEmpty
+
+        let machine: String
+        if !hasSession {
+            machine = "–"
+        } else if session.stampMatches {
+            machine = "Matches"
+        } else {
+            machine = session.stamp.isEmpty ? "Unstamped" : "Different"
+        }
+
+        var notes: [String] = []
+        if hasSession && !session.stampMatches {
+            notes.append(
+                session.stamp.isEmpty
+                    ? "Saved before stamps were recorded, so it won't be resumed."
+                    : "Saved as \(session.stamp), so it won't be resumed.")
+        }
+        if session.isRunning {
+            notes.append("Leaving tctiSH saves this disk's session again, replacing this one.")
+        }
+
+        var rows = [
+            SettingsRow(
+                id: "session-\(session.disk)",
+                title: "Saved Session",
+                detail: hasSession ? session.tag : "None"),
+            SettingsRow(id: "machine-\(session.disk)", title: "Machine", detail: machine),
+        ]
+
+        if hasSession {
+            rows.append(
+                SettingsRow(
+                    id: "forget-\(session.disk)",
+                    title: "Forget Saved Session",
+                    symbol: "xmark.circle",
+                    select: { [weak self] in self?.confirmForgetting(session.disk) }))
+        }
+
+        return SettingsSection(
+            header: session.isRunning ? "\(session.disk) (running)" : session.disk,
+            footer: notes.isEmpty ? nil : notes.joined(separator: " "),
+            rows: rows)
+    }
+
+    private func snapshotSection(for running: QEMUInterface.SavedSession) -> SettingsSection {
+        let rows: [SettingsRow]
+
+        if let snapshots, !listingFailed {
+            rows =
+                snapshots.isEmpty
+                ? [SettingsRow(id: "snapshots-none", title: "None")]
+                : snapshots.map { tag in
+                    SettingsRow(
+                        id: "snapshot-\(tag)",
+                        title: tag,
+                        detail: tag == running.tag ? "Saved session" : nil,
+                        select: { [weak self] in
+                            self?.confirmDeleting(tag, onRunningDisk: running.disk)
+                        })
+                }
+        } else {
+            let title = listingFailed ? "The monitor didn't answer" : "Checking…"
+            rows = [SettingsRow(id: "snapshots-pending", title: title)]
+        }
+
+        return SettingsSection(
+            header: "Snapshots on \(running.disk)",
+            footer: "Tap one to delete it.",
+            rows: rows)
+    }
+
+    private func confirmForgetting(_ disk: String) {
+        confirm(
+            title: "Forget Saved Session?",
+            message: "The next launch on '\(disk)' cold boots. The snapshot stays on the disk.",
+            action: "Forget"
+        ) { [weak self] in
+            if let failure = self?.qemu?.forgetSavedSession(disk: disk) {
+                self?.showAlert(title: "Couldn't Forget Saved Session", message: failure)
+            }
+            self?.reload()
+        }
+    }
+
+    private func confirmDeleting(_ tag: String, onRunningDisk disk: String) {
+        guard let qemu else { return }
+
+        confirm(
+            title: "Delete Snapshot?",
+            message: "'\(tag)' is removed from '\(disk)'. If it's the saved session, the next "
+                + "launch cold boots unless tctiSH saves again first.",
+            action: "Delete"
+        ) { [weak self] in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let failure = qemu.deleteSnapshot(tag, onRunningDisk: disk)
+
+                DispatchQueue.main.async {
+                    if let failure {
+                        self?.showAlert(title: "Couldn't Delete Snapshot", message: failure)
+                    }
+                    self?.listSnapshots()
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Debug tools: logs
+
+/// The launches whose logs are kept.
+private final class LogsViewController: SettingsListViewController {
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        title = "Logs"
+        navigationItem.largeTitleDisplayMode = .never
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            image: UIImage(systemName: "square.and.arrow.up"),
+            primaryAction: UIAction { [weak self] _ in self?.shareAll() })
+    }
+
+    fileprivate override func buildSections() -> [SettingsSection] {
+        [
+            SettingsSection(
+                header: nil,
+                footer: "The last few launches. Each has tctiSH's own log, and whatever was "
+                    + "written to stderr, which is where QEMU says why it stopped. Stderr isn't "
+                    + "captured when Xcode launched tctiSH, as its console is reading it.",
+                rows: LogFile.launches().map { launch in
+                    SettingsRow(
+                        id: "launch-\(launch.log.lastPathComponent)",
+                        title: debugTimeFormat.string(from: launch.started),
+                        detail: launch.isCurrent
+                            ? "This launch"
+                            : (Self.hasOutput(launch.stderr) ? "Has stderr" : nil),
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.push(LogViewerViewController(launch: launch))
+                        })
+                })
+        ]
+    }
+
+    /// Whether either part of `file` has anything in it.
+    private static func hasOutput(_ file: URL) -> Bool {
+        [file, LogFile.older(file)].contains { part in
+            let size =
+                (try? FileManager.default.attributesOfItem(atPath: part.path))?[.size] as? Int
+            return (size ?? 0) > 0
+        }
+    }
+
+    private func shareAll() {
+        share(
+            LogFile.launches().flatMap(\.files),
+            from: navigationItem.rightBarButtonItem)
+    }
+}
+
+/// One launch's log and stderr, as text.
+private final class LogViewerViewController: UIViewController {
+
+    private let launch: LogFile.Launch
+    private let textView = UITextView()
+
+    init(launch: LogFile.Launch) {
+        self.launch = launch
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used; these screens are built in code")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        title = launch.isCurrent ? "This Launch" : debugTimeFormat.string(from: launch.started)
+        navigationItem.largeTitleDisplayMode = .never
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            image: UIImage(systemName: "square.and.arrow.up"),
+            primaryAction: UIAction { [weak self] _ in self?.shareLaunch() })
+
+        view.backgroundColor = .systemBackground
+
+        textView.isEditable = false
+        textView.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        textView.alwaysBounceVertical = true
+        textView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(textView)
+
+        NSLayoutConstraint.activate([
+            textView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            textView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            textView.topAnchor.constraint(equalTo: view.topAnchor),
+            textView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+
+        textView.text =
+            Self.titled("tctiSH", contents: launch.log) + "\n\n"
+            + Self.titled("stderr", contents: launch.stderr)
+
+        // The end is where a launch that went wrong says so.
+        textView.layoutIfNeeded()
+        textView.scrollRangeToVisible(NSRange(location: textView.text.utf16.count, length: 0))
+    }
+
+    /// How much of each file is shown. A text view slows to a crawl well before
+    /// a file reaches its cap, and sharing has the whole of it.
+    private static let shownBytes = 256 << 10
+
+    /// A file's text under a heading, its older part first if it was rotated.
+    private static func titled(_ title: String, contents file: URL) -> String {
+        let parts = [LogFile.older(file), file].compactMap { try? Data(contentsOf: $0) }
+        guard !parts.isEmpty else { return "── \(title) ──\n(not captured)" }
+
+        let whole = parts.reduce(Data(), +)
+        let dropped = whole.count > shownBytes
+
+        // Decoding repairs a character split at the cut, rather than failing on it.
+        let text = String(decoding: whole.suffix(shownBytes), as: UTF8.self)
+
+        // A rotated file is past its cap, which is well past this, so this covers rotation too.
+        let note =
+            dropped
+            ? "(earlier output isn't shown here; share the files for all that was kept)\n" : ""
+
+        return "── \(title) ──\n\(note)\(text.isEmpty ? "(empty)" : text)"
+    }
+
+    private func shareLaunch() {
+        share(launch.files, from: navigationItem.rightBarButtonItem)
     }
 }
 

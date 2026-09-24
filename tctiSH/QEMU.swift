@@ -54,6 +54,11 @@ public class QEMUInterface {
         let diskPath = getPersistentStore().path
         Log.fs.note("disk path: \(diskPath)")
 
+        // Kept for Debug Tools, which needs to know which disk the monitor is talking about. The
+        // setting can be changed while this one runs.
+        let diskName = getDiskName()
+        DispatchQueue.main.async { self.runningDisk = diskName }
+
         // ... figure out which image we'll be restoring state from ...
         let bootImageName = getBootImageName(forceRecoveryBoot: forceRecoveryBoot)
 
@@ -100,6 +105,10 @@ public class QEMUInterface {
         // Finally, recreate our persistent mounts, so they're available in the VM.
         recreatePersistentMounts()
     }
+
+    /// The disk this launch is running from. Main thread only, like
+    /// `bootedFromResumeImage`.
+    private(set) var runningDisk: String?
 
     /// Whether this launch was told to resume from `resume_image`.
     ///
@@ -151,6 +160,21 @@ public class QEMUInterface {
         set { UserDefaults.standard.set(newValue, forKey: "last_save_failed") }
     }
 
+    /// When a save last succeeded, on any disk. For Debug Tools.
+    static var lastSavedAt: Date? {
+        get { UserDefaults.standard.object(forKey: "last_saved_at") as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: "last_saved_at") }
+    }
+
+    /// When a save last failed, for Debug Tools.
+    ///
+    /// Not `lastSaveFailed`, which the UI clears once it has said so, and so
+    /// can't say what the last attempt came to afterwards.
+    static var lastSaveFailedAt: Date? {
+        get { UserDefaults.standard.object(forKey: "last_save_failed_at") as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: "last_save_failed_at") }
+    }
+
     /// Snapshots the session, and points the next launch at it if it worked.
     ///
     /// Returns whether the session was saved.
@@ -197,6 +221,7 @@ public class QEMUInterface {
         let stamp = VmMemory.bootedArgument.map { VmSnapshots.resumeStamp(memory: $0) } ?? ""
         setResumeImage(tag: tag, stamp: stamp)
         Self.lastSaveFailed = false
+        Self.lastSavedAt = Date()
 
         // Including anything `reportSaveRanOutOfTime` left queued. The assertion running out did
         // not stop the work, and the work went on to succeed.
@@ -214,6 +239,7 @@ public class QEMUInterface {
     func reportSaveFailure(_ reason: String) {
         Log.qemu.warn("session save: \(reason)")
         Self.lastSaveFailed = true
+        Self.lastSaveFailedAt = Date()
 
         LocalAlert.post(
             title: "Session not saved",
@@ -542,11 +568,23 @@ public class QEMUInterface {
         }
 
         var tags: [String] = []
+        var inList = false
 
         for line in Self.lines(of: response) {
             let text = line.trimmingCharacters(in: .whitespacesAndNewlines)
 
-            if text.isEmpty || text.hasPrefix("List of") || text.hasPrefix("ID ") {
+            // Only rows under one of the lists' headings. Before them comes the monitor's echo of
+            // the command, and after them its prompt, and "info snapshots" has two words, which is
+            // enough to pass for a row. Deleting what it passed for then does nothing at all, as
+            // `delvm` says nothing about a tag that isn't there.
+            if text.hasPrefix("List of") {
+                inList = true
+                continue
+            }
+
+            guard inList, !text.isEmpty, !text.hasPrefix("ID "),
+                !text.hasPrefix(Self.monitorPrompt), !line.unicodeScalars.contains("\u{1B}")
+            else {
                 continue
             }
 
@@ -939,7 +977,7 @@ public class QEMUInterface {
             // The pointer is left alone, as a mismatch is never resumed and the next save replaces
             // it anyway.
             let saved = getResumeStamp()
-            let wanted = VmSnapshots.resumeStamp(memory: VmMemory.qemuArgument)
+            let wanted = Self.wantedStamp
             guard saved == wanted else {
                 Log.qemu.note(
                     "resume: '\(resume_image)' was saved by a different machine "
@@ -1208,5 +1246,135 @@ public class QEMUInterface {
         // Harmless if it's already running, and necessary if it isn't.
         writeMonitorCommand("c")
         return true
+    }
+}
+
+// MARK: - Debug tools
+
+extension QEMUInterface {
+
+    /// One disk's saved session, as Debug Tools shows it.
+    struct SavedSession {
+        let disk: String
+
+        /// Whether this is the disk the VM is running from.
+        let isRunning: Bool
+
+        /// The snapshot the next launch on this disk would resume, or empty.
+        let tag: String
+
+        /// What the machine that saved it recorded; see `resumeStamp`.
+        let stamp: String
+
+        /// Whether the next launch would accept it, as far as the stamp goes.
+        let stampMatches: Bool
+    }
+
+    /// What the next launch requires a saved session's stamp to be.
+    static var wantedStamp: String {
+        VmSnapshots.resumeStamp(memory: VmMemory.qemuArgument)
+    }
+
+    /// Every disk's saved session: each disk image in the data store, and any
+    /// disk the metadata store still remembers. The running disk comes first.
+    ///
+    /// Main thread only, for `runningDisk`.
+    func savedSessions() -> [SavedSession] {
+        dispatchPrecondition(condition: .onQueue(.main))
+
+        let running = runningDisk ?? getDiskName()
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+
+        let images =
+            (try? FileManager.default.contentsOfDirectory(atPath: documents.path))?
+            .filter { $0.hasSuffix(".qcow") }
+            .map { ($0 as NSString).deletingPathExtension } ?? []
+        let remembered =
+            UserDefaults.standard.dictionary(forKey: "images") as? [String: [String: String]] ?? [:]
+
+        let others = Set(images).union(remembered.keys).subtracting([running]).sorted()
+        let wanted = Self.wantedStamp
+
+        return ([running] + others).map { disk in
+            let stamp = getResumeStamp(diskName: disk)
+            return SavedSession(
+                disk: disk,
+                isRunning: disk == running,
+                tag: getResumeImage(diskName: disk),
+                stamp: stamp,
+                stampMatches: stamp == wanted)
+        }
+    }
+
+    /// The snapshots on the running disk, or nil if the monitor didn't answer.
+    ///
+    /// Blocks on the monitor, so never call it from the main thread.
+    ///
+    /// Each tag once, in the order QEMU gave them. The loadable and partial
+    /// lists can both name one, and a list with a repeat can't be shown.
+    func snapshotsOnRunningDisk() -> [String]? {
+        guard let tags = snapshotTagsOnDisk() else { return nil }
+
+        var seen = Set<String>()
+        return tags.filter { seen.insert($0).inserted }
+    }
+
+    /// Stops a disk's saved session being resumed, so the next launch on it
+    /// cold boots. The snapshot itself stays on the disk. Returns why it
+    /// couldn't, or nil.
+    func forgetSavedSession(disk: String) -> String? {
+        // A save rewrites the same store. Without the lock, whichever of the two writes last
+        // quietly undoes the other.
+        guard Self.snapshotWorkLock.try() else {
+            return "a session save is running; try again in a moment"
+        }
+        defer { Self.snapshotWorkLock.unlock() }
+
+        Log.qemu.note("debug: forgetting the saved session on '\(disk)'")
+        setResumeImage(tag: "", diskName: disk)
+        return nil
+    }
+
+    /// Deletes a snapshot from the running disk, `disk`, and that disk's
+    /// pointer at it if it has one. Returns why it couldn't, or nil.
+    ///
+    /// Blocks on the monitor, so never call it from the main thread.
+    func deleteSnapshot(_ tag: String, onRunningDisk disk: String) -> String? {
+        // Against a save as much as the stale-snapshot discard is: both write the tags this
+        // deletes, and the save points the disk at one.
+        guard Self.snapshotWorkLock.try() else {
+            return "a session save is running; try again in a moment"
+        }
+        defer { Self.snapshotWorkLock.unlock() }
+
+        guard let reply = runMonitorCommand("delvm \(tag)", timeout: Self.monitorReplyDeadline)
+        else {
+            return "the monitor didn't answer"
+        }
+
+        if let failure = Self.monitorError(in: reply) {
+            return failure
+        }
+
+        // Checked rather than trusted: `delvm` is silent about a tag it didn't find, so no error is
+        // not the same as deleted.
+        guard let remaining = snapshotTagsOnDisk() else {
+            return "the monitor didn't answer when asked whether it was gone"
+        }
+
+        guard !remaining.contains(tag) else {
+            Log.qemu.warn(
+                "debug: 'delvm \(tag)' left it on the disk; monitor said: " + Self.forLogging(reply)
+            )
+            return "QEMU reported no error, but '\(tag)' is still on the disk"
+        }
+
+        Log.qemu.note("debug: deleted snapshot '\(tag)'")
+
+        if getResumeImage(diskName: disk) == tag {
+            setResumeImage(tag: "", diskName: disk)
+        }
+
+        return nil
     }
 }
