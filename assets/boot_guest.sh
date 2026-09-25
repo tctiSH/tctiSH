@@ -215,6 +215,7 @@ main() {
         -device virtio-net-pci,id=net1,netdev=net0
         -netdev "user,id=net0,net=192.168.100.0/24,dhcpstart=$GUEST_IP,hostfwd=tcp:127.0.0.1:$SSH_PORT-:22"
         -device virtio-rng-pci
+        -device virtio-balloon-pci,free-page-reporting=on
         -device virtio-blk-pci,id=disk1,drive=drive1
         -drive "file=$DISK,id=drive1,if=none,format=qcow2"
         -fsdev "local,path=$SHARE,security_model=none,id=fsdev0"

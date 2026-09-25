@@ -234,6 +234,14 @@ size_t qemu_code_cache_grow(size_t target) {
     /* Provide our host RNG to our guest; to speed up entropy generation. */                       \
     "-device", "virtio-rng-pci",                                                                   \
                                                                                                    \
+    /* Free page reporting: the guest hands back pages it has freed, as it frees them, so its      \
+       footprint follows what it is using rather than its high-water mark. Not a balloon -- there  \
+       is no target size and nothing on the host decides anything. Page cache is in use as far     \
+       as the guest is concerned, so it is never reported. The discard this ends in only frees     \
+       memory on Darwin because of the MADV_FREE_REUSABLE arm our QEMU patch adds to               \
+       ram_block_discard_range(). */                                                               \
+    "-device", "virtio-balloon-pci,free-page-reporting=on",                                        \
+                                                                                                   \
     /* The controller for the disk; the -drive that backs it carries a path and is separate. */    \
     "-device", "virtio-blk-pci,id=disk1,drive=drive1",                                             \
                                                                                                    \

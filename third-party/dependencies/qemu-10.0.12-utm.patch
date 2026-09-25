@@ -16,6 +16,13 @@ What is in here, roughly in order of size:
                             folder mounts are built on
   system/vl.c               a named snapshot that is absent is a cold boot
                             rather than a fatal error
+  system/physmem.c          discard guest RAM by mapping fresh memory over it,
+                            since Darwin's MADV_DONTNEED frees nothing -- this
+                            is what makes free page reporting return memory
+  migration/ram.c           don't read guest pages the kernel has no copy of
+                            when saving or loading a snapshot; on Darwin each
+                            read would charge a page, so either took the
+                            footprint to the whole of guest RAM
   system/qemu.symbols       export the tctish_* accessors; the shared-library
                             build hides anything not listed here
   accel/tcg/tb-maint.c      release the unused tail of the code buffer at a
@@ -406,6 +413,179 @@ diff --git a/meson.build b/meson.build
                 install: true,
                 c_args: c_args,
                 dependencies: exe_deps + exe['dependencies'],
+diff --git a/migration/ram.c b/migration/ram.c
+--- a/migration/ram.c
++++ b/migration/ram.c
+@@ -331,7 +331,76 @@
+ 
+     QSIMPLEQ_ENTRY(RAMSrcPageRequest) next_req;
+ };
++
++#ifdef CONFIG_DARWIN
++/*
++ * tctiSH: which host pages of guest RAM the kernel has no copy of.
++ *
++ * On Darwin, reading anonymous memory that was never written charges a
++ * zero-filled page to phys_footprint, where Linux would map the shared zero
++ * page for nothing. Saving a snapshot reads every page to find the zero ones,
++ * and loading one reads every zero page before deciding whether to clear it,
++ * so either takes the footprint to the whole of guest RAM. A page that is
++ * neither resident nor compressed has never been written since it was
++ * mapped, so it is zero, and both can skip it without reading it. That
++ * includes pages handed back by free page reporting, because
++ * ram_block_discard_range maps fresh memory over them.
++ *
++ * Asked a window at a time, just before the pages are needed, so that the
++ * answer is never older than the few pages it describes.
++ */
++#define UNTOUCHED_WINDOW_PAGES 256
++
++typedef struct {
++    RAMBlock *block;
++    ram_addr_t start;   /* offset in the block of the first host page */
++    size_t pages;       /* host pages described by vec */
++    char vec[UNTOUCHED_WINDOW_PAGES];
++} UntouchedWindow;
++
++static bool ram_page_untouched(UntouchedWindow *w, RAMBlock *rb,
++                               ram_addr_t offset)
++{
++    size_t page = qemu_real_host_page_size();
++    ram_addr_t first = QEMU_ALIGN_DOWN(offset, page);
++
++    /* Only private anonymous memory reads as zero when it has no pages. */
++    if (rb->fd >= 0 || qemu_ram_is_shared(rb) || rb->page_size != page) {
++        return false;
++    }
++
++    if (w->block != rb || first < w->start ||
++        first >= w->start + w->pages * page) {
++        size_t len = MIN((ram_addr_t)UNTOUCHED_WINDOW_PAGES * page,
++                         rb->used_length - first);
++
++        if (mincore(rb->host + first, len, w->vec)) {
++            w->block = NULL;
++            return false;
++        }
++        w->block = rb;
++        w->start = first;
++        w->pages = DIV_ROUND_UP(len, page);
++    }
++
++    return !(w->vec[(first - w->start) / page] &
++             (MINCORE_INCORE | MINCORE_PAGED_OUT));
++}
++
++/* Records a write the window cannot have seen, made after it was taken. */
++static void ram_page_written(UntouchedWindow *w, RAMBlock *rb,
++                             ram_addr_t offset)
++{
++    size_t page = qemu_real_host_page_size();
++    ram_addr_t first = QEMU_ALIGN_DOWN(offset, page);
+ 
++    if (w->block == rb && first >= w->start &&
++        first < w->start + w->pages * page) {
++        w->vec[(first - w->start) / page] |= MINCORE_INCORE;
++    }
++}
++#endif
++
+ /* State of RAM for migration */
+ struct RAMState {
+     /*
+@@ -395,6 +464,10 @@
+      * RAM migration.
+      */
+     unsigned int postcopy_bmap_sync_requested;
++#ifdef CONFIG_DARWIN
++    /* tctiSH: see ram_page_untouched */
++    UntouchedWindow untouched;
++#endif
+ };
+ typedef struct RAMState RAMState;
+ 
+@@ -1112,7 +1185,19 @@
+         return 0;
+     }
+ 
+-    if (!buffer_is_zero(p, TARGET_PAGE_SIZE)) {
++#ifdef CONFIG_DARWIN
++    /*
++     * tctiSH: see ram_page_untouched. Only while the guest is stopped, as it
++     * is for savevm, since a running guest could write the page after the
++     * kernel was asked about it.
++     */
++    bool untouched = !runstate_is_running() &&
++                     ram_page_untouched(&rs->untouched, pss->block, offset);
++#else
++    bool untouched = false;
++#endif
++
++    if (!untouched && !buffer_is_zero(p, TARGET_PAGE_SIZE)) {
+         return 0;
+     }
+ 
+@@ -4079,6 +4164,10 @@
+ {
+     MigrationIncomingState *mis = migration_incoming_get_current();
+     int flags = 0, ret = 0, invalid_flags = 0, i = 0;
++#ifdef CONFIG_DARWIN
++    /* tctiSH: see ram_page_untouched */
++    UntouchedWindow untouched = { 0 };
++#endif
+ 
+     if (migrate_mapped_ram()) {
+         invalid_flags |= (RAM_SAVE_FLAG_HOOK | RAM_SAVE_FLAG_MULTIFD_FLUSH |
+@@ -4089,6 +4178,7 @@
+     while (!ret && !(flags & RAM_SAVE_FLAG_EOS)) {
+         ram_addr_t addr;
+         void *host = NULL, *host_bak = NULL;
++        RAMBlock *block = NULL;
+         uint8_t ch;
+ 
+         /*
+@@ -4121,8 +4211,7 @@
+ 
+         if (flags & (RAM_SAVE_FLAG_ZERO | RAM_SAVE_FLAG_PAGE |
+                      RAM_SAVE_FLAG_XBZRLE)) {
+-            RAMBlock *block = ram_block_from_stream(mis, f, flags,
+-                                                    RAM_CHANNEL_PRECOPY);
++            block = ram_block_from_stream(mis, f, flags, RAM_CHANNEL_PRECOPY);
+ 
+             host = host_from_ram_block_offset(block, addr);
+             /*
+@@ -4155,7 +4244,12 @@
+             }
+             if (!migration_incoming_in_colo_state()) {
+                 ramblock_recv_bitmap_set(block, host);
++            }
++#ifdef CONFIG_DARWIN
++            if (flags & (RAM_SAVE_FLAG_PAGE | RAM_SAVE_FLAG_XBZRLE)) {
++                ram_page_written(&untouched, block, addr);
+             }
++#endif
+ 
+             trace_ram_load_loop(block->idstr, (uint64_t)addr, flags, host);
+         }
+@@ -4180,8 +4274,18 @@
+             if (ch != 0) {
+                 error_report("Found a zero page with value %d", ch);
+                 ret = -EINVAL;
++                break;
++            }
++#ifdef CONFIG_DARWIN
++            /*
++             * tctiSH: see ram_page_untouched. Under COLO the page may be going
++             * to a cache rather than to guest RAM, so leave that alone.
++             */
++            if (!migration_incoming_colo_enabled() &&
++                ram_page_untouched(&untouched, block, addr)) {
+                 break;
+             }
++#endif
+             ram_handle_zero(host, TARGET_PAGE_SIZE);
+             break;
+ 
 diff --git a/subprojects/slirp.wrap b/subprojects/slirp.wrap
 --- a/subprojects/slirp.wrap
 +++ b/subprojects/slirp.wrap
@@ -419,6 +599,44 @@ diff --git a/subprojects/slirp.wrap b/subprojects/slirp.wrap
  [provide]
 -slirp = libslirp_dep
 +slirp = libslirp_libdep
+diff --git a/system/physmem.c b/system/physmem.c
+--- a/system/physmem.c
++++ b/system/physmem.c
+@@ -3857,6 +3857,34 @@
+ #if defined(CONFIG_MADVISE)
+             if (qemu_ram_is_shared(rb) && rb->fd < 0) {
+                 ret = madvise(host_startaddr, length, QEMU_MADV_REMOVE);
++#if defined(CONFIG_DARWIN)
++            } else if (rb->fd < 0) {
++                /*
++                 * tctiSH: Darwin's MADV_DONTNEED succeeds and frees nothing.
++                 * The pages stay in phys_footprint, which is the figure jetsam
++                 * kills by, so free page reporting would look healthy from
++                 * both sides while returning no memory at all.
++                 *
++                 * Mapping fresh anonymous memory over the range is the Darwin
++                 * equivalent of Linux's MADV_DONTNEED: the pages are freed
++                 * there and then, and read back as zero, as promised above.
++                 * They are also indistinguishable from pages never touched,
++                 * which is what lets a snapshot skip them (ram_page_untouched
++                 * in migration/ram.c).
++                 *
++                 * Not MADV_FREE_REUSABLE, which frees them from the footprint
++                 * but leaves them mapped with their old contents: a snapshot
++                 * then saves and restores them as data, and pages reused
++                 * afterwards are not counted again.
++                 */
++                if (mmap(host_startaddr, length, PROT_READ | PROT_WRITE,
++                         MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0) ==
++                    MAP_FAILED) {
++                    ret = -1;
++                } else {
++                    ret = 0;
++                }
++#endif
+             } else {
+                 ret = madvise(host_startaddr, length, QEMU_MADV_DONTNEED);
+             }
 diff --git a/system/qemu.symbols b/system/qemu.symbols
 --- a/system/qemu.symbols
 +++ b/system/qemu.symbols
