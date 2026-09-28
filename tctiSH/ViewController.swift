@@ -1014,50 +1014,57 @@ class ViewController: UIViewController {
     }
 
     func makeFrame(keyboardDelta: CGFloat, _ fn: String = #function, _ ln: Int = #line) -> CGRect {
+        // Whichever reaches higher: the keyboard, or the home indicator's strip when there is no
+        // keyboard over it. A keyboard that is up already covers that strip, so the two don't add.
+        let bottom = max(keyboardDelta, view.safeAreaInsets.bottom)
+
         return CGRect(
             x: view.safeAreaInsets.left + padding,
             y: view.safeAreaInsets.top + padding,
             width: view.frame.width - view.safeAreaInsets.left - view.safeAreaInsets.right
                 - (padding * 2),
-            height: view.frame.height - view.safeAreaInsets.top - keyboardDelta - (padding * 2))
+            height: view.frame.height - view.safeAreaInsets.top - bottom - (padding * 2))
     }
 
+    /// Watches the keyboard, and the accessory bar that stands in for it when a
+    /// hardware keyboard is attached.
+    ///
+    /// Every notification that carries the keyboard's frame, not just show and
+    /// hide, because the bar can change size while it stays up. With a hardware
+    /// keyboard on iPad, the bar's frame is first reported at zero height and
+    /// only then at its real size, and both are only ever announced as
+    /// `keyboardDidChangeFrame`: no will-show, and no will-change before them.
+    /// A terminal sized at show time is left with its last rows behind it.
     func setupKeyboardMonitor() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(keyboardWillShow),
-            name: UIWindow.keyboardWillShowNotification,
-            object: nil)
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(keyboardWillHide),
-            name: UIWindow.keyboardWillHideNotification,
-            object: nil)
+        for name in [
+            UIResponder.keyboardWillShowNotification,
+            UIResponder.keyboardWillHideNotification,
+            UIResponder.keyboardWillChangeFrameNotification,
+            UIResponder.keyboardDidChangeFrameNotification,
+        ] {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(keyboardFrameChanged), name: name, object: nil)
+        }
     }
 
-    @objc private func keyboardWillShow(_ notification: NSNotification) {
+    @objc private func keyboardFrameChanged(_ notification: NSNotification) {
         guard
             let keyboardValue = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey]
-                as? NSValue
+                as? NSValue,
+            let screen = view.window?.screen
         else { return }
 
-        let keyboardScreenEndFrame = keyboardValue.cgRectValue
-        let keyboardViewEndFrame = view.convert(keyboardScreenEndFrame, from: view.window)
-        keyboardDelta = keyboardViewEndFrame.height
-        tv.frame = makeFrame(keyboardDelta: keyboardViewEndFrame.height)
+        // How much of the view the keyboard covers, measured from its top edge down, rather than
+        // its height: a bar that floats clear of the bottom of the screen covers the gap beneath it
+        // too. A keyboard that is going away, or is undocked somewhere off the view, covers none.
+        let keyboardFrame = view.convert(keyboardValue.cgRectValue, from: screen.coordinateSpace)
+        let covered = view.bounds.intersection(keyboardFrame)
+        keyboardDelta = covered.isEmpty ? 0 : view.bounds.maxY - covered.minY
+        tv.frame = makeFrame(keyboardDelta: keyboardDelta)
     }
 
-    override func viewWillTransition(
-        to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator
-    ) {
-        tv.frame = CGRect(origin: tv.frame.origin, size: size)
-    }
-
-    @objc private func keyboardWillHide(_ notification: NSNotification) {
-        keyboardDelta = 0
-        tv.frame = makeFrame(keyboardDelta: 0)
-    }
-
+    /// Sizes the terminal on every layout pass, which rotation and every other
+    /// change of size go through, so nothing else needs to.
     override func viewWillLayoutSubviews() {
         tv.frame = makeFrame(keyboardDelta: keyboardDelta)
     }

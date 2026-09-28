@@ -36,6 +36,15 @@ final class FreezeBanner: UIView {
     /// A raise that hasn't appeared yet, so `lower()` can call it off.
     private static var pendingRaise: DispatchWorkItem?
 
+    /// The banner's counterpart over the keyboard's accessory bar, if there is
+    /// one. Main thread only.
+    ///
+    /// The bar lives in the keyboard's window rather than the app's, so the
+    /// banner can't cover it however it is placed. Without this, the bar's keys
+    /// and settings button stay bright and tappable under a banner saying the
+    /// app can't respond, and whatever they do happens once it can.
+    private static var accessoryShade: UIView?
+
     private let label = UILabel()
     private let spinner = UIActivityIndicatorView(style: .large)
 
@@ -98,10 +107,20 @@ final class FreezeBanner: UIView {
             guard let banner = current else { return }
             current = nil
 
+            let shade = accessoryShade
+            accessoryShade = nil
+            shade?.superview?.accessibilityElementsHidden = false
+
             UIView.animate(
                 withDuration: 0.2,
-                animations: { banner.alpha = 0 },
-                completion: { _ in banner.removeFromSuperview() })
+                animations: {
+                    banner.alpha = 0
+                    shade?.alpha = 0
+                },
+                completion: { _ in
+                    banner.removeFromSuperview()
+                    shade?.removeFromSuperview()
+                })
         }
     }
 
@@ -135,9 +154,34 @@ final class FreezeBanner: UIView {
         host.addSubview(banner)
         current = banner
 
+        let shade = shadeAccessory(like: banner)
+
         guard fading else { return }
 
-        UIView.animate(withDuration: 0.15) { banner.alpha = 1 }
+        UIView.animate(withDuration: 0.15) {
+            banner.alpha = 1
+            shade?.alpha = 1
+        }
+    }
+
+    /// Dims the keyboard's accessory bar to match the banner, and stops it
+    /// taking touches, returning the shade so it can fade in alongside.
+    private static func shadeAccessory(like banner: FreezeBanner) -> UIView? {
+        guard let bar = ViewController.getCurrentTerminal()?.inputAccessoryView else {
+            return nil
+        }
+
+        let shade = UIView(frame: bar.bounds)
+        shade.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        shade.backgroundColor = banner.backgroundColor
+        shade.alpha = banner.alpha
+        shade.isUserInteractionEnabled = true
+
+        bar.addSubview(shade)
+        bar.accessibilityElementsHidden = true
+        accessoryShade = shade
+
+        return shade
     }
 
     // MARK: - The view

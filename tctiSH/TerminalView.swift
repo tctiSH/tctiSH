@@ -168,8 +168,19 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     }
 
     /// Callback notified each time a setting is changed.
+    ///
+    /// Arrives on whichever thread changed the setting, often not the main one:
+    /// the guest's font size comes in on the configuration server's queue, and
+    /// the save bookkeeping writes from the monitor's. A font change resizes
+    /// the terminal, which is UIKit's to do, so it is done on the main thread
+    /// whatever thread this was called on.
     @objc
     func applySettings() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.applySettings() }
+            return
+        }
+
         let std = UserDefaults.standard
 
         // Font size.
@@ -180,9 +191,6 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         if new_size != self.font.pointSize {
             self.font = UIFont(name: self.font.fontName, size: new_size) ?? self.font
         }
-
-        // TODO: apply themes, here
-
     }
 
     func clear() {
