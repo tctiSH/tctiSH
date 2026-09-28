@@ -180,21 +180,177 @@ public class QEMUInterface {
         set { UserDefaults.standard.set(newValue, forKey: "last_save_failed_at") }
     }
 
+    /// How a background save ended.
+    enum BackgroundSave {
+        case failed
+
+        /// Saved, and the machine carried on running.
+        case saved
+
+        /// Saved as `tag`, and the machine left stopped at exactly the state
+        /// the snapshot holds, ready to `park`. The caller must either park it
+        /// or `continueStopped()` it.
+        case savedAndStopped(tag: String)
+    }
+
     /// Snapshots the session, and points the next launch at it if it worked.
     ///
-    /// Returns whether the session was saved.
+    /// With `leavingStopped`, stops the machine first and leaves it stopped
+    /// after a successful save, so that the snapshot and the machine agree and
+    /// the machine can be parked. A save that fails, or a machine that won't
+    /// stop, goes on as an ordinary save: the machine is left running.
     ///
     /// Call off the main thread, and only once the shell has connected: a
     /// snapshot of a machine that has not finished booting is not worth
     /// resuming, and the check is a view's, so the caller makes it.
     @discardableResult
-    func performBackgroundSave() -> Bool {
+    func performBackgroundSave(leavingStopped: Bool = false) -> BackgroundSave {
         // See snapshotWorkLock: this whole sequence has to be atomic against a stale-snapshot
         // discard, which deletes the very tags this rotates between.
         Self.snapshotWorkLock.lock()
         defer { Self.snapshotWorkLock.unlock() }
 
+        // `savevm` stops the machine for its own duration and starts it again, so a machine that is
+        // to stay stopped has to be stopped beforehand.
+        let stopped = leavingStopped && runMonitorCommandCleanly("stop", purpose: "park: stop")
+
+        // A `stop` that answered late still stopped the machine, and the save that follows would
+        // leave it that way. Harmless on a machine that is running.
+        if leavingStopped && !stopped {
+            continueStopped()
+        }
+
         let tag = getNextInstantResumeTag()
+
+        guard saveSession(as: tag) else {
+            if stopped {
+                continueStopped()
+            }
+            return .failed
+        }
+
+        return stopped ? .savedAndStopped(tag: tag) : .saved
+    }
+
+    /// Gives a stopped, saved machine's RAM back to the host.
+    ///
+    /// Returns whether it is parked. If it isn't, it has been started again.
+    /// See background-footprint.md, Lever C.
+    func park() -> Bool {
+        Self.snapshotWorkLock.lock()
+        defer { Self.snapshotWorkLock.unlock() }
+
+        if runMonitorCommandCleanly("park", purpose: "park", timeout: Self.unparkDeadline) {
+            return true
+        }
+
+        // Not parked as far as we know, so it has to run again. Unless it was all the same: a
+        // `park` that answered too late still did its work, and then QEMU refuses the `cont`.
+        guard let reply = runMonitorCommand("cont", timeout: Self.monitorReplyDeadline) else {
+            Log.qemu.warn("park: 'cont' got no answer")
+            return false
+        }
+
+        if let failure = Self.monitorError(in: reply) {
+            if failure.contains("parked") {
+                Log.qemu.note("park: 'park' finished after all")
+                return true
+            }
+            Log.qemu.warn("park: 'cont' refused: \(failure)")
+        }
+
+        return false
+    }
+
+    /// Brings a parked machine back from `tag`, the snapshot it was parked on,
+    /// and starts it with its clock caught up.
+    ///
+    /// Returns whether it is running. If it isn't, it is still parked: QEMU
+    /// refuses to `cont` a machine whose RAM hasn't been loaded back, and the
+    /// only ways on are another `unpark` or a hard reset.
+    func unpark(tag: String) -> Bool {
+        Self.snapshotWorkLock.lock()
+        defer { Self.snapshotWorkLock.unlock() }
+
+        let started = Date()
+        let failure: String?
+        if let reply = runMonitorCommand("unpark \(tag)", timeout: Self.unparkDeadline) {
+            failure = Self.monitorError(in: reply)
+        } else {
+            failure = "no answer within \(Int(Self.unparkDeadline))s"
+        }
+
+        guard let failure else {
+            // Logged every time. How long a return takes is what the setting's description quotes.
+            Log.qemu.note(
+                String(format: "park: unparked '%@' in %.2fs", tag, -started.timeIntervalSinceNow))
+            return true
+        }
+
+        // An `unpark` that answered too late still loaded and started the machine, and trying again
+        // is then refused as not parked. Running is what was asked for, however it got there.
+        if machineIsRunning() {
+            Log.qemu.note("park: 'unpark \(tag)' said '\(failure)', but the machine is running")
+            return true
+        }
+
+        Log.qemu.warn("park: 'unpark \(tag)' failed: \(failure)")
+        return false
+    }
+
+    /// Whether QEMU says the machine is running, asked a few times over.
+    ///
+    /// More than once because it follows a command that may have answered too
+    /// late, and whose reply can still be in the way of this one's.
+    private func machineIsRunning() -> Bool {
+        for _ in 0..<3 {
+            guard let reply = runMonitorCommand("info status", timeout: Self.monitorReplyDeadline)
+            else { continue }
+
+            if let status = Self.lines(of: reply).first(where: { $0.contains("VM status:") }) {
+                return status.contains("VM status: running")
+            }
+        }
+
+        return false
+    }
+
+    /// Starts a machine that a save left stopped and that isn't going to be
+    /// parked after all.
+    func continueStopped() {
+        runMonitorCommandCleanly("cont", purpose: "park: cont")
+    }
+
+    /// Runs a monitor command, and says whether it came back without an error.
+    ///
+    /// The refusal goes to the log verbatim, under `purpose`.
+    @discardableResult
+    private func runMonitorCommandCleanly(
+        _ command: String, purpose: String,
+        timeout: TimeInterval = QEMUInterface.monitorReplyDeadline
+    ) -> Bool {
+        guard let reply = runMonitorCommand(command, timeout: timeout) else {
+            Log.qemu.warn("\(purpose): '\(command)' got no answer")
+            return false
+        }
+
+        if let failure = Self.monitorError(in: reply) {
+            Log.qemu.warn("\(purpose): '\(command)' refused: \(failure)")
+            return false
+        }
+
+        return true
+    }
+
+    /// How long a return from parking may take before we stop waiting.
+    ///
+    /// Longer than a save's, because it runs in the foreground with nothing
+    /// else to hurry it along, and cut short it leaves the machine parked.
+    private static let unparkDeadline: TimeInterval = 60
+
+    /// Writes the snapshot, checks it, and points the next launch at it. Call
+    /// with `snapshotWorkLock` held.
+    private func saveSession(as tag: String) -> Bool {
         let started = Date()
 
         guard let reply = runMonitorCommand("savevm \(tag)", timeout: Self.saveDeadline) else {

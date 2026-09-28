@@ -190,6 +190,32 @@ size_t qemu_code_cache_shrink(size_t target) {
     return fn ? fn(target) : 0;
 }
 
+bool qemu_code_cache_release_all(void) {
+    static bool (*fn)(void);
+    if (!fn) {
+        fn = qemu_symbol("tctish_code_cache_release_all");
+    }
+    return fn ? fn() : false;
+}
+
+bool qemu_code_cache_release_all_outstanding(void) {
+    static bool (*fn)(void);
+    if (!fn) {
+        fn = qemu_symbol("tctish_code_cache_release_all_outstanding");
+    }
+    return fn ? fn() : false;
+}
+
+bool qemu_code_cache_needs_preparing(void) {
+    static bool (*fn)(void);
+    if (!fn) {
+        fn = qemu_symbol("tctish_code_cache_needs_preparing");
+    }
+    // Unanswered, assume it does: preparing a cache that needed nothing costs a grow that is
+    // declined, where running one that needed it crashes.
+    return fn ? fn() : true;
+}
+
 bool qemu_code_cache_needs_debugger(void) {
     static bool (*fn)(void);
     if (!fn) {
@@ -238,16 +264,25 @@ size_t qemu_code_cache_grow(size_t target) {
        footprint follows what it is using rather than its high-water mark. Not a balloon -- there  \
        is no target size and nothing on the host decides anything. Page cache is in use as far     \
        as the guest is concerned, so it is never reported. The discard this ends in only frees     \
-       memory on Darwin because of the MADV_FREE_REUSABLE arm our QEMU patch adds to               \
+       memory on Darwin because our QEMU patch maps fresh memory over the range in                 \
        ram_block_discard_range(). */                                                               \
     "-device", "virtio-balloon-pci,free-page-reporting=on",                                        \
                                                                                                    \
     /* The controller for the disk; the -drive that backs it carries a path and is separate. */    \
     "-device", "virtio-blk-pci,id=disk1,drive=drive1",                                             \
                                                                                                    \
-    /* Kernel command line; tells our image how to handle disk images. This variant selects        \
-       the provided qcow disk file. */                                                             \
-    "-append", "tcti_disk=file",                                                                   \
+    /* Kernel command line. `tcti_disk=file` tells our image to use the provided qcow disk file.   \
+                                                                                                   \
+       `page_reporting_order=2` reports free blocks from 16 KiB, one host page, up. The default    \
+       is 2 MiB, and memory a workload leaves fragmented stays resident on the host even though    \
+       the guest counts it free: after a build, about 220 MiB of it.                               \
+                                                                                                   \
+       `rcu_cpu_stall_suppress=1` because the guest's clock jumps, by design. Our QEMU catches     \
+       the clock up after every stop and every snapshot load, so a guest that was away for an      \
+       hour comes back an hour later, and RCU reads the jump as a CPU that stalled for an hour.    \
+       KVM guests are told when they were paused; under TCG there is no way to tell them. */       \
+    "-append", "tcti_disk=file page_reporting.page_reporting_order=2 "                             \
+               "rcupdate.rcu_cpu_stall_suppress=1",                                                \
                                                                                                    \
     /* Provide a few cores.                                                                        \
                                                                                                    \

@@ -5,6 +5,7 @@
 //  Copyright © 2026 Ara Adkins.
 //
 
+import Atomics
 import Foundation
 import os
 
@@ -304,6 +305,39 @@ enum CodeCacheMonitor {
         apply(shrinkTo: target)
     }
 
+    /// Debug Tools: shrinks a Dynamic cache to the first rung now, as memory
+    /// pressure would. Returns why it didn't, or nil if it did. Should be run
+    /// on the main thread.
+    static func debugShrink() -> String? {
+        guard CodeCache.mode == .dynamic else { return "Only a Dynamic cache shrinks." }
+        guard !isGrowing else { return "An expansion is under way." }
+
+        let target = CodeCache.growthLadder.first ?? 128
+        guard qemu_code_cache_usable() > target * bytesPerMib else {
+            return "It's already at \(target) MiB."
+        }
+
+        abandonCountdown()
+        Log.jit.note("code cache: debug: shrinking to \(target)MiB")
+        apply(shrinkTo: target)
+        return nil
+    }
+
+    /// Debug Tools: grows a Dynamic cache to the next rung now, without the
+    /// countdown. Returns why it didn't, or nil if it started. Should be run on
+    /// the main thread.
+    static func debugGrow() -> String? {
+        guard !isGrowing else { return "An expansion is already under way." }
+        guard canGrow, let next = nextTargetMib else {
+            return "There's no room to grow, or it isn't allowed to."
+        }
+
+        abandonCountdown()
+        Log.jit.note("code cache: debug: growing to \(next)MiB")
+        beginGrowth(to: next * bytesPerMib)
+        return nil
+    }
+
     /// Does the shrinking, once something has decided how far.
     private static func apply(shrinkTo target: Int) {
         let remaining = qemu_code_cache_shrink(target * bytesPerMib)
@@ -365,6 +399,145 @@ enum CodeCacheMonitor {
     /// How long to give the VM to reach a flush before asking what it released.
     private static let releaseCheckDelay: TimeInterval = 3
 
+    // MARK: - While parked
+
+    /// Hands the whole cache back while the machine is parked. Returns whether
+    /// it did, in which case the machine must not run until `prepareAfterPark`
+    /// has succeeded; QEMU refuses to start it meanwhile.
+    ///
+    /// Waits for the flush that pays it out, so call it off the main thread.
+    /// Only reads and asks QEMU; nothing here touches the monitor's own state.
+    static func releaseWhileParked() -> Bool {
+        // Before the release, so that the poll never sees it unannounced, and so that it can't
+        // start a countdown from here on.
+        isParked.store(true, ordering: .relaxed)
+
+        // One already running would expand a cache that is about to go. Harmless if it fires first,
+        // since QEMU then asks for the cache to be prepared again anyway, but pointless.
+        DispatchQueue.main.async { abandonCountdown() }
+
+        guard qemu_code_cache_release_all() else {
+            isParked.store(false, ordering: .relaxed)
+            Log.jit.note(
+                "code cache: kept while parked; under JIT, what's released here can't be "
+                    + "prepared again")
+            return false
+        }
+
+        if waitForReleaseAll() {
+            Log.jit.note(
+                "code cache: handed \(mib(qemu_code_cache_released())) back while parked")
+        } else {
+            // Arranged all the same, and paid out at the next flush, which `prepareAfterPark` waits
+            // for.
+            Log.jit.warn("code cache: no flush yet; released at the next one")
+        }
+        return true
+    }
+
+    /// Whether the cache has been released while parked and not yet prepared
+    /// again. Quietens the poll, which would otherwise report the release a
+    /// second time, and as a flush that nothing is re-translating after.
+    /// Written off the main thread, read on it.
+    private static let isParked = ManagedAtomic<Bool>(false)
+
+    /// Waits for QEMU to have paid out a release of everything. Blocks; off the
+    /// main thread.
+    ///
+    /// Asks QEMU about that release in particular. The attempt count would also
+    /// move for an ordinary shrink's flush that happened to land first.
+    private static func waitForReleaseAll() -> Bool {
+        let deadline = Date().addingTimeInterval(parkedReleaseDeadline)
+
+        while qemu_code_cache_release_all_outstanding() {
+            guard Date() < deadline else { return false }
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        return true
+    }
+
+    /// How long to wait for the flush before carrying on.
+    private static let parkedReleaseDeadline: TimeInterval = 5
+
+    /// Calls off an expansion that is counting down. Main thread.
+    private static func abandonCountdown() {
+        guard case .countingDown = state else { return }
+
+        countdownWork?.cancel()
+        countdownWork = nil
+        countdownEndsAt = nil
+        publish(.quiet)
+    }
+
+    /// Prepares the cache again after `releaseWhileParked`, as at launch. Under
+    /// TXM that's a blessing with its freeze: of the whole of a fixed cache, or
+    /// the first rung of a dynamic one. Everywhere else it's the whole buffer,
+    /// and only a raised limit.
+    ///
+    /// Calls `completion` on the main queue with whether it worked. Until it
+    /// has, the machine must stay parked. Main thread.
+    static func prepareAfterPark(completion: @escaping (Bool) -> Void) {
+        // An expansion counting down from before the app went away would race this one.
+        abandonCountdown()
+
+        // As at launch, which only chunks a cache it has to bless. Everywhere else, TCTI included,
+        // the whole buffer is usable from the start, and a cache that costs only what is translated
+        // into it gains nothing from a limit.
+        let blessing = qemu_code_cache_needs_debugger()
+        let size =
+            blessing
+            ? (CodeCache.launchedInitialSize ?? CodeCache.initialSize) * bytesPerMib
+            : qemu_code_cache_total()
+
+        // The release has to have happened first. Still pending, the grow would be refused as
+        // pointless, and the flush that finally paid it out would do so under a running machine,
+        // taking pages under TXM that it was about to execute.
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard waitForReleaseAll() else {
+                Log.jit.fail("code cache: the release while parked never happened")
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+
+            DispatchQueue.main.async {
+                prepareOnceIdle(size: size, blessing: blessing, completion: completion)
+            }
+        }
+    }
+
+    /// The rest of `prepareAfterPark`, once no expansion is running. Main
+    /// thread.
+    private static func prepareOnceIdle(
+        size: Int, blessing: Bool, completion: @escaping (Bool) -> Void
+    ) {
+        // An expansion that began before the park finishes first, or `beginGrowth` would turn this
+        // one away. Whatever it prepared, QEMU says below whether it was enough.
+        guard !isGrowing else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                prepareOnceIdle(size: size, blessing: blessing, completion: completion)
+            }
+            return
+        }
+
+        isParked.store(false, ordering: .relaxed)
+        lastLoggedUsed = 0
+        lastReleased = qemu_code_cache_released()
+
+        // Nothing to do if the release came to nothing, or something has prepared the cache since.
+        // Asking to grow regardless would be declined as pointless, and read as a failure.
+        guard qemu_code_cache_needs_preparing() else {
+            Log.jit.note("code cache: nothing to prepare before the session comes back")
+            completion(true)
+            return
+        }
+
+        Log.jit.note(
+            blessing
+                ? "code cache: preparing \(mib(size)) before the session comes back"
+                : "code cache: making all \(mib(size)) usable again, as at launch")
+        beginGrowth(to: size, completion: completion)
+    }
+
     static func stop() {
         timer?.invalidate()
         timer = nil
@@ -392,9 +565,9 @@ enum CodeCacheMonitor {
     /// The most this session may ever use, in bytes.
     ///
     /// The chosen ceiling, not the mapped size. The buffer is mapped at the
-    /// largest size we offer whatever was picked, because its size is the one
-    /// thing that cannot change without a restart. The ceiling is enforced here
-    /// instead, where changing it costs nothing.
+    /// largest size we offer whatever was picked, because its size cannot
+    /// change without a restart. The ceiling is enforced here instead, where
+    /// changing it costs nothing.
     private static var limit: Int {
         min(CodeCache.ceiling * bytesPerMib, qemu_code_cache_total())
     }
@@ -473,6 +646,9 @@ enum CodeCacheMonitor {
         // Zero until the VM thread has opened the QEMU image and got as far as allocating. Not a
         // failure, just early.
         guard total > 0 else { return }
+
+        // `releaseWhileParked` has said what happened, and nothing runs to say more about.
+        guard !isParked.load(ordering: .relaxed) else { return }
 
         let usable = qemu_code_cache_usable()
         let used = qemu_code_cache_used()
@@ -573,38 +749,49 @@ enum CodeCacheMonitor {
     /// Returns immediately; the expansion runs off the main thread because the
     /// banner it puts up has to be committed to a frame from somewhere that can
     /// block waiting for one.
-    private static func beginGrowth(to next: Int) {
-        guard !isGrowing else { return }
+    ///
+    /// `completion`, if given, is called on the main queue with whether the
+    /// cache grew.
+    private static func beginGrowth(to next: Int, completion: ((Bool) -> Void)? = nil) {
+        guard !isGrowing else {
+            completion?(false)
+            return
+        }
 
         isGrowing = true
         publish(.growing(to: next))
 
         DispatchQueue.global(qos: .userInitiated).async {
-            grow(to: next)
+            let grew = grow(to: next)
 
             // Ahead of the state, and on the main queue with it. `poll` reads both and both have to
             // have moved before it can act again. `shrinkIfNeeded` reads this one on its own, which
             // is what keeps a pressure event from shrinking out from under an expansion that is
             // still running.
-            DispatchQueue.main.async { isGrowing = false }
+            DispatchQueue.main.async {
+                isGrowing = false
+                completion?(grew)
+            }
             publish(.quiet)
         }
     }
 
-    private static func grow(to next: Int) {
+    /// Returns whether the cache grew.
+    @discardableResult
+    private static func grow(to next: Int) -> Bool {
         // Under TCTI there is nothing to prepare, so there is no debugger to find and no freeze to
         // announce. The pages are already ordinary memory and growing is raising a limit.
         guard qemu_code_cache_needs_debugger() else {
             let usable = qemu_code_cache_grow(next)
             guard usable > 0 else {
                 failGrowth(.declined)
-                return
+                return false
             }
 
             setReached(next / bytesPerMib)
             Log.jit.note("code cache: now \(mib(usable)) usable, without preparing anything")
             report(.grew(to: next))
-            return
+            return true
         }
 
         let started = Date()
@@ -616,13 +803,12 @@ enum CodeCacheMonitor {
         // that has been there since launch is long since armed.
         if jit_debugger_tracing() {
             Log.jit.note("code cache: a debugger is already attached; trapping into it")
-            finishGrowth(to: next, started: started)
-            return
+            return finishGrowth(to: next, started: started)
         }
 
         guard let pairingData = JitPairingFile.read() else {
             failGrowth(.noPairingFile)
-            return
+            return false
         }
 
         // From here until the trap, the app keeps running and there is a visible wait to explain.
@@ -637,7 +823,7 @@ enum CodeCacheMonitor {
 
         guard waitForDebugger() else {
             failGrowth(.attachTimedOut)
-            return
+            return false
         }
 
         Log.jit.note(
@@ -646,11 +832,12 @@ enum CodeCacheMonitor {
                 -started.timeIntervalSinceNow))
 
         Thread.sleep(forTimeInterval: settleBeforeTrap)
-        finishGrowth(to: next, started: started)
+        return finishGrowth(to: next, started: started)
     }
 
     /// Traps into whatever debugger is attached, and records what came of it.
-    private static func finishGrowth(to next: Int, started: Date) {
+    /// Returns whether the cache grew.
+    private static func finishGrowth(to next: Int, started: Date) -> Bool {
         // The waiting is over; what follows is the freeze, which the banner covers instead.
         setPreparing(false)
 
@@ -664,7 +851,7 @@ enum CodeCacheMonitor {
 
         guard usable > 0 else {
             failGrowth(.declined)
-            return
+            return false
         }
 
         // What was asked for, not what came back: see `reachedMib`.
@@ -675,6 +862,7 @@ enum CodeCacheMonitor {
             String(
                 format: "code cache: now %@ usable, after %.2fs",
                 mib(usable), -started.timeIntervalSinceNow))
+        return true
     }
 
     /// Blocks until a debugger attaches, or time runs out.

@@ -93,6 +93,22 @@ size_t qemu_code_cache_grow(size_t target);
 /// code, which this asks for; the cap comes down at once.
 size_t qemu_code_cache_shrink(size_t target);
 
+/// Hands the whole cache back at the VM's next flush, all but the prologue,
+/// and returns whether that was arranged.
+///
+/// Only for a parked VM: it can't run until `qemu_code_cache_grow` has
+/// prepared the cache again, and under TXM it would crash if it did, so QEMU
+/// refuses to start it meanwhile. The flush runs even though the VM is stopped;
+/// `qemu_code_cache_release_all_outstanding` goes false once it has.
+bool qemu_code_cache_release_all(void);
+
+/// Whether a `qemu_code_cache_release_all` is still waiting for its flush.
+bool qemu_code_cache_release_all_outstanding(void);
+
+/// Whether a release of everything has left the cache to be prepared again
+/// with `qemu_code_cache_grow` before the VM may run.
+bool qemu_code_cache_needs_preparing(void);
+
 /// Whether the snapshot the VM was told to resume from turned out not to exist.
 ///
 /// False until QEMU has got far enough to look, so a caller watching for it has

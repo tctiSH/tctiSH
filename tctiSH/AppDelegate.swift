@@ -7,12 +7,33 @@
 
 import UIKit
 import AVKit
+import Atomics
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
     var qemu: QEMUInterface?
     var configServer: ConfigServer?
     var saving: Bool = false
+
+    /// The snapshot the machine is parked on, while parked: stopped, saved, and
+    /// its RAM given back to iOS. Main thread only.
+    ///
+    /// See `handleEnteredBackground` and `unpark`.
+    private var parkedTag: String?
+
+    /// Whether an `unpark` is running. Main thread only.
+    private var unparking = false
+
+    /// Whether the code cache was handed back while parked, and has to be
+    /// prepared again before the machine may run. Main thread only.
+    private var codeCacheNeedsPreparing = false
+
+    /// Whether the app is in the background.
+    ///
+    /// Atomic because the save reads it from its own thread at the moment it
+    /// decides whether to park: someone who came back while the snapshot was
+    /// being written doesn't want the machine parked under them.
+    private let away = ManagedAtomic<Bool>(false)
 
     /// Where the slow half of the launch runs.
     ///
@@ -95,6 +116,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             "code_cache_mode": CodeCache.Mode.fixed.rawValue,
             "code_cache_ceiling": CodeCache.autoCeiling,
             "code_cache_notifications": true,
+            "park_in_background": false,
+            "release_code_cache_in_background": false,
         ])
 
         // If we attempted a boot, but did not finish one, something went wrong last time. Force a
@@ -208,9 +231,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Going back to the background cancels a reconnect that was waiting on the save. There is
         // no foreground left to reconnect for, and `handleWillEnterForeground` will ask again.
         reconnectWhenSaved = false
+        away.store(true, ordering: .relaxed)
 
-        if (saving) {
-            return;
+        // An unpark in flight saves again when it finishes, seeing that we are away; a parked
+        // machine is already saved, and there is nothing running to save.
+        if saving || unparking || parkedTag != nil {
+            return
         }
 
         if backgroundToPip() {
@@ -256,16 +282,56 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             releaseAssertion()
         }
 
+        // Read here rather than on the save's thread, so that a change made while a save is running
+        // takes effect at the next one rather than halfway through this one. The code cache only
+        // ever goes with the machine's memory: a machine that isn't parked is still running on it.
+        let parking = AppSetting.parkInBackground.bool
+        let releasingCode = parking && AppSetting.releaseCodeCacheInBackground.bool
+
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            self?.qemu?.performBackgroundSave()
+            let parked = self?.save(thenPark: parking, releasingCode: releasingCode)
 
             DispatchQueue.main.async {
                 releaseAssertion()
-                self?.saveDidFinish()
+                self?.saveDidFinish(
+                    parkedOn: parked?.tag, codeReleased: parked?.codeReleased ?? false)
             }
         }
 
         Log.ui.note("backgrounded")
+    }
+
+    /// Saves the session and, if asked and still away, parks the machine, and
+    /// then hands its code cache back too if asked.
+    ///
+    /// Returns what it is parked on, or nil if it is running. Off the main
+    /// thread.
+    private func save(thenPark parking: Bool, releasingCode: Bool) -> (
+        tag: String, codeReleased: Bool
+    )? {
+        guard let qemu else { return nil }
+
+        guard case .savedAndStopped(let tag) = qemu.performBackgroundSave(leavingStopped: parking)
+        else {
+            return nil
+        }
+
+        // Decided at the last moment. Coming back mid-save means a reconnect is waiting and parking
+        // would only make it wait for a load as well.
+        guard away.load(ordering: .relaxed) else {
+            qemu.continueStopped()
+            return nil
+        }
+
+        // Running again if it didn't park; see `park`.
+        guard qemu.park() else { return nil }
+
+        Log.qemu.note("park: parked on '\(tag)'")
+
+        // Only now, with the machine parked: nothing can run into the cache until it has been
+        // prepared again.
+        let codeReleased = releasingCode && CodeCacheMonitor.releaseWhileParked()
+        return (tag, codeReleased)
     }
 
     /// Rebuilds the shell after a spell in the background.
@@ -275,11 +341,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     /// machine that is not executing: the attempt fails, and the terminal's own
     /// 1.5s poll retries until the VM comes back.
     func handleWillEnterForeground() {
+        away.store(false, ordering: .relaxed)
+
+        // Before looking at the terminal, which may well say it is connected: a parked machine has
+        // to be brought back whatever the view thinks, or it stays parked for good.
+        if let tag = parkedTag {
+            unpark(tag: tag)
+            return
+        }
+
         guard let terminal = ViewController.getCurrentTerminal(), terminal.connected else {
             return
         }
 
-        guard !saving else {
+        guard !saving, !unparking else {
             Log.ui.note("returned to the foreground mid-save; reconnecting once it finishes")
 
             reconnectWhenSaved = true
@@ -301,13 +376,24 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     static let reconnectDeferred = Notification.Name("io.ara.tctish.reconnectDeferred")
 
     /// Marks a save finished, and does whatever was waiting on it.
-    private func saveDidFinish() {
+    private func saveDidFinish(parkedOn tag: String? = nil, codeReleased: Bool = false) {
         saving = false
+        parkedTag = tag
+        codeCacheNeedsPreparing = codeReleased
 
         // Before the reconnect, which there is no point rebuilding a shell for.
         if exitWhenSaved {
             Log.ui.note("the save finished; quitting for a quick action")
             exit(0)
+        }
+
+        // Parked just as someone came back. `handleWillEnterForeground` saw a save running and left
+        // it to us, or saw a dropped shell and left nothing at all; either way a parked machine in
+        // the foreground has to come back.
+        if let tag, !away.load(ordering: .relaxed) {
+            reconnectWhenSaved = false
+            unpark(tag: tag)
+            return
         }
 
         guard reconnectWhenSaved else { return }
@@ -323,6 +409,161 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         terminal.forceReconnect()
     }
 
+    /// Brings a parked machine back, and the shell with it.
+    ///
+    /// Main thread. The load itself runs off it, because it reads the whole
+    /// session back from storage, and the boot pill says what is going on.
+    private func unpark(tag: String) {
+        guard let qemu, !unparking else { return }
+
+        unparking = true
+        NotificationCenter.default.post(name: AppDelegate.unparkStarted, object: nil)
+        Log.ui.note("returned to the foreground parked; unparking '\(tag)'")
+
+        // The code cache first, if it went while parked: the machine must not run a single
+        // instruction before it is prepared, and under TXM this is the freeze.
+        prepareCodeCacheIfNeeded { [weak self] prepared in
+            guard prepared else {
+                self?.unparkDidFinish(unparked: false)
+                return
+            }
+
+            DispatchQueue.global(qos: .userInitiated).async {
+                let unparked = qemu.unpark(tag: tag)
+
+                DispatchQueue.main.async {
+                    self?.unparkDidFinish(unparked: unparked)
+                }
+            }
+        }
+    }
+
+    /// Prepares a code cache that was handed back while parked, as at launch,
+    /// and says whether the machine may now run. Main thread.
+    private func prepareCodeCacheIfNeeded(then proceed: @escaping (Bool) -> Void) {
+        guard codeCacheNeedsPreparing else {
+            proceed(true)
+            return
+        }
+
+        CodeCacheMonitor.prepareAfterPark { [weak self] prepared in
+            if prepared {
+                self?.codeCacheNeedsPreparing = false
+            }
+            proceed(prepared)
+        }
+    }
+
+    /// Posted on the main queue when a parked machine starts coming back.
+    static let unparkStarted = Notification.Name("io.ara.tctish.unparkStarted")
+
+    /// Posted on the main queue when a parked machine couldn't be brought back,
+    /// and is waiting for `recoverFromFailedUnpark`.
+    static let unparkDidFail = Notification.Name("io.ara.tctish.unparkDidFail")
+
+    /// The ways on from a parked machine that wouldn't come back.
+    enum UnparkRecovery {
+        case retry
+
+        /// Quit, so that the next launch resumes from the snapshot on disk.
+        case quit
+
+        /// A cold boot. The session is lost.
+        case startAfresh
+    }
+
+    /// Acts on the answer to `unparkDidFail`, and returns whether it did: not
+    /// if the machine has meanwhile come back, or is on its way. Main thread.
+    @discardableResult
+    func recoverFromFailedUnpark(_ choice: UnparkRecovery) -> Bool {
+        guard let tag = parkedTag, !unparking else { return false }
+
+        switch choice {
+        case .retry:
+            unpark(tag: tag)
+
+        case .quit:
+            Log.ui.note("quitting to resume '\(tag)' from a fresh launch")
+            exit(0)
+
+        case .startAfresh:
+            // Counted as an unpark, which it replaces, so that a return meanwhile doesn't start a
+            // second one over the top of it.
+            unparking = true
+
+            // A reset machine runs on the code cache as much as an unparked one does, and QEMU
+            // won't start it until the cache is prepared.
+            prepareCodeCacheIfNeeded { [weak self] prepared in
+                guard let self else { return }
+                self.unparking = false
+
+                guard prepared else {
+                    Log.qemu.fail("park: can't start afresh without a code cache; asking again")
+                    NotificationCenter.default.post(name: AppDelegate.unparkDidFail, object: nil)
+                    return
+                }
+
+                Log.qemu.note("park: giving up on '\(tag)'; booting Linux afresh")
+
+                // Parked until the reset has actually been asked for. Let go of before then, a
+                // failure would leave a parked machine that nothing ever tries to bring back.
+                guard self.qemu?.requestRecoveryBoot() == true else {
+                    Log.qemu.fail("park: the reset didn't go through; asking again")
+                    NotificationCenter.default.post(name: AppDelegate.unparkDidFail, object: nil)
+                    return
+                }
+                self.parkedTag = nil
+            }
+        }
+
+        return true
+    }
+
+    /// Does whatever was waiting on an unpark.
+    private func unparkDidFinish(unparked: Bool) {
+        unparking = false
+
+        guard unparked else {
+            // Still parked, and QEMU won't run it. What was in memory is in the snapshot on disk,
+            // which the next launch would try again.
+            if exitWhenSaved {
+                Log.ui.note("unpark failed; quitting for a quick action, which retries it")
+                exit(0)
+            }
+
+            // Not decided here: trying again, quitting to try from a fresh launch, and a cold boot
+            // each cost something different, and only one of them loses the session. Left parked
+            // meanwhile, which is safe; a return with the question unanswered simply tries again.
+            Log.qemu.fail("park: could not bring the session back; asking what to do")
+            NotificationCenter.default.post(name: AppDelegate.unparkDidFail, object: nil)
+            return
+        }
+
+        parkedTag = nil
+
+        // The machine is exactly what the snapshot holds, so nothing needs saving first.
+        if exitWhenSaved {
+            Log.ui.note("unparked; quitting for a quick action")
+            exit(0)
+        }
+
+        // Away again before the load finished. It's running now, so it gets saved (and parked)
+        // again, as if it had just been backgrounded.
+        if away.load(ordering: .relaxed) {
+            handleEnteredBackground()
+            return
+        }
+
+        // A dropped session needs no forcing, as elsewhere: the terminal's own poll is already on
+        // it, and brings the pill down when it connects.
+        guard let terminal = ViewController.getCurrentTerminal(), terminal.connected else {
+            return
+        }
+
+        Log.ui.note("unparked; rebuilding the shell")
+        terminal.forceReconnect()
+    }
+
     /// Snapshots the session and ends the process.
     ///
     /// The tail of a quick action that only a fresh launch can honour. Saving
@@ -332,6 +573,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     /// Main thread only, because both the `saving` flag and the connectedness
     /// it reads live there.
     func saveAndExit() {
+        // A parked machine is a saved one, and the next launch is already pointed at it.
+        if parkedTag != nil, !unparking {
+            Log.ui.note("quitting while parked; the session is already saved")
+            exit(0)
+        }
+
+        // Either way the machine will match its snapshot once this is over.
+        if unparking {
+            Log.ui.note("an unpark is running; quitting once it finishes")
+            exitWhenSaved = true
+            return
+        }
+
         // A save already running is this session's save, and it is the one that will point the next
         // launch at its snapshot. A second one must not be started on top of it: the tag is chosen
         // before the monitor lock is taken, so it would read a `resume_image` the first save has
@@ -409,6 +663,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         Log.network.note("reconnecting SSH channels")
         configServer?.listen()
         qemu?.startHostChannels()
+
+        // Not into a parked machine, which can't answer; the unpark reconnects once it is running.
+        guard parkedTag == nil, !unparking else { return }
+
         ViewController.getCurrentTerminal()?.forceReconnect()
     }
 

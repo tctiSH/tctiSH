@@ -66,6 +66,11 @@ private struct SettingsRow {
 /// A switch on a row.
 private struct ToggleValue {
     var isOn: Bool
+
+    /// Greyed out when false, for a switch that only means something while
+    /// another one is on.
+    var isEnabled = true
+
     var commit: (Bool) -> Void
 }
 
@@ -193,6 +198,7 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
             if let toggle = row.toggle {
                 let control = self.control(for: id, toggle: toggle)
                 control.isOn = toggle.isOn
+                control.isEnabled = toggle.isEnabled
 
                 cell.accessories = [
                     .customView(configuration: .init(customView: control, placement: .trailing()))
@@ -601,6 +607,31 @@ final class SettingsViewController: SettingsListViewController,
                 ]),
 
             SettingsSection(
+                header: "In the Background",
+                footer:
+                    "Release Memory gives Linux's memory back to iOS once your session is saved, so other apps are less likely to be closed to make room. Coming back takes a moment longer, while the session is read back in. Release Code Cache, with it, gives back all of the translated code as well. It's prepared again on return as it is at launch, which under JIT on newer devices means a pause, and translated again as it's needed.",
+                rows: [
+                    SettingsRow(
+                        id: "park",
+                        title: "Release Memory",
+                        symbol: "memorychip.fill",
+                        toggle: ToggleValue(
+                            isOn: AppSetting.parkInBackground.bool,
+                            commit: { [weak self] in
+                                AppSetting.parkInBackground.set($0)
+                                self?.reload()
+                            })),
+                    SettingsRow(
+                        id: "release-code-cache",
+                        title: "Release Code Cache",
+                        symbol: "cpu",
+                        toggle: ToggleValue(
+                            isOn: AppSetting.releaseCodeCacheInBackground.bool,
+                            isEnabled: AppSetting.parkInBackground.bool,
+                            commit: { AppSetting.releaseCodeCacheInBackground.set($0) })),
+                ]),
+
+            SettingsSection(
                 header: "Storage",
                 footer:
                     "Where your session is stored, including the disk image and boot snapshot (used for resume) file names. A disk name that doesn't yet exist creates a fresh machine.",
@@ -944,6 +975,28 @@ private final class DebugToolsViewController: SettingsListViewController {
                 ]),
 
             SettingsSection(
+                header: "Code Cache",
+                footer: "Shrink Now hands a Dynamic cache back down to its first step, as memory "
+                    + "pressure would. Grow Now climbs one step, as when the cache fills, without "
+                    + "the countdown. Under JIT on newer devices growing means a pause.",
+                rows: [
+                    SettingsRow(
+                        id: "shrink-code-cache",
+                        title: "Shrink Now",
+                        symbol: "arrow.down.right.and.arrow.up.left",
+                        select: { [weak self] in
+                            self?.codeCacheAction(CodeCacheMonitor.debugShrink(), "Shrink")
+                        }),
+                    SettingsRow(
+                        id: "grow-code-cache",
+                        title: "Grow Now",
+                        symbol: "arrow.up.left.and.arrow.down.right",
+                        select: { [weak self] in
+                            self?.codeCacheAction(CodeCacheMonitor.debugGrow(), "Grow")
+                        }),
+                ]),
+
+            SettingsSection(
                 header: nil,
                 footer: nil,
                 rows: [
@@ -987,6 +1040,15 @@ private final class DebugToolsViewController: SettingsListViewController {
 
         Self.lastMemoryWarning = Date()
         reload()
+    }
+
+    // MARK: Code cache
+
+    /// Says why a code cache action didn't happen, if it didn't. What it did is
+    /// in the log and on the status pill.
+    private func codeCacheAction(_ refusal: String?, _ verb: String) {
+        guard let refusal else { return }
+        showAlert(title: "Couldn't \(verb)", message: refusal)
     }
 
     // MARK: Removing DDIs

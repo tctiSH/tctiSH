@@ -8,7 +8,8 @@ What is in here, roughly in order of size:
 
   tcg/region.c              the StikJIT blessing protocol, and code cache
                             ballooning -- grow/shrink/release plus the
-                            tctish_* accessors the app reads through dlsym
+                            tctish_* accessors the app reads through dlsym;
+                            and releasing all of it while the VM is parked
   hw/9pfs/*                 snapshot support: the migration blocker removed,
                             and in-flight virtqueue elements saved/restored;
                             and 9p-util.h, which lets the server follow a
@@ -22,7 +23,19 @@ What is in here, roughly in order of size:
   migration/ram.c           don't read guest pages the kernel has no copy of
                             when saving or loading a snapshot; on Darwin each
                             read would charge a page, so either took the
-                            footprint to the whole of guest RAM
+                            footprint to the whole of guest RAM. And hand back
+                            the resident zero pages a stopped save finds
+  migration/*-hmp-cmds.c,   `park` and `unpark`: give a stopped, saved VM's RAM
+  hmp-commands.hx,          back while the app is in the background, and load
+  include/monitor/hmp.h     it back in the same process on return
+  system/cpu-timers.c       catch the VM's clock up whenever it starts after a
+                            stop or a snapshot load, as if it had only been
+                            suspended: saves, parking, and resuming after a
+                            kill no longer leave the guest's time behind
+  system/runstate.c,        a parked VM refuses `cont` and `savevm` until a
+  monitor/qmp-cmds.c,       load or a reset makes its RAM whole again
+  migration/savevm.c
+  include/system/*.h        declarations for the above
   system/qemu.symbols       export the tctish_* accessors; the shared-library
                             build hides anything not listed here
   accel/tcg/tb-maint.c      release the unused tail of the code buffer at a
@@ -163,6 +176,45 @@ diff --git a/configure b/configure
    # unroll any custom device configs
    for a in $device_archs; do
        eval "c=\$devices_${a}"
+diff --git a/hmp-commands.hx b/hmp-commands.hx
+--- a/hmp-commands.hx
++++ b/hmp-commands.hx
+@@ -364,6 +364,35 @@
+ ERST
+ 
+     {
++        .name       = "park",
++        .args_type  = "",
++        .params     = "",
++        .help       = "give a stopped, saved VM's RAM back to the host",
++        .cmd        = hmp_park,
++    },
++
++SRST
++``park``
++  tctiSH: give every page of the machine's RAM back to the host. Only while
++  the VM is stopped, and only once its state has been saved: the guest's
++  memory reads as zero afterwards, until ``unpark`` loads it back.
++ERST
++
++    {
++        .name       = "unpark",
++        .args_type  = "name:s",
++        .params     = "tag",
++        .help       = "load a parked VM's snapshot, catch its clock up, and start it",
++        .cmd        = hmp_unpark,
++    },
++
++SRST
++``unpark`` *tag*
++  tctiSH: load the snapshot *tag* into a parked VM, move its clock on by
++  however long it was stopped, and start it. Left stopped if the load fails.
++ERST
++
++    {
+         .name       = "delvm",
+         .args_type  = "name:s",
+         .params     = "tag",
 diff --git a/hw/9pfs/9p-util.h b/hw/9pfs/9p-util.h
 --- a/hw/9pfs/9p-util.h
 +++ b/hw/9pfs/9p-util.h
@@ -353,13 +405,63 @@ diff --git a/hw/9pfs/virtio-9p-device.c b/hw/9pfs/virtio-9p-device.c
  }
  
  static const TypeInfo virtio_device_info = {
+diff --git a/include/monitor/hmp.h b/include/monitor/hmp.h
+--- a/include/monitor/hmp.h
++++ b/include/monitor/hmp.h
+@@ -59,6 +59,8 @@
+ void hmp_balloon(Monitor *mon, const QDict *qdict);
+ void hmp_loadvm(Monitor *mon, const QDict *qdict);
+ void hmp_savevm(Monitor *mon, const QDict *qdict);
++void hmp_park(Monitor *mon, const QDict *qdict);
++void hmp_unpark(Monitor *mon, const QDict *qdict);
+ void hmp_delvm(Monitor *mon, const QDict *qdict);
+ void hmp_migrate_cancel(Monitor *mon, const QDict *qdict);
+ void hmp_migrate_continue(Monitor *mon, const QDict *qdict);
+diff --git a/include/system/cpu-timers.h b/include/system/cpu-timers.h
+--- a/include/system/cpu-timers.h
++++ b/include/system/cpu-timers.h
+@@ -83,6 +83,13 @@
+ void cpu_disable_ticks(void);
+ 
+ /*
++ * tctiSH: a snapshot taken at @taken, host wall-clock nanoseconds since the
++ * epoch, has just been loaded; the VM's clock is to catch up from then when it
++ * next starts. See cpu_enable_ticks.
++ */
++void tctish_clock_loaded(int64_t taken);
++
++/*
+  * return the time elapsed in VM between vm_start and vm_stop.
+  * cpu_get_ticks() uses units of the host CPU cycle counter.
+  */
+diff --git a/include/system/runstate.h b/include/system/runstate.h
+--- a/include/system/runstate.h
++++ b/include/system/runstate.h
+@@ -8,6 +8,16 @@
+ void runstate_set(RunState new_state);
+ RunState runstate_get(void);
+ bool runstate_is_running(void);
++
++/*
++ * tctiSH: whether the machine's RAM has been given back by the `park` monitor
++ * command and not yet loaded again. A parked machine must not run, and must
++ * not be saved: its memory reads as zero.
++ */
++bool tctish_is_parked(void);
++void tctish_set_parked(bool parked);
++/* tctiSH: false while a released code cache waits to be prepared (tcg/region.c). */
++bool tctish_code_cache_may_run(void);
+ bool runstate_needs_reset(void);
+ void runstate_replay_enable(void);
+ 
 diff --git a/include/tcg/tcg.h b/include/tcg/tcg.h
 --- a/include/tcg/tcg.h
 +++ b/include/tcg/tcg.h
-@@ -638,6 +638,37 @@
+@@ -637,6 +637,42 @@
+ 
  size_t tcg_code_size(void);
  size_t tcg_code_capacity(void);
- 
++
 +/*
 + * Hands the unused tail of the code buffer back to the system.
 + *
@@ -386,14 +488,18 @@ diff --git a/include/tcg/tcg.h b/include/tcg/tcg.h
 +bool tctish_code_cache_needs_debugger(void);
 +size_t tctish_code_cache_grow(size_t target);
 +size_t tctish_code_cache_shrink(size_t target);
++bool tctish_code_cache_release_all(void);
++bool tctish_code_cache_release_all_outstanding(void);
++bool tctish_code_cache_needs_preparing(void);
++/* Also in system/runstate.h, for the monitor. */
++bool tctish_code_cache_may_run(void);
 +size_t tctish_code_cache_released(void);
 +size_t tctish_code_cache_release_attempts(void);
 +int tctish_code_cache_release_errno(void);
 +int tctish_code_cache_release_errno_rx(void);
-+
+ 
  /**
   * tcg_tb_insert:
-  * @tb: translation block to insert
 diff --git a/meson.build b/meson.build
 --- a/meson.build
 +++ b/meson.build
@@ -413,10 +519,99 @@ diff --git a/meson.build b/meson.build
                 install: true,
                 c_args: c_args,
                 dependencies: exe_deps + exe['dependencies'],
+diff --git a/migration/migration-hmp-cmds.c b/migration/migration-hmp-cmds.c
+--- a/migration/migration-hmp-cmds.c
++++ b/migration/migration-hmp-cmds.c
+@@ -27,7 +27,10 @@
+ #include "qemu/cutils.h"
+ #include "qemu/error-report.h"
+ #include "qemu/sockets.h"
++#include "qemu/units.h"
+ #include "system/runstate.h"
++#include "exec/ramblock.h"
++#include "hw/boards.h"
+ #include "ui/qemu-spice.h"
+ #include "system/system.h"
+ #include "options.h"
+@@ -390,6 +393,74 @@
+     hmp_handle_error(mon, err);
+ }
+ 
++/*
++ * tctiSH: parks a machine whose state has just been saved, by giving all of
++ * its RAM back to the host. The pages read as zero until hmp_unpark loads the
++ * snapshot's back, and the load skips the ones that were zero anyway, so a
++ * parked machine costs the host nothing for its memory. See
++ * background-footprint.md, Lever C.
++ *
++ * All but the first megabyte. That holds the PC's shadowed BIOS, which a
++ * reset starts from: QEMU leaves the i440FX's PAM mapping RAM over the BIOS
++ * across a reset, and SeaBIOS copies itself back from ROM only on a reboot
++ * the guest asks for (see qemu_reboot() in roms/seabios/src/fw/shadow.c).
++ * Zeroed, a `system_reset` of a parked machine -- tctiSH's "start afresh" --
++ * runs into nothing and never boots. Measured on the Mac harness. It costs a
++ * megabyte at most.
++ *
++ * Refused while the VM runs: a running guest would carry on with its memory
++ * gone. Nothing here checks that a snapshot exists; that is the caller's to
++ * know before asking.
++ */
++#define TCTISH_PARK_KEEP (1 * MiB)
++
++void hmp_park(Monitor *mon, const QDict *qdict)
++{
++    MachineState *ms = MACHINE(qdev_get_machine());
++    RAMBlock *rb = ms->ram ? ms->ram->ram_block : NULL;
++    Error *err = NULL;
++
++    if (runstate_is_running()) {
++        error_setg(&err, "the VM is running; stop it first");
++    } else if (rb == NULL) {
++        error_setg(&err, "this machine has no RAM block to discard");
++    } else if (rb->used_length > TCTISH_PARK_KEEP &&
++               ram_block_discard_range(rb, TCTISH_PARK_KEEP,
++                                       rb->used_length - TCTISH_PARK_KEEP)) {
++        error_setg(&err, "discarding '%s' failed", rb->idstr);
++    } else {
++        tctish_set_parked(true);
++    }
++
++    hmp_handle_error(mon, err);
++}
++
++/*
++ * tctiSH: brings a parked machine back. Loads the snapshot and starts it; the
++ * clock catches up from when the snapshot was taken, as after any load (see
++ * cpu_enable_ticks).
++ *
++ * A failed load leaves the VM stopped and still parked, so `cont` goes on
++ * refusing until a load succeeds or the machine is reset.
++ */
++void hmp_unpark(Monitor *mon, const QDict *qdict)
++{
++    const char *name = qdict_get_str(qdict, "name");
++    Error *err = NULL;
++
++    if (!tctish_is_parked()) {
++        error_setg(&err, "the VM is not parked");
++    } else if (runstate_is_running()) {
++        error_setg(&err, "the VM is running");
++    } else if (!tctish_code_cache_may_run()) {
++        error_setg(&err, "the code cache was released; prepare it first");
++    } else if (load_snapshot(name, NULL, false, NULL, &err)) {
++        vm_start();
++    }
++
++    hmp_handle_error(mon, err);
++}
++
+ void hmp_delvm(Monitor *mon, const QDict *qdict)
+ {
+     Error *err = NULL;
 diff --git a/migration/ram.c b/migration/ram.c
 --- a/migration/ram.c
 +++ b/migration/ram.c
-@@ -331,7 +331,76 @@
+@@ -331,7 +331,86 @@
  
      QSIMPLEQ_ENTRY(RAMSrcPageRequest) next_req;
  };
@@ -447,14 +642,24 @@ diff --git a/migration/ram.c b/migration/ram.c
 +    char vec[UNTOUCHED_WINDOW_PAGES];
 +} UntouchedWindow;
 +
++/*
++ * Private anonymous memory, in host-sized pages: the only kind that reads as
++ * zero when it has no pages, and the only kind a discard maps fresh memory
++ * over rather than punching a hole in a file someone else might share.
++ */
++static bool ram_block_is_private_anon(RAMBlock *rb)
++{
++    return rb->fd < 0 && !qemu_ram_is_shared(rb) &&
++           rb->page_size == qemu_real_host_page_size();
++}
++
 +static bool ram_page_untouched(UntouchedWindow *w, RAMBlock *rb,
 +                               ram_addr_t offset)
 +{
 +    size_t page = qemu_real_host_page_size();
 +    ram_addr_t first = QEMU_ALIGN_DOWN(offset, page);
 +
-+    /* Only private anonymous memory reads as zero when it has no pages. */
-+    if (rb->fd >= 0 || qemu_ram_is_shared(rb) || rb->page_size != page) {
++    if (!ram_block_is_private_anon(rb)) {
 +        return false;
 +    }
 +
@@ -471,7 +676,7 @@ diff --git a/migration/ram.c b/migration/ram.c
 +        w->start = first;
 +        w->pages = DIV_ROUND_UP(len, page);
 +    }
-+
+ 
 +    return !(w->vec[(first - w->start) / page] &
 +             (MINCORE_INCORE | MINCORE_PAGED_OUT));
 +}
@@ -482,7 +687,7 @@ diff --git a/migration/ram.c b/migration/ram.c
 +{
 +    size_t page = qemu_real_host_page_size();
 +    ram_addr_t first = QEMU_ALIGN_DOWN(offset, page);
- 
++
 +    if (w->block == rb && first >= w->start &&
 +        first < w->start + w->pages * page) {
 +        w->vec[(first - w->start) / page] |= MINCORE_INCORE;
@@ -493,18 +698,91 @@ diff --git a/migration/ram.c b/migration/ram.c
  /* State of RAM for migration */
  struct RAMState {
      /*
-@@ -395,6 +464,10 @@
+@@ -395,10 +474,83 @@
       * RAM migration.
       */
      unsigned int postcopy_bmap_sync_requested;
 +#ifdef CONFIG_DARWIN
 +    /* tctiSH: see ram_page_untouched */
 +    UntouchedWindow untouched;
++    /*
++     * tctiSH: what a stopped save found, in target pages, and how many whole
++     * host pages were resident but held nothing but zeroes. Those last could
++     * be handed back as the save passes; see background-footprint.md, Lever B.
++     */
++    uint64_t saw_untouched;
++    uint64_t saw_resident_zero;
++    uint64_t saw_data;
++    uint64_t saw_zero_host_pages;
++    unsigned host_page_zeroes;
++    /* tctiSH: see ram_hand_back_zero_host_page */
++    RAMBlock *zero_run_block;
++    ram_addr_t zero_run_start;
++    ram_addr_t zero_run_length;
++    uint64_t handed_back;
 +#endif
  };
  typedef struct RAMState RAMState;
  
-@@ -1112,7 +1185,19 @@
+ static RAMState *ram_state;
++
++#ifdef CONFIG_DARWIN
++/*
++ * tctiSH: gives back the run of zero host pages collected so far.
++ *
++ * Only while the guest is stopped. The pages were found to hold nothing but
++ * zeroes, and a discard makes them read as zero again, so the guest cannot
++ * tell -- unless it wrote to one in between, which a stopped guest cannot.
++ * If the VM has been started again since the run was collected, the run is
++ * dropped rather than trusted.
++ */
++static void ram_hand_back_zero_run(RAMState *rs)
++{
++    RAMBlock *rb = rs->zero_run_block;
++
++    if (rb != NULL && !runstate_is_running() &&
++        !ram_block_discard_is_disabled() &&
++        ram_block_discard_range(rb, rs->zero_run_start,
++                                rs->zero_run_length) == 0) {
++        rs->handed_back += rs->zero_run_length;
++    }
++
++    rs->zero_run_block = NULL;
++    rs->zero_run_length = 0;
++}
++
++/*
++ * tctiSH: a host page the save found resident and entirely zero.
++ *
++ * Saving already reads every resident page to find the zero ones, so these
++ * cost nothing more to find, and until the guest writes to them again they
++ * are footprint holding nothing. Neighbours are gathered into one discard,
++ * because each discard maps fresh memory over its range and a run of them is
++ * one call rather than many. See background-footprint.md, Lever B.
++ */
++static void ram_hand_back_zero_host_page(RAMState *rs, RAMBlock *rb,
++                                         ram_addr_t offset)
++{
++    size_t page = qemu_real_host_page_size();
++
++    if (!ram_block_is_private_anon(rb)) {
++        return;
++    }
++
++    if (rs->zero_run_block != rb ||
++        rs->zero_run_start + rs->zero_run_length != offset) {
++        ram_hand_back_zero_run(rs);
++        rs->zero_run_block = rb;
++        rs->zero_run_start = offset;
++    }
++
++    rs->zero_run_length += page;
++}
++#endif
+ 
+ static NotifierWithReturnList precopy_notifier_list;
+ 
+@@ -1112,10 +1264,36 @@
          return 0;
      }
  
@@ -522,10 +800,82 @@ diff --git a/migration/ram.c b/migration/ram.c
 +#endif
 +
 +    if (!untouched && !buffer_is_zero(p, TARGET_PAGE_SIZE)) {
++#ifdef CONFIG_DARWIN
++        if (!runstate_is_running()) {
++            rs->saw_data++;
++        }
++#endif
          return 0;
      }
  
-@@ -4079,6 +4164,10 @@
++#ifdef CONFIG_DARWIN
++    if (untouched) {
++        rs->saw_untouched++;
++    } else if (!runstate_is_running()) {
++        rs->saw_resident_zero++;
++        rs->host_page_zeroes++;
++    }
++#endif
++
+     stat64_add(&mig_stats.zero_pages, 1);
+ 
+     if (migrate_mapped_ram()) {
+@@ -2126,6 +2304,10 @@
+     /* Update host page boundary information */
+     pss_host_page_prepare(pss);
+ 
++#ifdef CONFIG_DARWIN
++    rs->host_page_zeroes = 0;
++#endif
++
+     do {
+         page_dirty = migration_bitmap_clear_dirty(rs, pss->block, pss->page);
+ 
+@@ -2165,6 +2347,19 @@
+         pss_find_next_dirty(pss);
+     } while (pss_within_range(pss));
+ 
++#ifdef CONFIG_DARWIN
++    /*
++     * tctiSH: every target page in this host page was resident and zero, all
++     * of them seen by this pass, with the guest stopped throughout.
++     */
++    if (pagesize_bits > 1 && rs->host_page_zeroes == pagesize_bits &&
++        !runstate_is_running()) {
++        rs->saw_zero_host_pages++;
++        ram_hand_back_zero_host_page(
++            rs, pss->block, (ram_addr_t)pss->host_page_start << TARGET_PAGE_BITS);
++    }
++#endif
++
+     pss_host_page_finish(pss);
+ 
+     res = ram_save_release_protection(rs, pss, start_page);
+@@ -3265,7 +3460,23 @@
+             error_reportf_err(local_err, "Failed to write bitmap to file: ");
+             return -err;
+         }
++    }
++
++#ifdef CONFIG_DARWIN
++    ram_hand_back_zero_run(rs);
++
++    /* tctiSH: to stderr, which the app keeps, rather than to the monitor. */
++    if (!runstate_is_running()) {
++        fprintf(stderr, "tctiSH: savevm: %" PRIu64 " MiB with data, %" PRIu64
++                " MiB untouched, %" PRIu64 " MiB resident zero (%" PRIu64
++                " MiB in whole host pages, %" PRIu64 " MiB handed back)\n",
++                rs->saw_data * TARGET_PAGE_SIZE >> 20,
++                rs->saw_untouched * TARGET_PAGE_SIZE >> 20,
++                rs->saw_resident_zero * TARGET_PAGE_SIZE >> 20,
++                rs->saw_zero_host_pages * qemu_real_host_page_size() >> 20,
++                rs->handed_back >> 20);
+     }
++#endif
+ 
+     qemu_put_be64(f, RAM_SAVE_FLAG_EOS);
+     return qemu_fflush(f);
+@@ -4079,6 +4290,10 @@
  {
      MigrationIncomingState *mis = migration_incoming_get_current();
      int flags = 0, ret = 0, invalid_flags = 0, i = 0;
@@ -536,7 +886,7 @@ diff --git a/migration/ram.c b/migration/ram.c
  
      if (migrate_mapped_ram()) {
          invalid_flags |= (RAM_SAVE_FLAG_HOOK | RAM_SAVE_FLAG_MULTIFD_FLUSH |
-@@ -4089,6 +4178,7 @@
+@@ -4089,6 +4304,7 @@
      while (!ret && !(flags & RAM_SAVE_FLAG_EOS)) {
          ram_addr_t addr;
          void *host = NULL, *host_bak = NULL;
@@ -544,7 +894,7 @@ diff --git a/migration/ram.c b/migration/ram.c
          uint8_t ch;
  
          /*
-@@ -4121,8 +4211,7 @@
+@@ -4121,8 +4337,7 @@
  
          if (flags & (RAM_SAVE_FLAG_ZERO | RAM_SAVE_FLAG_PAGE |
                       RAM_SAVE_FLAG_XBZRLE)) {
@@ -554,7 +904,7 @@ diff --git a/migration/ram.c b/migration/ram.c
  
              host = host_from_ram_block_offset(block, addr);
              /*
-@@ -4155,7 +4244,12 @@
+@@ -4155,7 +4370,12 @@
              }
              if (!migration_incoming_in_colo_state()) {
                  ramblock_recv_bitmap_set(block, host);
@@ -567,12 +917,10 @@ diff --git a/migration/ram.c b/migration/ram.c
  
              trace_ram_load_loop(block->idstr, (uint64_t)addr, flags, host);
          }
-@@ -4180,8 +4274,18 @@
-             if (ch != 0) {
-                 error_report("Found a zero page with value %d", ch);
+@@ -4182,6 +4402,16 @@
                  ret = -EINVAL;
-+                break;
-+            }
+                 break;
+             }
 +#ifdef CONFIG_DARWIN
 +            /*
 +             * tctiSH: see ram_page_untouched. Under COLO the page may be going
@@ -580,12 +928,70 @@ diff --git a/migration/ram.c b/migration/ram.c
 +             */
 +            if (!migration_incoming_colo_enabled() &&
 +                ram_page_untouched(&untouched, block, addr)) {
-                 break;
-             }
++                break;
++            }
 +#endif
              ram_handle_zero(host, TARGET_PAGE_SIZE);
              break;
  
+diff --git a/migration/savevm.c b/migration/savevm.c
+--- a/migration/savevm.c
++++ b/migration/savevm.c
+@@ -61,6 +61,7 @@
+ #include "io/channel-file.h"
+ #include "system/replay.h"
+ #include "system/runstate.h"
++#include "system/cpu-timers.h"
+ #include "system/system.h"
+ #include "system/xen.h"
+ #include "migration/colo.h"
+@@ -3228,6 +3229,12 @@
+     g_autoptr(GDateTime) now = g_date_time_new_now_local();
+ 
+     GLOBAL_STATE_CODE();
++
++    /* tctiSH: a parked machine's RAM reads as zero; saving it loses the session. */
++    if (tctish_is_parked()) {
++        error_setg(errp, "The VM is parked; unpark it before saving.");
++        return false;
++    }
+ 
+     if (migration_is_blocked(errp)) {
+         return false;
+@@ -3480,6 +3487,11 @@
+         return false;
+     }
+ 
++    /* tctiSH: RAM holds a whole machine again, whoever asked for the load. */
++    tctish_set_parked(false);
++
++    /* tctiSH: and its clock catches up from when the snapshot was taken. */
++    tctish_clock_loaded(sn.date_sec * NANOSECONDS_PER_SECOND + sn.date_nsec);
+     return true;
+ 
+ err_drain:
+diff --git a/monitor/qmp-cmds.c b/monitor/qmp-cmds.c
+--- a/monitor/qmp-cmds.c
++++ b/monitor/qmp-cmds.c
+@@ -76,6 +76,18 @@
+         return;
+     }
+ 
++    /* tctiSH: its RAM reads as zero until `unpark` loads it back. */
++    if (tctish_is_parked()) {
++        error_setg(errp, "The VM is parked; unpark it instead.");
++        return;
++    }
++
++    /* tctiSH: generated code would run into pages that aren't there. */
++    if (!tctish_code_cache_may_run()) {
++        error_setg(errp, "The code cache was released; prepare it first.");
++        return;
++    }
++
+     if (runstate_needs_reset()) {
+         error_setg(errp, "Resetting the Virtual Machine is required");
+         return;
 diff --git a/subprojects/slirp.wrap b/subprojects/slirp.wrap
 --- a/subprojects/slirp.wrap
 +++ b/subprojects/slirp.wrap
@@ -599,6 +1005,124 @@ diff --git a/subprojects/slirp.wrap b/subprojects/slirp.wrap
  [provide]
 -slirp = libslirp_dep
 +slirp = libslirp_libdep
+diff --git a/system/cpu-timers.c b/system/cpu-timers.c
+--- a/system/cpu-timers.c
++++ b/system/cpu-timers.c
+@@ -97,9 +97,87 @@
+     } while (seqlock_read_retry(&timers_state.vm_clock_seqlock, start));
+ 
+     return ti;
++}
++
++/*
++ * tctiSH: a stopped VM's clock stands still. That's what QEMU means by
++ * stopping it, and it's no use to us: the VM stops for every snapshot save,
++ * for parking, and a snapshot load puts the clock back to wherever the
++ * snapshot was taken. Each time, the guest comes back behind by however long
++ * it was away, and nothing in it notices: Linux keeps time from the TSC and
++ * only reads the RTC at boot. Resuming a session iOS had killed left the guest
++ * behind by however long the app was dead.
++ *
++ * A process that iOS merely suspends has none of this, because its clock
++ * never stops, and on return the guest sees the TSC jump and catches up by
++ * itself. So make every stop look like a suspend. Remember the host time the
++ * clock stopped at, and when it starts again, move it on by everything since.
++ * After a snapshot load, the moment to count from is when the snapshot was
++ * taken; see tctish_clock_loaded.
++ *
++ * Host monotonic nanoseconds, from get_clock(), valid only while
++ * tctish_stopped is set. It can be negative: after a load it is counted back
++ * from now by the snapshot's age, and get_clock() starts near zero when the
++ * host boots, so a snapshot older than the host's uptime lands before it.
++ * Measured on device: a negative value used as "nothing to catch up" left a
++ * three-day-old session three days behind.
++ */
++static int64_t tctish_stopped_at;
++static bool tctish_stopped;
++
++/* tctiSH: a sample of both host counters at start-up; see tctish_host_ticks_for. */
++static int64_t tctish_clock_origin;
++static int64_t tctish_ticks_origin;
++
++/*
++ * tctiSH: host ticks in @ns nanoseconds. The VM's clock is kept in both, and
++ * on hosts without a cycle counter QEMU's host ticks *are* get_clock(), so the
++ * ratio is 1. That includes arm64, and so every host tctiSH runs on. It's
++ * measured rather than assumed, so a host with a real cycle counter gets it
++ * right too.
++ */
++static int64_t tctish_host_ticks_for(int64_t ns)
++{
++    int64_t clock = get_clock() - tctish_clock_origin;
++    int64_t ticks = cpu_get_host_ticks() - tctish_ticks_origin;
++
++    if (clock < NANOSECONDS_PER_SECOND || ticks <= 0) {
++        return ns;
++    }
++    return (int64_t)((double)ns * ((double)ticks / (double)clock));
+ }
+ 
++/* Call with vm_clock_seqlock held for writing, with the clock stopped. */
++static void tctish_clock_catch_up_locked(void)
++{
++    int64_t elapsed;
++
++    if (!tctish_stopped || icount_enabled()) {
++        return;
++    }
++
++    elapsed = MAX(get_clock() - tctish_stopped_at, 0);
++    timers_state.cpu_clock_offset += elapsed;
++    timers_state.cpu_ticks_offset += tctish_host_ticks_for(elapsed);
++    tctish_stopped = false;
++}
++
+ /*
++ * tctiSH: a snapshot taken at @taken (host wall clock, in nanoseconds since
++ * the epoch) has just been loaded, clock and all. The clock now reads what it
++ * read then, so the time to catch up is everything since, whenever and in
++ * whichever process that was. A snapshot from the future (a host clock put
++ * back) catches up by nothing rather than going backwards.
++ */
++void tctish_clock_loaded(int64_t taken)
++{
++    int64_t since = MAX(qemu_clock_get_ns(QEMU_CLOCK_HOST) - taken, 0);
++
++    tctish_stopped_at = get_clock() - since;
++    tctish_stopped = true;
++}
++
++/*
+  * enable cpu_get_ticks()
+  * Caller must hold BQL which serves as mutex for vm_clock_seqlock.
+  */
+@@ -108,6 +186,7 @@
+     seqlock_write_lock(&timers_state.vm_clock_seqlock,
+                        &timers_state.vm_clock_lock);
+     if (!timers_state.cpu_ticks_enabled) {
++        tctish_clock_catch_up_locked();
+         timers_state.cpu_ticks_offset -= cpu_get_host_ticks();
+         timers_state.cpu_clock_offset -= get_clock();
+         timers_state.cpu_ticks_enabled = 1;
+@@ -129,6 +208,8 @@
+         timers_state.cpu_ticks_offset += cpu_get_host_ticks();
+         timers_state.cpu_clock_offset = cpu_get_clock_locked();
+         timers_state.cpu_ticks_enabled = 0;
++        tctish_stopped_at = get_clock();
++        tctish_stopped = true;
+     }
+     seqlock_write_unlock(&timers_state.vm_clock_seqlock,
+                          &timers_state.vm_clock_lock);
+@@ -268,6 +349,9 @@
+ /* initialize timers state and the cpu throttle for convenience */
+ void cpu_timers_init(void)
+ {
++    tctish_clock_origin = get_clock();
++    tctish_ticks_origin = cpu_get_host_ticks();
++
+     seqlock_init(&timers_state.vm_clock_seqlock);
+     qemu_spin_init(&timers_state.vm_clock_lock);
+     vmstate_register(NULL, 0, &vmstate_timers, &timers_state);
 diff --git a/system/physmem.c b/system/physmem.c
 --- a/system/physmem.c
 +++ b/system/physmem.c
@@ -640,7 +1164,7 @@ diff --git a/system/physmem.c b/system/physmem.c
 diff --git a/system/qemu.symbols b/system/qemu.symbols
 --- a/system/qemu.symbols
 +++ b/system/qemu.symbols
-@@ -8,4 +8,23 @@
+@@ -8,4 +8,26 @@
    qemu_thread_create;
    replay_mutex_lock;
    replay_mutex_unlock;
@@ -658,12 +1182,71 @@ diff --git a/system/qemu.symbols b/system/qemu.symbols
 +  tctish_code_cache_needs_debugger;
 +  tctish_code_cache_grow;
 +  tctish_code_cache_shrink;
++  tctish_code_cache_release_all;
++  tctish_code_cache_release_all_outstanding;
++  tctish_code_cache_needs_preparing;
 +  tctish_code_cache_released;
 +  tctish_code_cache_release_attempts;
 +  tctish_code_cache_release_errno;
 +  tctish_code_cache_release_errno_rx;
 +  tctish_snapshot_was_missing;
  };
+diff --git a/system/runstate.c b/system/runstate.c
+--- a/system/runstate.c
++++ b/system/runstate.c
+@@ -500,6 +500,19 @@
+     int r = debug_requested;
+     debug_requested = 0;
+     return r;
++}
++
++/* tctiSH: see tctish_is_parked */
++static bool tctish_parked;
++
++bool tctish_is_parked(void)
++{
++    return tctish_parked;
++}
++
++void tctish_set_parked(bool parked)
++{
++    tctish_parked = parked;
+ }
+ 
+ /*
+@@ -509,6 +522,16 @@
+ {
+     MachineClass *mc;
+     ResetType type;
++
++    /*
++     * tctiSH: a reset boots from firmware, which needs nothing from RAM. Except
++     * the one inside a snapshot load, which comes before the RAM is read back:
++     * a load that fails after it has to leave the machine parked, or `unpark`
++     * refuses to try again and `cont` runs an empty machine.
++     */
++    if (reason != SHUTDOWN_CAUSE_SNAPSHOT_LOAD) {
++        tctish_parked = false;
++    }
+ 
+     mc = current_machine ? MACHINE_GET_CLASS(current_machine) : NULL;
+ 
+@@ -626,6 +649,15 @@
+ 
+ void qemu_system_reset_request(ShutdownCause reason)
+ {
++    /*
++     * tctiSH: and at the request too, not only when the reset happens. The
++     * main loop can get to the reset only after the monitor has finished its
++     * input, so a `system_reset` followed at once by `cont` would otherwise
++     * have the `cont` refused as parked, and a stopped machine reset into
++     * prelaunch that nothing ever starts.
++     */
++    tctish_parked = false;
++
+     if (reboot_action == REBOOT_ACTION_SHUTDOWN &&
+         reason != SHUTDOWN_CAUSE_SUBSYSTEM_RESET) {
+         shutdown_requested = reason;
 diff --git a/system/vl.c b/system/vl.c
 --- a/system/vl.c
 +++ b/system/vl.c
@@ -749,7 +1332,7 @@ diff --git a/tcg/region.c b/tcg/region.c
  #include "tcg/tcg.h"
  #include "exec/translation-block.h"
  #include "tcg-internal.h"
-@@ -68,15 +69,145 @@
+@@ -68,15 +69,177 @@
      size_t size; /* size of one region */
      size_t stride; /* .size + guard size */
      size_t total_size; /* size of entire buffer, >= n * stride */
@@ -824,13 +1407,62 @@ diff --git a/tcg/region.c b/tcg/region.c
 +static size_t tctish_release_upto;
 +
 +/*
++ * Set by tctish_code_cache_release_all(): the release waiting to be paid starts
++ * from the prologue rather than from the usable boundary. See there.
++ */
++static bool tctish_release_everything;
++
++/*
 + * Set once any page has been dropped from read-execute to read-write.
 + *
-+ * Until it is, every page of the buffer is still in the protection it was
-+ * mapped with, and the restoring mprotect in tctish_code_cache_grow() has
-+ * nothing to restore.
++ * Under TXM that is for good. Measured on device (background-footprint.md,
++ * Part B): the executable alias of those pages comes back with a maximum
++ * protection of read-write, so mprotect() cannot make it executable again; and
++ * the alias itself is permanent, so it cannot be replaced either -- an
++ * overwriting mach_vm_remap() answers KERN_PROTECTION_FAILURE, and munmap()
++ * answers success but leaves the mapping where it was. Growing past a release
++ * is therefore impossible there until the next launch.
 + */
 +static bool tctish_ever_unprotected;
++
++/*
++ * Whether everything after the buffer's first page is purgeable, in pieces of
++ * TCTISH_PURGEABLE_PIECE (tctish_alloc_purgeable()), under TXM only.
++ *
++ * What makes releasing survivable there. Emptying a purgeable object discards
++ * its pages however many views map them, and changes neither view's protection
++ * -- so the executable alias is never made writable, its addresses keep their
++ * executability, and the debugger can prepare them again exactly as it
++ * prepares a stretch it has never seen. That goes for a release of everything
++ * while parked and for an ordinary shrink alike, so a shrunk cache can grow
++ * again.
++ *
++ * In pieces because emptying is all or nothing per object: a shrink empties
++ * every piece lying wholly past its boundary, and keeps the one it cuts
++ * through.
++ */
++static bool tctish_purgeable;
++#define TCTISH_PURGEABLE_PIECE (32 * MiB)
++
++/*
++ * Set by tctish_code_cache_release_all() and cleared once a flush has paid it
++ * out, whatever came of it. What the app waits on before preparing the cache
++ * again. Not the attempt count, which an ordinary shrink's flush moves too.
++ */
++static bool tctish_release_all_outstanding;
++
++/*
++ * Set when a release of everything has actually lowered the usable boundary,
++ * and cleared by the next grow, which prepares what it lowered.
++ *
++ * With either flag set the machine must not run: TCG's regions still reach
++ * past the boundary (region.available can't go below a region per vCPU), so
++ * the first translation would land in pages that were emptied and, under TXM,
++ * aren't executable. QEMU refuses `cont` and `unpark` meanwhile, rather than
++ * trusting everyone who might start the machine to know. See
++ * tctish_code_cache_may_run().
++ */
++static bool tctish_needs_preparing;
 +
 +/*
 + * Rounds a range *inward* to whole pages, false if nothing is left.
@@ -851,23 +1483,6 @@ diff --git a/tcg/region.c b/tcg/region.c
 +    *start = (char *)begin;
 +    *length = end - begin;
 +    return true;
-+}
-+
-+/*
-+ * Rounds a range *outward* to whole pages.
-+ *
-+ * For taking a protection back. Covering a little more than asked is harmless
-+ * -- the neighbours carry the same protection -- where covering a little less
-+ * would leave a page unexecutable in the middle of the cache.
-+ */
-+static void tctish_pages_covering(char **start, size_t *length)
-+{
-+    uintptr_t page = qemu_real_host_page_size();
-+    uintptr_t begin = (uintptr_t)*start & ~(page - 1);
-+    uintptr_t end = ROUND_UP((uintptr_t)*start + *length, page);
-+
-+    *start = (char *)begin;
-+    *length = end - begin;
 +}
 +
 +/*
@@ -895,10 +1510,12 @@ diff --git a/tcg/region.c b/tcg/region.c
   * This is an array of struct tcg_region_tree's, with padding.
   * We use void * to simplify the computation of region_trees[i]; each
   * struct is found every tree_size bytes.
-@@ -345,6 +476,30 @@
-     *pend = end;
- }
+@@ -343,6 +506,30 @@
  
+     *pstart = start;
+     *pend = end;
++}
++
 +/*
 + * How many whole regions fit inside the first `bytes` of the buffer.
 + *
@@ -921,12 +1538,10 @@ diff --git a/tcg/region.c b/tcg/region.c
 +    }
 +
 +    return n;
-+}
-+
+ }
+ 
  static void tcg_region_assign(TCGContext *s, size_t curr_region)
- {
-     void *start, *end;
-@@ -359,7 +514,13 @@
+@@ -359,7 +546,13 @@
  
  static bool tcg_region_alloc__locked(TCGContext *s)
  {
@@ -941,7 +1556,7 @@ diff --git a/tcg/region.c b/tcg/region.c
          return true;
      }
      tcg_region_assign(s, region.current);
-@@ -453,6 +614,27 @@
+@@ -453,6 +646,27 @@
  }
  
  /*
@@ -969,7 +1584,21 @@ diff --git a/tcg/region.c b/tcg/region.c
   * Minimum size of the code gen buffer.  This number is randomly chosen,
   * but not so small that we can't have a fair number of TB's live.
   *
-@@ -627,6 +809,24 @@
+@@ -611,6 +825,13 @@
+ #ifdef CONFIG_DARWIN
+ #include <mach/mach.h>
+ 
++#include <mach/vm_purgable.h>
++
++extern kern_return_t mach_vm_purgable_control(vm_map_t target_task,
++                                              mach_vm_address_t address,
++                                              vm_purgable_t control,
++                                              int *state);
++
+ extern kern_return_t mach_vm_remap(vm_map_t target_task,
+                                    mach_vm_address_t *target_address,
+                                    mach_vm_size_t size,
+@@ -627,6 +848,24 @@
  #if TARGET_OS_IPHONE && !TARGET_OS_SIMULATOR
  #include <sys/types.h>
  #include <sys/sysctl.h>
@@ -994,7 +1623,7 @@ diff --git a/tcg/region.c b/tcg/region.c
  static int is_debugger_attached(void)
  {
      int mib[4];
-@@ -651,11 +851,39 @@
+@@ -651,14 +890,104 @@
      return (info.kp_proc.p_flag & P_TRACED) != 0;
  }
  
@@ -1013,11 +1642,14 @@ diff --git a/tcg/region.c b/tcg/region.c
 + */
 +__attribute__((noinline, optnone, naked))
 +static void *jit26_prepare_region(void *addr, size_t len)
-+{
+ {
+-    asm ("mov x0, %0\n"
+-         "mov x1, %1\n"
+-         "brk #0x69" :: "r" (addr), "r" (len) : "x0", "x1");
 +    asm ("mov x16, #1\n"
 +         "brk #0xf00d\n"
 +         "ret");
-+}
+ }
 +
 +/*
 + * Releases the script once every region it will ever be asked about exists.
@@ -1028,17 +1660,79 @@ diff --git a/tcg/region.c b/tcg/region.c
 + */
 +__attribute__((noinline, optnone, naked))
 +static void jit26_detach(void)
- {
--    asm ("mov x0, %0\n"
--         "mov x1, %1\n"
--         "brk #0x69" :: "r" (addr), "r" (len) : "x0", "x1");
++{
 +    asm ("mov x16, #0\n"
 +         "brk #0xf00d\n"
 +         "ret");
- }
++}
  #endif
  
-@@ -667,8 +895,8 @@
++#if TARGET_OS_IPHONE && !TARGET_OS_SIMULATOR
++/*
++ * The purgeable piece holding byte `offset` of the buffer, as offsets. The
++ * first starts after the buffer's first page, and the last ends with the
++ * buffer; see tctish_purgeable.
++ */
++static void tctish_piece_at(size_t offset, size_t size, size_t *start,
++                            size_t *end)
++{
++    size_t page = qemu_real_host_page_size();
++
++    *start = MAX(QEMU_ALIGN_DOWN(offset, TCTISH_PURGEABLE_PIECE), page);
++    *end = MIN(QEMU_ALIGN_DOWN(offset, TCTISH_PURGEABLE_PIECE) +
++               TCTISH_PURGEABLE_PIECE, size);
++}
++
++/*
++ * Maps the buffer for blessing as purgeable pieces behind an ordinary first
++ * page, and returns whether it could. See tctish_purgeable.
++ *
++ * The first page is apart because it holds the prologue, which has to survive
++ * every release. Everything is mapped as alloc_code_gen_buffer_anon() would
++ * map it otherwise, read-execute from the start; the purgeable flag travels in
++ * mmap()'s descriptor, as Darwin takes VM flags for anonymous memory. On any
++ * refusal nothing is left mapped and the caller maps the ordinary way.
++ */
++static bool tctish_alloc_purgeable(size_t size)
++{
++    size_t page = qemu_real_host_page_size();
++    size_t start, end;
++    char *buf;
++
++    buf = mmap(NULL, size, PROT_READ | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS,
++               -1, 0);
++    if (buf == MAP_FAILED) {
++        error_report("code cache: no buffer to make purgeable (%s)",
++                     strerror(errno));
++        return false;
++    }
++
++    for (size_t offset = page; offset < size; offset = end) {
++        tctish_piece_at(offset, size, &start, &end);
++
++        if (mmap(buf + start, end - start, PROT_READ | PROT_EXEC,
++                 MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, VM_FLAGS_PURGABLE,
++                 0) == MAP_FAILED) {
++            error_report("code cache: no purgeable piece at %zu MiB (%s); "
++                         "releases under TXM will be refused or final",
++                         (size_t)(start / MiB), strerror(errno));
++            munmap(buf, size);
++            return false;
++        }
++    }
++
++    info_report("code cache: purgeable after the first page, so it can be "
++                "released and prepared again");
++    region.start_aligned = buf;
++    region.total_size = size;
++    return true;
++}
++#endif
++
+ static int alloc_code_gen_buffer_splitwx_vmremap(size_t size, Error **errp)
+ {
+     kern_return_t ret;
+@@ -667,14 +996,17 @@
      int orig_prot = PROT_READ | PROT_WRITE;
  
  #if TARGET_OS_IPHONE && !TARGET_OS_SIMULATOR
@@ -1047,9 +1741,20 @@ diff --git a/tcg/region.c b/tcg/region.c
 +    /* TXM requires the region to start out executable. */
 +    if (jit_region_blessing_requested()) {
          orig_prot = PROT_READ | PROT_EXEC;
++        tctish_purgeable = tctish_alloc_purgeable(size);
      }
  #endif
-@@ -706,19 +934,68 @@
+ 
+-    if (!alloc_code_gen_buffer_anon(size, orig_prot,
+-                                    MAP_PRIVATE | MAP_ANONYMOUS, errp)) {
++    /* Negative on failure, not zero: upstream's `!` never caught one. */
++    if (!tctish_purgeable &&
++        alloc_code_gen_buffer_anon(size, orig_prot,
++                                   MAP_PRIVATE | MAP_ANONYMOUS, errp) < 0) {
+         return -1;
+     }
+ 
+@@ -706,19 +1038,68 @@
      }
  
  #if TARGET_OS_IPHONE && !TARGET_OS_SIMULATOR
@@ -1123,7 +1828,7 @@ diff --git a/tcg/region.c b/tcg/region.c
      }
  #endif
  
-@@ -818,6 +1095,14 @@
+@@ -818,6 +1199,14 @@
      size_t region_size;
      int have_prot, need_prot;
  
@@ -1138,7 +1843,7 @@ diff --git a/tcg/region.c b/tcg/region.c
      /* Size the buffer.  */
      if (tb_size == 0) {
          size_t phys_mem = qemu_get_host_physmem();
-@@ -838,6 +1123,18 @@
+@@ -838,6 +1227,18 @@
      have_prot = alloc_code_gen_buffer(tb_size, splitwx, &error_fatal);
      assert(have_prot >= 0);
  
@@ -1157,7 +1862,7 @@ diff --git a/tcg/region.c b/tcg/region.c
      /* Request large pages for the buffer and the splitwx.  */
      qemu_madvise(region.start_aligned, region.total_size, QEMU_MADV_HUGEPAGE);
      if (tcg_splitwx_diff) {
-@@ -851,6 +1148,43 @@
+@@ -851,6 +1252,43 @@
       * the buffer; we will assign those to the last region.
       */
      region.n = tcg_n_regions(tb_size, max_cpus);
@@ -1201,7 +1906,7 @@ diff --git a/tcg/region.c b/tcg/region.c
      region_size = tb_size / region.n;
      region_size = QEMU_ALIGN_DOWN(region_size, page_size);
  
-@@ -863,6 +1197,41 @@
+@@ -863,6 +1301,41 @@
      region.total_size -= page_size;
  
      /*
@@ -1243,7 +1948,7 @@ diff --git a/tcg/region.c b/tcg/region.c
       * The first region will be smaller than the others, via the prologue,
       * which has yet to be allocated.  For now, the first region begins at
       * the page boundary.
-@@ -873,6 +1242,12 @@
+@@ -873,6 +1346,12 @@
      qemu_mutex_init(&region.lock);
  
      /*
@@ -1256,7 +1961,7 @@ diff --git a/tcg/region.c b/tcg/region.c
       * Set guard pages in the rw buffer, as that's the one into which
       * buffer overruns could occur.  Do not set guard pages in the rx
       * buffer -- let that one use hugepages throughout.
-@@ -921,6 +1296,9 @@
+@@ -921,6 +1400,9 @@
       * It is also the only context for CONFIG_USER_ONLY.
       */
      tcg_region_initial_alloc__locked(&tcg_init_ctx);
@@ -1266,7 +1971,7 @@ diff --git a/tcg/region.c b/tcg/region.c
  }
  
  void tcg_region_prologue_set(TCGContext *s)
-@@ -982,3 +1360,502 @@
+@@ -982,3 +1464,704 @@
  
      return capacity;
  }
@@ -1413,7 +2118,19 @@ diff --git a/tcg/region.c b/tcg/region.c
 +
 +size_t tctish_code_cache_release_attempts(void)
 +{
-+    return tctish_release_attempts;
++    return qatomic_load_acquire(&tctish_release_attempts);
++}
++
++/*
++ * Counts an attempt, once its outcome is recorded. Last, and with release
++ * ordering, because the app watches the count and reads the outcome the moment
++ * it moves. Measured on device: counted first, a 512 MiB release was still
++ * under way when the app looked, and read back as having given nothing.
++ */
++static void tctish_release_attempted(void)
++{
++    qatomic_store_release(&tctish_release_attempts,
++                          tctish_release_attempts + 1);
 +}
 +
 +int tctish_code_cache_release_errno(void)
@@ -1425,6 +2142,36 @@ diff --git a/tcg/region.c b/tcg/region.c
 +{
 +    return tctish_release_errno_rx;
 +}
++
++#ifdef CONFIG_DARWIN
++/*
++ * How much of [start, start + length) the kernel holds a copy of, resident or
++ * compressed. Whole pages; `start` and `length` are page-aligned by the caller.
++ */
++static size_t tctish_resident_bytes(char *start, size_t length)
++{
++    size_t page = qemu_real_host_page_size();
++    size_t total = 0;
++    char vec[256];
++
++    for (size_t done = 0; done < length;) {
++        size_t chunk = MIN(length - done, sizeof(vec) * page);
++        size_t pages = chunk / page;
++
++        if (mincore(start + done, chunk, vec) != 0) {
++            return 0;
++        }
++        for (size_t i = 0; i < pages; i++) {
++            if (vec[i] & (MINCORE_INCORE | MINCORE_PAGED_OUT)) {
++                total += page;
++            }
++        }
++        done += chunk;
++    }
++
++    return total;
++}
++#endif
 +
 +/*
 + * Hands the unused tail of the code buffer back to the system.
@@ -1440,19 +2187,27 @@ diff --git a/tcg/region.c b/tcg/region.c
 + *
 + * Call with tctish_cache_lock held.
 + */
-+static void tctish_release_unused__locked(void)
++static void tctish_pay_release__locked(void)
 +{
 +#ifdef CONFIG_DARWIN
 +    size_t total = region.total_size;
 +    size_t keep = tctish_usable_bytes;
 +    char *rw = (char *)region.start_aligned;
 +    size_t length;
++    bool everything = false;
 +
 +    /* Only what a shrink gave up; see tctish_release_pending. */
 +    if (!tctish_release_pending) {
 +        return;
 +    }
 +    tctish_release_pending = false;
++
++    /* Everything after the prologue; see tctish_code_cache_release_all(). */
++    if (tctish_release_everything) {
++        tctish_release_everything = false;
++        everything = true;
++        keep = (char *)region.after_prologue - rw;
++    }
 +
 +    /*
 +     * Cleared here rather than only on the paths that go on to try, so that the
@@ -1461,7 +2216,11 @@ diff --git a/tcg/region.c b/tcg/region.c
 +     */
 +    tctish_released_bytes = 0;
 +
-+    if (keep == 0 || keep >= total || rw == NULL) {
++    /*
++     * Zero is only a boundary nobody has set, except when everything is going:
++     * under TCTI there is no prologue, so everything starts at the very front.
++     */
++    if ((keep == 0 && !everything) || keep >= total || rw == NULL) {
 +        return;
 +    }
 +
@@ -1484,16 +2243,93 @@ diff --git a/tcg/region.c b/tcg/region.c
 +        keep = from - rw;
 +    }
 +
++    /*
++     * After a release of everything, nothing past the prologue's page may be
++     * assumed prepared, whatever the kernel makes of the advice below: the
++     * protection changes first. So the next grow prepares from here. (After an
++     * ordinary shrink the boundary is already where the shrink put it.)
++     */
++    if (everything) {
++        tctish_usable_bytes = keep;
++        qatomic_set(&tctish_needs_preparing, true);
++    }
++
 +#ifdef MADV_FREE_REUSABLE
 +    bool released = true;
++    size_t resident;
 +
 +    /*
 +     * Counted separately from the bytes, because "gave nothing back" and "was
-+     * never asked" are the same number and only one of them is a problem.
++     * never asked" are the same number and only one of them is a problem. See
++     * tctish_release_attempted() for why the count comes at the end.
 +     */
-+    tctish_release_attempts++;
 +    tctish_release_errno_rw = 0;
 +    tctish_release_errno_rx = 0;
++
++#if TCTISH_BLESSING_POSSIBLE
++    /*
++     * Emptied instead, where the buffer allows it: see tctish_purgeable. Every
++     * piece lying wholly within the range goes, which for a release of
++     * everything is all of them; a piece the range only reaches into is kept,
++     * whole, still prepared and still executable.
++     *
++     * Each is made non-volatile again at once. The pages are gone either way;
++     * what matters is that the kernel cannot purge a piece on its own later,
++     * from under code TCG has translated into it since.
++     */
++    if (tctish_purgeable) {
++        size_t size = region.total_size;
++        size_t emptied = 0;
++        size_t start, end;
++
++        for (size_t offset = keep; offset < keep + length; offset = end) {
++            int state = VM_PURGABLE_EMPTY;
++            size_t in_core;
++            kern_return_t ret;
++
++            tctish_piece_at(offset, size, &start, &end);
++            if (start < keep || end > keep + length) {
++                continue;
++            }
++
++            in_core = tctish_resident_bytes(rw + start, end - start);
++            ret = mach_vm_purgable_control(mach_task_self(),
++                                           (mach_vm_address_t)(rw + start),
++                                           VM_PURGABLE_SET_STATE, &state);
++            if (ret != KERN_SUCCESS) {
++                /* Nothing changed there, so nothing is lost. */
++                error_report("code cache: could not empty the piece at %zu "
++                             "MiB: %d", (size_t)(start / MiB), ret);
++                tctish_release_errno_rw = EPERM;
++                break;
++            }
++            emptied += in_core;
++
++            state = VM_PURGABLE_NONVOLATILE;
++            ret = mach_vm_purgable_control(mach_task_self(),
++                                           (mach_vm_address_t)(rw + start),
++                                           VM_PURGABLE_SET_STATE, &state);
++            if (ret != KERN_SUCCESS) {
++                /*
++                 * Volatile memory can be taken at any moment, so none of it
++                 * may be translated into. Refusing to grow is what ensures
++                 * that, and the app, failing to prepare, asks what to do.
++                 */
++                error_report("code cache: could not keep the piece at %zu "
++                             "MiB: %d; growth stops here", (size_t)(start / MiB), ret);
++                tctish_ever_unprotected = true;
++                break;
++            }
++        }
++
++        tctish_released_bytes = emptied;
++        tctish_release_attempted();
++        return;
++    }
++#endif
++
++    /* What was resident, which is what comes off the footprint; not the range. */
++    resident = tctish_resident_bytes(rw + keep, length);
 +
 +    /*
 +     * The executable alias first, and only after making it writable.
@@ -1503,10 +2339,10 @@ diff --git a/tcg/region.c b/tcg/region.c
 +     * through a read-execute view of them, and while it holds on to them
 +     * through that view the writable side's consent counts for nothing.
 +     *
-+     * Dropping to read-write costs nothing that is not already being given up:
-+     * these pages are out of TCG's reach and cannot be executed again until a
-+     * debugger has prepared them afresh, which tctish_code_cache_grow() does --
-+     * restoring the protection on its way.
++     * Under TXM this is one-way: those addresses can never be executed again
++     * in this process; see tctish_ever_unprotected. Growth stops here, and a
++     * release of everything is refused outright. Only reached under TXM when
++     * the buffer couldn't be made purgeable.
 +     */
 +    if (tcg_splitwx_diff != 0) {
 +        char *rx = rw + tcg_splitwx_diff;
@@ -1548,9 +2384,27 @@ diff --git a/tcg/region.c b/tcg/region.c
 +        released = false;
 +    }
 +
-+    tctish_released_bytes = released ? length : 0;
++    /* What was resident, which is what comes off the footprint; not the range. */
++    tctish_released_bytes = released ? resident : 0;
++    tctish_release_attempted();
 +#endif
 +#endif
++}
++
++/*
++ * Pays out whatever release is pending, and marks a release of everything
++ * settled either way, so that nobody waits on one that came to nothing. Call
++ * with tctish_cache_lock held.
++ */
++static void tctish_release_unused__locked(void)
++{
++    bool everything = tctish_release_pending && tctish_release_everything;
++
++    tctish_pay_release__locked();
++
++    if (everything) {
++        qatomic_store_release(&tctish_release_all_outstanding, false);
++    }
 +}
 +
 +void tctish_release_unused(void)
@@ -1595,6 +2449,11 @@ diff --git a/tcg/region.c b/tcg/region.c
 +/* Whether there is anything left to bring into use. */
 +bool tctish_code_cache_can_grow(void)
 +{
++#if TCTISH_BLESSING_POSSIBLE
++    if (jit_region_blessing_requested() && tctish_ever_unprotected) {
++        return false;
++    }
++#endif
 +    return tcg_region_ready() && tctish_usable_bytes < region.total_size;
 +}
 +
@@ -1661,6 +2520,65 @@ diff --git a/tcg/region.c b/tcg/region.c
 +}
 +
 +/*
++ * Hands the whole code buffer back to the system at the next flush, all but
++ * the page holding the prologue, and returns whether a release was arranged.
++ *
++ * A shrink can only go as low as a region per vCPU, and after a flush those
++ * first regions are exactly where TCG translates into again, so a shrink gives
++ * back the tail and keeps nearly everything that was ever resident. This takes
++ * the kept regions too.
++ *
++ * Only for a machine that cannot run until the app has put the usable size
++ * back with tctish_code_cache_grow(): in tctiSH, a parked one.
++ *
++ * Refused wherever the buffer has an executable alias and is not purgeable.
++ * Releasing through that alias costs its addresses their executability for
++ * good under TXM (see tctish_ever_unprotected), and before TXM nothing puts it
++ * back. A purgeable buffer is emptied instead, which touches neither alias;
++ * see tctish_purgeable. So: TCTI, where nothing is executed from the buffer at
++ * all, and JIT under TXM when the buffer could be made purgeable.
++ *
++ * The flush is asked for here, and runs on the vCPUs even while the machine
++ * is stopped; watch tctish_code_cache_release_attempts() to see it happen.
++ */
++bool tctish_code_cache_release_all(void)
++{
++    if (tcg_region_usable_size() == 0 ||
++        (tcg_splitwx_diff != 0 && !tctish_purgeable)) {
++        return false;
++    }
++
++    qemu_mutex_lock(&tctish_cache_lock);
++    tctish_release_everything = true;
++    tctish_release_upto = region.total_size;
++    tctish_release_pending = true;
++    qatomic_store_release(&tctish_release_all_outstanding, true);
++    qemu_mutex_unlock(&tctish_cache_lock);
++
++    tctish_request_flush();
++    return true;
++}
++
++/* Whether a release of everything is still waiting for its flush. */
++bool tctish_code_cache_release_all_outstanding(void)
++{
++    return qatomic_load_acquire(&tctish_release_all_outstanding);
++}
++
++/* Whether a release of everything has left the cache to be prepared again. */
++bool tctish_code_cache_needs_preparing(void)
++{
++    return qatomic_read(&tctish_needs_preparing);
++}
++
++/* Whether the machine may run, as far as the code cache goes. */
++bool tctish_code_cache_may_run(void)
++{
++    return !tctish_code_cache_release_all_outstanding() &&
++           !tctish_code_cache_needs_preparing();
++}
++
++/*
 + * Brings the code buffer into use up to `target` bytes, and returns how much is
 + * usable afterwards -- or zero if nothing changed.
 + *
@@ -1715,27 +2633,15 @@ diff --git a/tcg/region.c b/tcg/region.c
 +        size_t len = target - tctish_usable_bytes;
 +        void *prepared;
 +
-+        /* Trapping with nothing listening kills the process. */
-+        if (!is_debugger_attached()) {
++        /* Released pages cannot be made executable again; see the flag. */
++        if (tctish_ever_unprotected) {
++            error_report("code cache: cannot grow past a release under TXM");
 +            goto unchanged;
 +        }
 +
-+        /*
-+         * Executable again, where a release left it writable so that the kernel
-+         * would take it back. Skipped entirely until something has actually
-+         * been unprotected, because until then every page is as it was mapped.
-+         */
-+        if (tctish_ever_unprotected) {
-+            char *protect = from;
-+            size_t protect_len = len;
-+
-+            tctish_pages_covering(&protect, &protect_len);
-+
-+            if (mprotect(protect, protect_len, PROT_READ | PROT_EXEC) != 0) {
-+                error_report("code cache: could not re-protect %zu bytes: %s",
-+                             protect_len, strerror(errno));
-+                goto unchanged;
-+            }
++        /* Trapping with nothing listening kills the process. */
++        if (!is_debugger_attached()) {
++            goto unchanged;
 +        }
 +
 +        /*
@@ -1762,6 +2668,7 @@ diff --git a/tcg/region.c b/tcg/region.c
 +    tctish_usable_bytes = target;
 +    tcg_region_set_usable(target);
 +    usable = tcg_region_usable_size();
++    qatomic_set(&tctish_needs_preparing, false);
 +    qemu_mutex_unlock(&tctish_cache_lock);
 +    return usable;
 +

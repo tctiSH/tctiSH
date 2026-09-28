@@ -421,7 +421,15 @@ enum CodeCache {
     /// against.
     static func recordBooted() {
         UserDefaults.standard.set(bootSignature, forKey: "last_code_cache")
+        launchedInitialSize = initialSize
     }
+
+    /// What this launch prepared at boot, in MiB, or nil before it has booted.
+    ///
+    /// Not `initialSize`, which follows the settings and so describes the next
+    /// launch. QEMU laid its regions out for this figure, and preparing any
+    /// less than it could leave an invalid region handed out.
+    private(set) static var launchedInitialSize: Int?
 }
 
 // MARK: - Snapshot compatibility
@@ -600,6 +608,8 @@ enum AppSetting: String {
     case jitMode = "jit_mode"
     case fontSize = "font_size"
     case codeCacheNotifications = "code_cache_notifications"
+    case parkInBackground = "park_in_background"
+    case releaseCodeCacheInBackground = "release_code_cache_in_background"
 
     var string: String {
         UserDefaults.standard.string(forKey: rawValue) ?? ""

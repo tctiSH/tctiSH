@@ -227,7 +227,7 @@ main() {
     # console=ttyS0 is the one deliberate difference from the app, which reaches
     # the guest over SSH and leaves the kernel talking to nothing. Here the
     # console is the point.
-    local cmdline="tcti_disk=file"
+    local cmdline="tcti_disk=file page_reporting.page_reporting_order=2 rcupdate.rcu_cpu_stall_suppress=1"
     if [ "$USE_SSH" -eq 0 ]; then
         cmdline="$cmdline console=ttyS0"
         argv+=(-nographic)

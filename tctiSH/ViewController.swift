@@ -244,6 +244,18 @@ class ViewController: UIViewController {
             name: AppDelegate.reconnectDeferred,
             object: nil)
 
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(unparkStarted),
+            name: AppDelegate.unparkStarted,
+            object: nil)
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(unparkDidFail),
+            name: AppDelegate.unparkDidFail,
+            object: nil)
+
         // Belt and braces: the observer goes on before anything could possibly have connected, but
         // a pill that never goes away is a worse bug than a pill that never appears.
         guard !terminal.connected else { return }
@@ -290,12 +302,79 @@ class ViewController: UIViewController {
     }
 
     /// Says why the shell hasn't come back yet.
-    ///
-    /// The same pill `terminalWillReconnect` uses, under the same key, so when
-    /// the save finishes and the reconnect really starts this changes its
-    /// message rather than stacking a second one beside it.
     @objc private func reconnectDeferred() {
         showBootProgress(message: "Finishing session save")
+    }
+
+    /// Says why the shell hasn't come back yet when the memory was given back
+    /// in the background and the session is being read back in.
+    @objc private func unparkStarted() {
+        // A return that tries again by itself makes the question moot, and answering it afterwards
+        // would act on a machine that is no longer parked.
+        unparkAlert?.dismiss(animated: true)
+        unparkAlert = nil
+
+        showBootProgress(message: "Restoring session")
+    }
+
+    /// The question `unparkDidFail` is asking, while it's up.
+    private weak var unparkAlert: UIAlertController?
+
+    /// Asks what to do about a session that wouldn't come back.
+    ///
+    /// No cancel: the machine is parked and can't run until one of these
+    /// happens, so there is nothing to go back to.
+    @objc private func unparkDidFail() {
+        // Asked once, however many times it fails before an answer.
+        if let unparkAlert, !unparkAlert.isBeingDismissed {
+            return
+        }
+
+        var presenter: UIViewController = self
+        while let next = presenter.presentedViewController {
+            presenter = next
+        }
+        guard !presenter.isBeingDismissed else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.unparkDidFail()
+            }
+            return
+        }
+
+        bootStallWatch?.cancel()
+        bootStallWatch = nil
+        status?.dismiss(key: Self.bootStatusKey)
+
+        let appDelegate = UIApplication.shared.delegate as? AppDelegate
+
+        let alert = UIAlertController(
+            title: "Couldn't restore your session",
+            message: "tctiSH gave Linux's memory back to iOS while it was in the background, "
+                + "and reading your session back in has failed. It is still saved: quitting "
+                + "and reopening tctiSH tries again from the start. Starting Linux afresh "
+                + "gets you a shell now, but anything in the session is lost.",
+            preferredStyle: .alert)
+
+        alert.addAction(
+            UIAlertAction(title: "Try Again", style: .default) { _ in
+                appDelegate?.recoverFromFailedUnpark(.retry)
+            })
+
+        alert.addAction(
+            UIAlertAction(title: "Quit tctiSH", style: .default) { _ in
+                appDelegate?.recoverFromFailedUnpark(.quit)
+            })
+
+        alert.addAction(
+            UIAlertAction(title: "Start Linux Afresh", style: .destructive) { [weak self] _ in
+                // Only if it was taken up, or the pill would wait on a boot nobody started.
+                if appDelegate?.recoverFromFailedUnpark(.startAfresh) == true {
+                    self?.showBootProgress(message: "Starting Linux")
+                }
+            })
+
+        unparkAlert = alert
+        presenter.present(alert, animated: true)
     }
 
     /// Puts the boot pill up as a spinner, and starts the clock on it.
