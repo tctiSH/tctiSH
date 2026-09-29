@@ -30,7 +30,7 @@ REPO="$(cd "$ASSETS/.." && pwd)"
 
 # The machine type the app's QEMU defaults to. Bump alongside the QEMU upgrade,
 # not before it: the point is to match what ships, not to be current.
-MACHINE="pc-i440fx-10.0"
+MACHINE="pc-i440fx-11.1"
 
 # Matches qemu_launcher.c. The guest's /etc/network config expects this subnet.
 GUEST_IP="192.168.100.100"
@@ -210,6 +210,7 @@ main() {
         -M "$MACHINE"
         -m "$MEMORY"
         -smp "$CPUS"
+        -cpu Haswell-v4,-pcid,-tsc-deadline,-invpcid,-spec-ctrl
         -kernel "$ASSETS/bzImage"
         -initrd "$ASSETS/initrd.img"
         -device virtio-net-pci,id=net1,netdev=net0

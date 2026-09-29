@@ -122,17 +122,28 @@
         with pkgs;
         [
           # gettext's configure probes for bison; the others are meson's and
-          # QEMU's. QEMU builds its own meson into a pyvenv, so the one here is
-          # for the glib build.
+          # QEMU's. QEMU builds its own meson into a pyvenv, from a wheel in its
+          # checkout, so the one here is for the glib build -- and for fetching
+          # QEMU's meson subprojects, which build_dependencies.sh does up front.
           bison
-          python3
+
+          # setuptools and wheel for QEMU's configure: since 11.0 it installs a
+          # "tooling" group into its pyvenv on every configure, and with
+          # --disable-download it can only find these two in the Python it was
+          # built from -- the pyvenv sees the system site-packages -- or fail.
+          (python3.withPackages (ps: [
+            ps.setuptools
+            ps.wheel
+          ]))
           meson
           ninja
 
-          # meson resolves [wrap-git] subprojects by shelling out to git --
-          # QEMU's libucontext and slirp, at configure time. Before this was
-          # listed, it came from the nix-darwin system profile, which the
-          # shellHook below now removes from $PATH.
+          # build_dependencies.sh checks out the third-party/qemu submodule
+          # when it is missing, and meson shells out to git for QEMU's
+          # [wrap-git] subprojects -- slirp, libucontext and three more,
+          # fetched before anything builds. Before this was listed, it came
+          # from the nix-darwin system profile, which the shellHook below now
+          # removes from $PATH.
           git
         ]
         ++ [
@@ -169,10 +180,14 @@
       # ships: that one is cross-compiled for iOS by build_dependencies.sh, links
       # against the TCTI backend, and cannot run here. They are different builds
       # of the same project, and the distinction is worth keeping in mind when
-      # reading a local boot -- it exercises the guest image, not TCTI.
+      # reading a local boot as it exercises the guest image, not TCTI.
       #
       # qemu-img comes along, which is what makes a working copy of the shipped
       # disk possible without a second tool.
+      #
+      # It has to be at least as new as the QEMU the app ships: boot_guest.sh
+      # pins that QEMU's machine type (pc-i440fx-11.1) and CPU model, and an
+      # older one has neither.
       guestTools = [ pkgs.qemu ];
 
       # Everything `make format` drives, minus swift-format and clang-format,

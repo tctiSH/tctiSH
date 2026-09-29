@@ -175,10 +175,71 @@ download_all() {
 
     download $PIXMAN_SRC
 
-    # QEMU last, because it is by far the largest and the one most likely to be
-    # interrupted. download() applies $PATCHES_DIR/qemu-10.0.12-utm.patch on the
-    # way out, which is where every tctiSH change to QEMU lives.
-    download $QEMU_SRC
+    prepare_qemu_source
+}
+
+# QEMU is not downloaded: it is the third-party/qemu submodule, tctiSH's fork
+# (tctiSH/qemu, branch tctish-edition), and every tctiSH change to it is a
+# commit there. The build directories live under $BUILD_DIR, so the checkout
+# itself is never written to by a build and can be edited, committed and
+# rebased like any other tree.
+#
+# What a checkout lacks, where a release tarball has it, is the meson
+# subprojects its wraps name. They are fetched here, with the rest of the
+# downloads, rather than by configure several minutes in -- the build then
+# passes --disable-download, so a network failure can only happen up front.
+# This is also the list configure would fetch: keep it to what this build
+# configures, since some wraps are large and none of the rest are used.
+QEMU_SUBPROJECTS="keycodemapdb berkeley-softfloat-3 berkeley-testfloat-3 slirp libucontext"
+
+prepare_qemu_source() {
+    if [ ! -f "$QEMU_DIR/configure" ]; then
+        echo "${GREEN}Checking out the QEMU submodule...${NC}"
+        git -C "$BASEDIR" submodule update --init third-party/qemu
+    fi
+    for sub in $QEMU_SUBPROJECTS; do
+        drop_stale_qemu_subproject "$sub"
+    done
+    echo "${GREEN}Fetching QEMU's meson subprojects...${NC}"
+    (cd "$QEMU_DIR" && meson subprojects download $QEMU_SUBPROJECTS)
+}
+
+# `meson subprojects download` skips a subproject whose directory already
+# exists, and --disable-download keeps configure from fetching one, so after a
+# rebase onto a release whose wrap moved -- a new revision, or a changed overlay
+# in packagefiles/ -- the build would go on using the old checkout without a
+# word. Such a checkout is removed here so the download replaces it.
+#
+# Only a pinned revision (a full commit hash, which every wrap this build uses
+# has) can be compared. A branch or tag would never match HEAD, and removing on
+# that basis would put a clone back in every build.
+drop_stale_qemu_subproject() {
+    wrap="$QEMU_DIR/subprojects/$1.wrap"
+    dir="$QEMU_DIR/subprojects/$1"
+    [ -d "$dir/.git" ] || return 0
+
+    want="$(sed -n 's/^revision *= *//p' "$wrap")"
+    overlay="$(sed -n 's/^patch_directory *= *//p' "$wrap")"
+    stale=
+
+    if echo "$want" | grep -Eq '^[0-9a-f]{40}$' &&
+        [ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" != "$want" ]; then
+        stale="it is not at the wrap's revision"
+    fi
+    if [ -n "$overlay" ] && [ -d "$QEMU_DIR/subprojects/packagefiles/$overlay" ]; then
+        # The overlay is copied over the clone, so each of its files must be
+        # there as it is now.
+        for f in $(cd "$QEMU_DIR/subprojects/packagefiles/$overlay" && find . -type f); do
+            if ! cmp -s "$QEMU_DIR/subprojects/packagefiles/$overlay/$f" "$dir/$f"; then
+                stale="its packagefiles overlay has changed"
+            fi
+        done
+    fi
+
+    if [ -n "$stale" ]; then
+        echo "${GREEN}Removing QEMU subproject $1, as ${stale}...${NC}"
+        rm -rf "$dir"
+    fi
 }
 
 copy_private_headers() {
@@ -346,10 +407,14 @@ build() {
 build_qemu_tcti() {
     NAME="QEMU_TCTI"
 
-    # Out of tree, inside the unpacked source. $QEMU_DIR is the tarball's own
-    # directory; both variants get their own build directory beneath it so the
-    # second does not have to undo the first.
-    BUILD_SUBDIR="$QEMU_DIR/qemu_tcti"
+    # Out of tree, and out of the checkout too; each variant gets its own
+    # directory so the second does not have to undo the first. Emptied first,
+    # as the old tarball tree used to be by being re-extracted: a stale
+    # configuration surviving a change of flags is the failure this avoids.
+    BUILD_SUBDIR="$BUILD_DIR/qemu_tcti"
+    if [ -z "$REBUILD" ]; then
+        rm -rf "$BUILD_SUBDIR"
+    fi
 
     # QEMU's configure reads $CFLAGS/$CXXFLAGS/$LDFLAGS straight out of the
     # environment and writes them into its meson cross file. It used to take
@@ -365,8 +430,8 @@ build_qemu_tcti() {
     # though every other binary it writes into the cross file is a full Xcode path. Pass it
     # explicitly so the ObjC probe cannot be captured by whatever clang happens to come first --
     # a nix one links against the macOS SDK and fails against our iOS target.
-    ../configure --prefix="$PREFIX" --host="$CHOST" --cross-prefix="" --with-coroutine=libucontext \
-        --objcc="$OBJCC" $@
+    "$QEMU_DIR/configure" --prefix="$PREFIX" --host="$CHOST" --cross-prefix="" \
+        --with-coroutine=libucontext --objcc="$OBJCC" $@
     echo "${GREEN}Building QEMU...${NC}"
     ninja
     echo "${GREEN}Installing QEMU...${NC}"
@@ -377,10 +442,14 @@ build_qemu_tcti() {
 build_qemu_jit() {
     NAME="QEMU_JIT"
 
-    # Out of tree, inside the unpacked source. $QEMU_DIR is the tarball's own
-    # directory; both variants get their own build directory beneath it so the
-    # second does not have to undo the first.
-    BUILD_SUBDIR="$QEMU_DIR/qemu_jit"
+    # Out of tree, and out of the checkout too; each variant gets its own
+    # directory so the second does not have to undo the first. Emptied first,
+    # as the old tarball tree used to be by being re-extracted: a stale
+    # configuration surviving a change of flags is the failure this avoids.
+    BUILD_SUBDIR="$BUILD_DIR/qemu_jit"
+    if [ -z "$REBUILD" ]; then
+        rm -rf "$BUILD_SUBDIR"
+    fi
 
     # QEMU's configure reads $CFLAGS/$CXXFLAGS/$LDFLAGS straight out of the
     # environment and writes them into its meson cross file. It used to take
@@ -396,8 +465,8 @@ build_qemu_jit() {
     # though every other binary it writes into the cross file is a full Xcode path. Pass it
     # explicitly so the ObjC probe cannot be captured by whatever clang happens to come first --
     # a nix one links against the macOS SDK and fails against our iOS target.
-    ../configure --prefix="$PREFIX" --host="$CHOST" --cross-prefix="" --with-coroutine=libucontext \
-        --objcc="$OBJCC" $@
+    "$QEMU_DIR/configure" --prefix="$PREFIX" --host="$CHOST" --cross-prefix="" \
+        --with-coroutine=libucontext --objcc="$OBJCC" $@
     echo "${GREEN}Building QEMU-JIT...${NC}"
     ninja
     echo "${GREEN}Copying single library...${NC}"
@@ -650,6 +719,8 @@ QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-dbus-display"
 # fetching and building dtc for a library nothing would link.
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-fdt"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --enable-virtfs --target-list=x86_64-softmmu"
+# prepare_qemu_source() has already fetched every subproject this needs.
+QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-download"
 QEMU_PLATFORM_TCTI_FLAGS="--enable-tcg-threaded-interpreter"
 
 # Setup directories
@@ -663,8 +734,7 @@ QEMU_DIR=""
 source "$PATCHES_DIR/sources"
 
 if [ -z "$QEMU_DIR" ]; then
-    FILE="$(basename $QEMU_SRC)"
-    QEMU_DIR="$BUILD_DIR/${FILE%.tar.*}"
+    QEMU_DIR="$BASEDIR/third-party/qemu"
 elif [ ! -d "$QEMU_DIR" ]; then
     echo "${RED}Cannot find: ${QEMU_DIR}...${NC}"
     exit 1

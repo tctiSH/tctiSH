@@ -29,7 +29,6 @@
   "excludes": [
     // Submodules and vendored code. Reformatting any of these would either be
     // lost on the next update or turn a future rebase into a merge conflict.
-    "qemu-tcti/**",
     "third-party/**",
     "Pods/**",
 
