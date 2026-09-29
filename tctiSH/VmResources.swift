@@ -449,9 +449,10 @@ enum VmSnapshots {
 
     /// QEMU's migration stream version.
     ///
-    /// Hand-maintained; bump on a QEMU upgrade. There is no compatibility
-    /// guarantee across versions.
-    static let migrationEpoch = "qemu-11.1.2"
+    /// Hand-maintained; bump on a QEMU upgrade, and when the fork changes what
+    /// a device saves (the suffix follows the fork's `-tctish.N` tags). There
+    /// is no compatibility guarantee across versions.
+    static let migrationEpoch = "qemu-11.1.2-tctish.2"
 
     /// The shape of the machine QEMU is told to build.
     ///
