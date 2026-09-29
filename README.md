@@ -24,18 +24,22 @@ libssh2 and the Pods, and each of those is a rule on the file it produces rather
 so they run once and then stay quiet. Running the numbered steps by hand is only for doing one in
 isolation.
 
-`deps` watches the files that decide what it builds (`build_dependencies.sh`, the source URLs in
-`third-party/dependencies/sources`, and the patches beside them) so editing any of those is enough
-to trigger a rebuild. `stikjit` cannot do the same, because it tracks a submodule and no file
-reliably changes when a gitlink moves; after bumping StikJIT, force it with
-`make clean-stikjit stikjit`.
+`deps` watches the things that decide what it builds: `build_dependencies.sh`, the source URLs in
+`third-party/dependencies/sources`, and the `third-party/qemu` checkout, both its commit and any
+edits not yet committed. Changing any of those is enough to trigger a rebuild. `stikjit` does not
+watch its submodule; after bumping StikJIT, force it with `make clean-stikjit stikjit`.
 
-StikJIT is the only submodule a `make` target builds from; `third-party/SwiftTerm` is the other one,
-consumed by Xcode directly. Clone with submodules, or fix one you already have:
+`make` builds from two submodules: `third-party/qemu`, tctiSH's QEMU fork (see below), and
+`third-party/StikJIT`. `third-party/SwiftTerm`, the third, is consumed by Xcode directly. Fetch them
+after cloning, or fix a clone you already have:
 
 ```sh
-git submodule update --init --recursive
+git submodule update --init
 ```
+
+Not `--recursive`, and not `git clone --recurse-submodules`: QEMU has submodules of its own, the
+firmware sources under `roms/` (EDK2 among them, gigabytes with its own submodules), and the build
+uses none of them. The prebuilt firmware in `pc-bios/` is part of the checkout.
 
 ### 1. Dependencies
 
@@ -44,11 +48,18 @@ make deps
 ```
 
 Builds QEMU and its libraries into `sysroot-iOS-arm64/`. About six minutes from scratch once the
-tarballs are cached, and only needed when something under `third-party/dependencies/` changes.
+tarballs are cached, and only needed when `third-party/qemu` or something under
+`third-party/dependencies/` changes.
 
-It fetches from the network while it runs: five source tarballs up front, then two git clones part
-way through, for QEMU's `libucontext` and `slirp` meson subprojects. Behind a per-process firewall
-those clones are the part that will stall.
+It fetches everything up front, before building anything: the tarballs named in
+`third-party/dependencies/sources`, then the meson subprojects QEMU's checkout lacks (a few git
+clones, `slirp` and `libucontext` among them). QEMU is then configured with `--disable-download`, so
+a network failure cannot land minutes into the build. Behind a per-process firewall the clones are
+the part that will stall; once they are in the checkout, later builds need no network for them.
+
+QEMU is [tctiSH's fork](https://github.com/tctiSH/qemu), branch `tctish-edition`: upstream's latest
+release with our changes on top as a series of commits (UTM's iOS and TCTI work, and tctiSH's own).
+Change QEMU by committing in the submodule; the series is rebased onto each new release.
 
 ### 2. StikJIT
 
@@ -354,7 +365,7 @@ TCG; the QEMU the app ships is cross-compiled for iOS, links the TCTI backend, a
 dylib the app `dlopen`s, so it cannot run on macOS at all. Anything about execution under
 translation still needs a device.
 
-It does pin the machine _type_ to `pc-i440fx-10.0`, the default of the QEMU we ship, so that a newer
+It does pin the machine _type_ to `pc-i440fx-11.1`, the default of the QEMU we ship, so that a newer
 host QEMU does not quietly test a different machine. That axis is not hypothetical: `pc-i440fx-6.2`
 changed what a bare `-smp 4` meant and cost the guest three of its four CPUs.
 

@@ -34,12 +34,30 @@ GUEST_KERNEL      := assets/bzImage
 
 # -- Building -------------------------------------------------------------------------------------
 
-# QEMU is a release tarball plus a patch file, both named in
-# third-party/dependencies/, so the prerequisites are the things that decide what gets built:
-# the script, the source URL, and our changes to it. StikJIT is still a submodule and still
+# QEMU is the third-party/qemu submodule, which points at tctiSH's fork. What decides what gets
+# built is that checkout -- its commit, and any edits not yet committed, in files git tracks or not
+# -- so both are summarised into a stamp, and the library depends on the stamp. 
+#
+# The stamp's recipe runs every time, but rewrites the file only when the summary changes, so an
+# untouched tree stays quiet and an edit in it is noticed. StikJIT is also a submodule and still
 # tracks nothing -- after bumping it, force the rebuild with `make clean-stikjit stikjit`.
-$(QEMU_LIBRARY): build_dependencies.sh third-party/dependencies/sources \
-                 $(wildcard third-party/dependencies/*.patch)
+#
+# The submodule is checked out here, not left to build_dependencies.sh: in an empty directory,
+# `git -C` finds tctiSH's own repository instead, and a stamp of that would change as soon as the
+# build checked QEMU out, costing a second full build.
+QEMU_STAMP := build-iOS-arm64/qemu-source.stamp
+
+.PHONY: qemu-source-changed
+$(QEMU_STAMP): qemu-source-changed
+	@mkdir -p $(dir $@)
+	@[ -e third-party/qemu/.git ] || git submodule update --init third-party/qemu
+	@{ git -C third-party/qemu rev-parse HEAD; git -C third-party/qemu status --porcelain; \
+	   git -C third-party/qemu diff HEAD; \
+	   cd third-party/qemu && git ls-files -z --others --exclude-standard | xargs -0 -r shasum; \
+	 } 2>/dev/null | shasum > $@.new
+	@if cmp -s $@.new $@; then rm $@.new; else mv $@.new $@; fi
+
+$(QEMU_LIBRARY): build_dependencies.sh third-party/dependencies/sources $(QEMU_STAMP)
 	$(SHELL_WRAPPER) ./build_dependencies.sh
 
 # Pinned by version inside build_idevice.sh, so that is the only prerequisite: a
@@ -166,7 +184,7 @@ endef
 
 # Not ours to reformat, and excluded everywhere. See tmp/plans/autoformatting.md.
 #
-#   third-party             submodules and vendored sources, including the QEMU patch
+#   third-party             submodules and vendored sources, including QEMU
 #   Pods                    vendored by CocoaPods, rewritten by `pod install`
 #   assets                  guest-side build scripts, their own world
 #   patches                 context lines are literal, so reformatting silently breaks them
@@ -334,11 +352,10 @@ clean-idevice: ## Remove the idevice source checkout and its build output
 clean-libssh2: ## Remove the libssh2 and OpenSSL build tree and its downloads
 	rm -rf $(LIBSSH2_BUILD)
 
-# Both QEMU build trees now live at build-iOS-arm64/<tarball>/qemu_{tcti,jit}, so a single
-# `rm -rf build-iOS-arm64` reaches them. It used to configure inside the qemu-tcti submodule, which
-# outlived that and left stale objects and a stale config-host.mak behind -- the one thing a clean
-# exists to rule out. Removing the tarballs with it also costs a re-download, which is most of why
-# this is not something to reach for casually.
+# Both QEMU build trees live at build-iOS-arm64/qemu_{tcti,jit}, outside the submodule checkout,
+# so a single `rm -rf build-iOS-arm64` reaches them and leaves the checkout alone. Removing the
+# dependency tarballs with it costs a re-download, which is most of why this is not something to
+# reach for casually.
 #
 # By far the largest build tree here: an unpacked kernel source, an object tree with full debug
 # info, and the tarball. The toolchain volume is another ~3.6 GB, and lives in the container

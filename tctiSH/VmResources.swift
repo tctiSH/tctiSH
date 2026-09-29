@@ -451,7 +451,7 @@ enum VmSnapshots {
     ///
     /// Hand-maintained; bump on a QEMU upgrade. There is no compatibility
     /// guarantee across versions.
-    static let migrationEpoch = "qemu-10.0.12"
+    static let migrationEpoch = "qemu-11.1.2"
 
     /// The shape of the machine QEMU is told to build.
     ///

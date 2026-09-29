@@ -264,7 +264,7 @@ size_t qemu_code_cache_grow(size_t target) {
        footprint follows what it is using rather than its high-water mark. Not a balloon -- there  \
        is no target size and nothing on the host decides anything. Page cache is in use as far     \
        as the guest is concerned, so it is never reported. The discard this ends in only frees     \
-       memory on Darwin because our QEMU patch maps fresh memory over the range in                 \
+       memory on Darwin because our QEMU fork maps fresh memory over the range in                  \
        ram_block_discard_range(). */                                                               \
     "-device", "virtio-balloon-pci,free-page-reporting=on",                                        \
                                                                                                    \
@@ -297,6 +297,14 @@ size_t qemu_code_cache_grow(size_t target) {
        longer has to be spelled out. Verified under TCG: a plain `-smp 4` gives nproc == 4. */     \
     "-smp", "4",                                                                                   \
                                                                                                    \
+    /* The CPU model: x86-64-v3 (AVX2, FMA, BMI2 and MOVBE on top of SSE4.2), which the software   \
+       people want to run increasingly assumes. QEMU's default, qemu64, stops at SSE3.             \
+                                                                                                   \
+       TCG cannot provide four of Haswell's features and would drop them anyway, warning once per  \
+       vCPU on every boot, so they are dropped here instead. None is visible to user space: pcid   \
+       and invpcid are TLB tagging, tsc-deadline a timer mode, spec-ctrl a mitigation MSR. */      \
+    "-cpu", "Haswell-v4,-pcid,-tsc-deadline,-invpcid,-spec-ctrl",                                  \
+                                                                                                   \
     /* Monitor connection for in-guest tools. */                                                   \
     "-monitor", "tcp:localhost:10045,server=on,wait=off",                                          \
                                                                                                    \
@@ -307,7 +315,7 @@ size_t qemu_code_cache_grow(size_t target) {
 const char *qemu_machine_signature(void) {
     static const char *const parts[] = { TCTISH_MACHINE_ARGS };
 
-    // Comfortably more than the ~354 bytes the current list needs. Built under
+    // Comfortably more than the ~530 bytes the current list needs. Built under
     // dispatch_once rather than a flag, because this is reached both from the
     // main thread at launch and from the boot queue when the epoch is recorded.
     // Those two would write identical bytes, so the race is benign -- but a
