@@ -1,128 +1,157 @@
+<p align=center>
+  <img src="https://avatars.githubusercontent.com/u/112928231?s=200"/>
+</p>
+
 # tctiSH
 
-This is an experimental iSH-alike that runs under the TCTI pseudo-JIT. It does not yet, y'know,
-work.
+tctiSH is a full Linux shell for iOS and iPadOS built atop QEMU in order to support any x86_64
+program you can imagine. It is built atop the [QEMU](https://github.com/tctiSH/qemu) machine
+emulation and virtualization framework, augmented with the TCTI pseudo-JIT, support features for the
+app, and many performance improvements for this use-case.
 
-Unless we got this working already and just didn't update the README.md. In that case, it works.
+- **Full System Emulation:** Because it is built atop QEMU, tctiSH emulates _an entire machine and
+  operating system_, rather than being just an emulator for a linux userland using syscall
+  translation akin to [iSH](https://github.com/ish-app/ish). In doing so it is doing more work (as
+  there is a whole Linux kernel running), but this also means that there is no software compiled for
+  x86_64 linux that it cannot run.
+- **Good Performance via TCTI:** iOS and iPadOS do not generally allow apps to execute code using a
+  Just-In-Time (JIT) compiler, which is used by most system emulators to get good performance. TCTI,
+  the Tiny Code Threaded Interpreter, is a backend for QEMU's TCG that compiles the tiny code to
+  chains of gadgets, reducing overhead _significantly_ when compared to direct interpretation of the
+  same. TCTI provides performance that is almost always within one order of magnitude of TCG's
+  standard JIT, but the gap is usually even smaller than that.
+- **Optional JIT:** The app also supports running with JIT for near-native performance in many
+  scenarios. With a loopback VPN such as [LocalDevVPN](https://github.com/jkcoxson/LocalDevVPN)
+  running on device, the app can use [StikJIT](https://github.com/StikDebug/StikJIT) to enable JIT
+  without needing an additional program. It does need an RRPairing file to do this, but on iOS 27 it
+  can generate that file on-device, without the support of a computer.
 
-## Building
+The roadmap for tctiSH is big, containing a mixture of performance improvements, UX improvements,
+and new features. Fundamentally, the goal is to make it the best place to run linux programs of all
+kinds on your iOS devices.
 
-Everything that isn't Xcode or the guest image comes from the Nix flake, so start there:
+## Getting Started
 
-```sh
-nix develop
-```
+This section provides a quick overview of both how you can [build](#building) the app, and also how
+to [use](#basic-usage) it on your phone.
 
-That provides `xcodegen`, `cocoapods`, Rust, the formatters and the toolchain the QEMU build wants.
-Xcode itself is expected to be installed separately.
+### Building
 
-Everything below has a `make` target, and every target that needs the devshell enters it for you, so
-`make build` works from a bare shell. `make` on its own lists them.
+It is not a goal of this project to provide prebuild binaries that can be re-signed, at least for
+the moment. Instead, we provide a fairly simple method to build the app yourself. You will need to
+have the following dependencies:
 
-The steps are wired together: `make build` depends on the QEMU sysroot, the StikJIT framework,
-libssh2 and the Pods, and each of those is a rule on the file it produces rather than a phony target
-so they run once and then stay quiet. Running the numbered steps by hand is only for doing one in
-isolation.
+- `nix`, the declarative package manager, installed and available on your `$PATH`.
+- [Xcode](https://apps.apple.com/nl/app/xcode/id497799835) installed, with `xcrun` available on your
+  `$PATH`.
 
-`deps` watches the things that decide what it builds: `build_dependencies.sh`, the source URLs in
-`third-party/dependencies/sources`, and the `third-party/qemu` checkout, both its commit and any
-edits not yet committed. Changing any of those is enough to trigger a rebuild. `stikjit` does not
-watch its submodule; after bumping StikJIT, force it with `make clean-stikjit stikjit`.
+The build is handled through the [`Makefile`](./Makefile), which provides a number of utility
+commands and also abstracts away the usage of `nix` for you. In other words, you can run bare
+`make <...>` commands, and it will drop into the nix shell as needed.
 
-`make` builds from two submodules: `third-party/qemu`, tctiSH's QEMU fork (see below), and
-`third-party/StikJIT`. `third-party/SwiftTerm`, the third, is consumed by Xcode directly. Fetch them
-after cloning, or fix a clone you already have:
+To build the app onto your device, you can follow these steps:
 
-```sh
-git submodule update --init
-```
+1. Clone the repository, making sure you get the submodules.
 
-Not `--recursive`, and not `git clone --recurse-submodules`: QEMU has submodules of its own, the
-firmware sources under `roms/` (EDK2 among them, gigabytes with its own submodules), and the build
-uses none of them. The prebuilt firmware in `pc-bios/` is part of the checkout.
+   ```sh
+   git clone --recursive https://github.com/tctiSH/tctiSH
+   ```
 
-### 1. Dependencies
+2. Build the dependencies by running `make build`. This will take some time the first time you do
+   it, as it has to fetch all the devshell dependencies and build our QEMU fork.
+3. Open `tctiSH.xcworkspace` in Xcode. Open the tctiSH project settings and select the tctiSH target
+   before changing the team to your team and setting a bundle identifier you can build with. Then
+   select the JITHelper target and do the same.
+4. In Xcode's build menu select tctiSH as the scheme and your device as the build target (we do not
+   currently support simulator devices). Then run the build. This should launch the app on your
+   device, though do note that the first launch under Xcode will hang forever, so feel free to kill
+   it and relaunch by hand. You can fix this by installing
+   [`jit-bless.py`](./utils/jit-bless/jit_bless.py) as an LLDB script as described in that file.
 
-```sh
-make deps
-```
+### Basic Usage
 
-Builds QEMU and its libraries into `sysroot-iOS-arm64/`. About six minutes from scratch once the
-tarballs are cached, and only needed when `third-party/qemu` or something under
-`third-party/dependencies/` changes.
+When the app launches you will be met with a terminal and a keyboard, as well as a little pill
+telling you that no tunnel has been found and hence it is running without JIT. What you have is a
+bare [Alpine Linux](https://www.alpinelinux.org) environment with little beyond busybox and some
+basic tools installed. How you use this is beyond the scope of this document.
 
-It fetches everything up front, before building anything: the tarballs named in
-`third-party/dependencies/sources`, then the meson subprojects QEMU's checkout lacks (a few git
-clones, `slirp` and `libucontext` among them). QEMU is then configured with `--disable-download`, so
-a network failure cannot land minutes into the build. Behind a per-process firewall the clones are
-the part that will stall; once they are in the checkout, later builds need no network for them.
+- The keyboard provides a bar above it to augment the basic iOS keyboard, including escape, modifier
+  keys, and utilities such as arrow keys.
+- At its right is a blue cog, which enters the app's settings screen. Here you can configure the
+  behavior of the app, including how much memory it uses, what it does in the background, and other
+  properties of its runtime.
+- Your app state is saved whenever the app goes into the background, but running programs are lost
+  due to the terminal's SSH connection starting anew after each resume. If you want stuff to not get
+  lost for now you need to unparent it from your shell.
+- The `/ios_host` folder is the default form of host access, and corresponds to
+  `On My iP(hone|ad)/tctiSH/SharedFolder.d`.
+- You can mount additional host folders by calling `mount -t ios <mount-name> <mount-point>`. This
+  will pop up a folder picker that lets you pick from any files app location. Once you submit, the
+  folder you picked will be mounted at the specified mount point with the given name, but the mount
+  point must exist first.
+- You can long-press on the app icon to get options to boot with or without JIT, or to trigger a
+  recovery boot if you are having problems.
 
-QEMU is [tctiSH's fork](https://github.com/tctiSH/qemu), branch `tctish-edition`: upstream's latest
-release with our changes on top as a series of commits (UTM's iOS and TCTI work, and tctiSH's own).
-Change QEMU by committing in the submodule; the series is rebased onto each new release.
+### Setting Up JIT
 
-### 2. StikJIT
+To set up JIT mode for tctiSH you first need to download a loopback VPN. We recommend using
+[LocalDevVPN](https://github.com/jkcoxson/LocalDevVPN) as it is what the app is developed alongside.
+You can get JIT working as follows:
 
-```sh
-make stikjit
-```
+1. Install and activate your loopback VPN.
+2. Launch tctiSH.
+3. It will detect the tunnel and ask you to provide a pairing:
 
-Produces `build-StikJIT/StikJIT.xcframework`, which provides the debugger side of JIT enablement on
-iOS 26+.
+   - **iOS 27:** Here you can pair on-device. Simply tap the corresponding button and follow the
+     instructions.
+   - **iOS 26 and Earlier:** You need to generate a pairing file using another device (usually a
+     computer), and an RRPairing-capable application like
+     [`idevice_pair`](https://github.com/jkcoxson/idevice_pair).
 
-This builds from a _copy_ of the submodule in `build-StikJIT/source`, with the fixes in `patches/`
-applied to the copy. The submodule itself is only ever read, so it stays clean in `git status`.
+4. Once tctiSH has your pairing file, it will tell you to restart the app to run with JIT. Do so.
 
-### 3. libssh2
+Note that for JIT to work you will always need your loopback VPN active, and to either be in
+airplane mode or connected to WiFi. Once the JIT helper has done its work you can fall back to
+mobile data, at least until the helper is needed again. By default, the helper is needed every time
+the code cache size is changed (e.g. when it grows in dynamic mode, or when resuming from a
+background session that evicted the code cache). If you don't want this behavior, make sure to use a
+fixed-size code cache and do not set the app to evict the code cache in the background.
 
-```sh
-make libssh2
-```
+## Development
 
-Builds libssh2 and OpenSSL for iOS into `build-libssh2/out`, from release tarballs pinned by version
-and hash in `build_libssh2.sh`. About a minute.
+If you are interested in developing tctiSH, we work on a PR-based workflow. We recommend that you
+fork the repo to make your changes before PRing back. You will need the following additional
+prerequisites to be able to perform all development tasks:
 
-The app reaches the guest's shell over SSH through SwiftSH, which is vendored in
-`third-party/SwiftSH` rather than fetched, so that it links this build instead of the libssh2 1.8.0
-upstream bundles. That one dates from 2016 and shares no key exchange or host key algorithm with the
-guest's current dropbear: every connection ends before authentication, and libssh2 reports it to the
-app as `authenticationFailed` -- a password problem that isn't.
+- [`container`](https://github.com/apple/container) installed and on your path with the container
+  runtime service started.
 
-### 4. Pods
+Some additional things to know for developing the app:
 
-```sh
-make pods
-```
+- The minimum deployment target is intentionally iOS and iPadOS 18 as we rely on some newer kernel
+  features for performance. This must be kept in sync across the app.
+- If you want to work on the JIT in conjunction with Xcode, or simply have JITted launches under
+  Xcode not hang, you will need to install the [`jit-bless.py`](./utils/jit-bless/jit_bless.py) LLDB
+  script. This performs the other part of the debugger's JIT page blessing dance, as when Xcode's
+  debugger is connected the StikJIT debugger connection cannot.
+- While `make build` is the umbrella build step, it depends on much more fine-grained build steps.
+  Run `make` on its own to see the available build steps.
+- `etc/resolv.conf` in the default image points at `192.168.100.3`, QEMU's built-in DNS forwarder,
+  which resolves through the phone and so follows its VPN and private DNS settings.
+- The root password is set from a literal hash in `build_rootfs.sh` rather than by calling `passwd`,
+  because crypt(3) salts randomly and a fresh hash each build would defeat the lock. It has to be
+  set at all because Alpine's minirootfs ships `root:*`, which disables password login. The app
+  connects as root/toor.
+- `assets/build_disk.sh` makes `empty.qcow`: a 200 GiB (maximum size) `.qcow2` carrying a
+  newly-created but never-mounted ext4 filesystem. Despite the name it is **not** an empty disk, and
+  should not become one as we do not want `init` to force format the disk for the user on every
+  first launch as this would be too expensive for good UX.
 
-Needed after a fresh clone and whenever the `Podfile` or `third-party/SwiftSH/SwiftSH.podspec`
-changes.
+### The Guest Image
 
-> **Build the workspace, never the bare project.** `tctiSH.xcodeproj` on its own cannot build the
-> Pods targets, and fails with `Unable to resolve module dependency: 'Socket'` -- which looks like a
-> project-format problem and isn't.
-
-### 5. The app
-
-```sh
-make build
-```
-
-Or just open `tctiSH.xcworkspace` in Xcode.
-
-`make clean` removes the app and `tctictl` output. `make distclean` also throws away the StikJIT
-framework, libssh2 and the QEMU sysroot, which are minutes apiece to rebuild, hence the split. There
-is no `clean-pods`, because `Pods/` is checked in and removing it would read as a page of deleted
-files rather than a clean slate.
-
-Minimum deployment target is **iOS 18.0**, kept in step across the app, the helper extension, the
-pods and the StikJIT build. `build_stikjit.sh` reads it out of the project rather than keeping a
-second copy, because a framework built newer than the app embedding it doesn't fail the build, it
-fails the launch.
-
-## The Guest Image
-
-Building the guest image depends on three artifacts, all of which can be reproducibly built but are
-still checked in due to the expanded tool list needed for their builds.
+The guest image is checked in by default as its dependencies require a more expansive set of tools
+to update. The following three artifacts are required, but you should only need to care about them
+if you change the definitions of the kernel or root filesystem builds.
 
 | Artifact            | Description                                                                                      |
 | ------------------- | ------------------------------------------------------------------------------------------------ |
@@ -130,80 +159,36 @@ still checked in due to the expanded tool list needed for their builds.
 | `assets/initrd.img` | The root filesystem the VM boots.                                                                |
 | `assets/empty.qcow` | The blank persistent store that the app copies out of its bundle whenever starting from scratch. |
 
-They can be built, assuming the [prerequisites](#Prerequisites) are available, as follows:
+They can be built, assuming the additional prerequisites are available, as follows:
 
 ```sh
 make guest
 ```
 
-`make build` depends on the rootfs and the disk, as rules on the files rather than phony targets, so
-they rebuild when the overlay or the lock moves.
+Note that while `make build` will force rebuilds of the root filesystem and disk if their
+definitions change, it explicitly does not depend on the kernel as this is an extremely
+time-consuming build.
 
-**It does not depend on the kernel**, which is the one asymmetry worth knowing about. The other two
-take about a second each, so depending on them is free; a kernel build is tens of minutes, and a
-fresh clone has no meaningful mtimes to reason from as git stamps every file with the checkout time,
-so the dependency would risk a twenty-minute surprise on someone's first build. The consequence is
-that after editing `tctish.config` you have to run `make kernel` yourself; `make build` will not
-notice.
-
-They remain checked in on purpose. The packages `rootfs.lock` pins get deleted from Alpine's CDN
-within weeks of being superseded, so a tree that could only build them would eventually be a tree
-that could not. Keeping the blobs means a fresh clone always has a working guest, and the build is
-there for when you want to change one.
-
-### Prerequisites
-
-This is the one part of the build the Nix flake can't provide, because it needs a Linux kernel:
-
-```sh
-brew install container
-container system start
-```
-
-macOS cannot run Linux binaries at all, so all three builds re-exec themselves inside
-`container run --rm` when invoked from macOS. You run them the same way on either platform.
-
-Each part needs the container for a different reason, and it shows in how they are invoked. The
-rootfs build runs x86_64 Alpine tooling (`apk`, and the install scripts it fires) so it needs
-somewhere those can _execute_. The kernel build runs nothing x86_64 at all; it cross-compiles, and
-wants a Linux only because kbuild is thousands of invocations of tools macOS does not have.
-
-So the two flags below apply to `build_rootfs.sh` only. `build_kernel.sh` needs neither, and is not
-given them.
-
-| Flag                      | Reason                                                                    |
-| ------------------------- | ------------------------------------------------------------------------- |
-| `--rosetta`               | Registers an x86_64 `binfmt_misc` handler, so the guest's own `apk` runs. |
-| `--cap-add CAP_SYS_ADMIN` | To `mount -t proc` inside the target.                                     |
-
-That `/proc` mount is non-optional for a non-obvious reason: `apk` chroots into the target to run
-install scripts, and Rosetta reads `/proc/self/exe` to identify what it is translating. Without it,
-every install script fails with `rosetta error: Unable to open /proc/self/exe`.
-
-Rosetta is an accelerator here, not a dependency. The mechanism is `binfmt_misc`, and `qemu-user` is
-an equally valid handler: slower, but not reliant on Apple keeping Rosetta around.
-
-### Pinned Things
-
-`assets/rootfs.lock` names everything the build fetches, with a SHA-256 for each. A plain build
-fetches exactly those and verifies every one. To move to current packages:
+`assets/rootfs.lock` names all the packages the build fetches, with a hash for each. A plain build
+fetches exactly those and verifies every one. You can move the current package set by:
 
 ```sh
 make rootfs-lock    # re-resolve against live edge, rewrite the lock
 make guest          # build from it
 ```
 
-The branch is `edge`, deliberately. The shipped image remains a pinned snapshot, but
-`/etc/apk/repositories` in the guest points at live edge. We get a reproducible build but the user's
-`apk add` still reaches current packages.
+The branch is `edge` because that is what we have found to be more useful. Even though the shipped
+image is a pinned snapshot, the repositories it contains point at `edge` and hence users get the
+latest packages whenever they add them.
 
 It should be noted that Alpine archives `releases/` indefinitely, but keeps only the latest build of
 each package in `main/`: the base is pinned durably and the sixteen packages are not. When edge
-supersedes one of them the old file goes away, `--lock` is how you catch up.
+supersedes one of them the old file goes away, `--lock` is how you catch up when building a new
+image.
 
 ### Overlay Filesystem
 
-Everything tctiSH adds on top of stock Alpine lives in `assets/overlay/`:
+Everything tctiSH adds _on top_ of the stock Alpine root filesystem lives in `assets/overlay/`:
 
 | File                                 | Description                                                                       |
 | ------------------------------------ | --------------------------------------------------------------------------------- |
@@ -216,8 +201,8 @@ Everything tctiSH adds on top of stock Alpine lives in `assets/overlay/`:
 `assets/scripts/` is installed alongside it into `/usr/bin`. `tctictl` is an _input_ rather than
 something copied in afterwards, so `make guest` ensures that it is built first.
 
-`init` mounts five pseudo-filesystems into the final root beyond the usual proc/sysfs/devtmpfs,
-because the kernel's newer capabilities are only reachable through them:
+`init` mounts the following five pseudo-filesystems into the final root beyond the usual
+proc/sysfs/devtmpfs, because the kernel's capabilities require them:
 
 | mount            | what needs it                                                            |
 | ---------------- | ------------------------------------------------------------------------ |
@@ -227,235 +212,76 @@ because the kernel's newer capabilities are only reachable through them:
 | `securityfs`     | the LSM interface, BPF LSM included                                      |
 | `debugfs` (0700) | older tooling that reaches tracing through it rather than tracefs        |
 
-None of them costs anything at runtime. They are virtual — no threads, no timers, no I/O — and
-mounting only makes an interface visible. The work behind tracing is paid for by having it compiled
-in, and `cgroup2` enables no controllers until something writes to `cgroup.subtree_control`.
-
-`etc/inittab` respawns `tctish-powerbtn`, which is what makes `system_powerdown` work. QEMU asserts
-the ACPI power button, the kernel turns that into an input event — it could not before
-`CONFIG_ACPI_BUTTON` — and this reads the event and calls `poweroff`. Without it the request is
-received and ignored, and the VM has to be killed, which is a plug-pull the ext4 journal then has to
-recover from.
-
-It is not `acpid`, though busybox ships one: acpid's default event source is `/proc/acpi/event`, an
-interface the kernel removed years ago. The event is four `input_event` structs on a character
-device, and reading one is less machinery than configuring a daemon to read it. It finds the device
-by name rather than assuming `event0`, for the same reason the disk is `/dev/vda` rather than a
-hardcoded major.
-
-`etc/resolv.conf` points at `192.168.100.3`, QEMU's built-in DNS forwarder, which resolves through
-the phone and so follows its VPN and private DNS.
-
-`init` also sets `vm.overcommit_memory` to 1. The kernel's default refuses any single mapping larger
-than RAM plus swap, and the guest has no swap and often only a gibibyte, so programs that reserve
-far more than they use -- Lean's 1 GiB thread stacks, for one -- failed with "Resource temporarily
-unavailable". It costs the phone nothing: QEMU caps guest RAM at `-m`, and iOS only charges for
-guest pages actually touched.
-
-`init` mounts the persistent disk as `/dev/vda`, straight from devtmpfs. It used to hand-roll
-`mknod /dev/ios0 b 254 0`, which worked only because virtio-blk happened to land on major 254 — the
-major is allocated dynamically at registration, so nothing guaranteed it. devtmpfs was already
-mounted twenty lines earlier, so the node had been redundant as well as brittle.
-
-The root password is set from a literal hash in `build_rootfs.sh` rather than by calling `passwd`,
-because crypt(3) salts randomly and a fresh hash each build would defeat the lock. It has to be set
-at all because Alpine's minirootfs ships `root:*`, which disables password login. The app connects
-as root/toor, so without it dropbear refuses and the user never sees the terminal.
-
-### Blank Disk
-
-`assets/build_disk.sh` makes `empty.qcow`: a 200 GiB qcow2 carrying a made, never-mounted ext4
-filesystem. It is 19 MB on disk due to `qcow2`'s sparseness and it containing essentially nothing.
-
-Despite the name it is **not** an empty disk, and should not become one. `init` _can_ format the
-disk itself but that would charge every user a `mkfs` of a 200 GiB filesystem under emulation on
-their very first launch: too expensive for a good user experience.
-
-Two things are pinned: the filesystem UUID and directory hash seed, which mke2fs would otherwise
-generate randomly, and the feature set. The feature list is prefixed `none,` deliberately. This
-matters beyond reproducibility: a feature the guest kernel does not implement shows up as a mount
-failure on device rather than as a build error.
-
 ### The Kernel
 
 `assets/build_kernel.sh` builds `bzImage` from a pinned kernel.org tarball, verified by hash. The
-line is **6.18**, the newest longterm; picking a non-LTS line is how the guest spent four years on a
-6.0 release candidate, so this should move along 6.18.x and change lines only deliberately.
+line is currently pinned to **6.18**, the latest-available LTS. It should be rare that a contributor
+needs to rebuild the kernel, but it can be done as follows:
 
 ```sh
 make kernel          # build it
 make kernel-config   # resolve the config and report the delta, without building
 ```
 
-Two things are pinned, against two different kinds of drift:
-
-|                   | pinned by                                                            |
-| ----------------- | -------------------------------------------------------------------- |
-| the kernel source | a tarball and its SHA-256, in `build_kernel.sh`                      |
-| the toolchain     | `assets/kernel/flake.lock`, which fixes nixpkgs to an exact revision |
-
-The second matters more than it looks. A kernel's bytes depend on its compiler in detail, and a
-container image pins nothing — `alpine:latest` moves and the clang inside it moves with it. Nix
-gives an exactly-pinned clang, lld and pahole with no daemon: the container is still `--rm`.
-
-Nothing x86_64 runs during this build. Unlike the rootfs it needs neither `--rosetta` nor
-`CAP_SYS_ADMIN` — the kernel is _cross-compiled_ via `LLVM=1`, which is tier-1 upstream for x86_64
-and needs no separate cross-targeted toolchain, clang being a cross compiler by construction.
+Our build pins the kernel source using a tarball and its SHA-256 hash (in `build_kernel.sh`), and
+the kernel build toolchain (pinned by `assets/kernel/flake.lock`). This ensures byte-for-byte
+reproducible kernel builds, which are done via cross-compilation rather than needing to run x86_64
+code like the root filesystem build.
 
 > The kernel is built with the **unwrapped** clang, while host tools use the wrapped one on `PATH`.
 > nixpkgs' cc-wrapper targets a single triple and says so when asked to cross-compile; it fails
-> concretely at `scripts/mod/empty.o`. Unwrapped is right rather than merely quieter — the kernel
-> compiles `-nostdinc` and supplies every header itself — but `objtool` and `resolve_btfids` are
-> ordinary native programs that want a libc, so only `CC` is overridden.
+> concretely at `scripts/mod/empty.o`.
 
-Two container-managed volumes hold what cannot live on a macOS bind mount, and in both cases that is
-forced rather than chosen:
-
-| Volume          | Why it Can't Be a Directory                                                                                                                                                                                                                                                                             |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tctish-nix`    | **macOS is case-insensitive and the Nix store is not** — one perl package ships `pod` and `Pod` in the same directory, so copying a store onto APFS fails partway with `File exists` and leaves it silently incomplete.                                                                                 |
-| `tctish-kernel` | **the bind mount does not reproduce symlinks.** A kernel tree has 85 of them; unpacked onto the bind mount, `tools/testing/selftests/bpf/json_writer.h` becomes a zero-length file with mode `000` that the container then cannot unlink, so `--clean` and rebuild fails and the tree is quietly wrong. |
-
-Everything that needs to be _seen_ from macOS stays on the bind mount, because it is all plain
-files: the source tarball (so `--clean` costs no re-download), the config reports, and `bzImage`
-itself. `--clean` drops the kernel volume, `--clean-all` drops both.
-
-#### The Configuration
-
-`assets/kernel/tctish.config` is the whole configuration, in `savedefconfig` form: a minimal list of
-what differs from the kernel's own defaults, which is why ~270 lines describe a kernel with
-thousands of options. Symbols absent from it take the kernel default.
-
-**Every line in it is asserted after configuration**, and a symbol that did not take fails the
-build. This is not ceremony — Kconfig's failure mode is silence. A symbol whose dependencies are
-unmet is dropped without a word, `make` succeeds, the kernel boots, and the feature is absent. It
-has caught five real faults so far:
-
-| What                                     | Why                                                                                                                                   |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `CONFIG_SQUASHFS` silently dropped       | needs `MISC_FILESYSTEMS`, which was off                                                                                               |
-| every CPU mitigation silently re-enabled | `SPECULATION_MITIGATIONS` was renamed `CPU_MITIGATIONS` in 6.10, so `olddefconfig` had no old value to carry and took the new default |
-| `CONFIG_I2C_I801` unsatisfiable          | `I2C` was being selected by `DRM`; disabling DRM removed it                                                                           |
-| `CONFIG_MICROCODE` not disableable       | it is `def_bool y` in 6.18 — there is no prompt                                                                                       |
-| `CPU_IDLE_GOV_HALTPOLL` not disableable  | `select`-only; `HALTPOLL_CPUIDLE` is what to turn off                                                                                 |
-
-The file also restates symbols it does _not_ change — the overlay root, 9p, virtio, the initramfs —
-purely so the assertion pass becomes a tripwire. The mitigations entry is the evidence that earns
-that space: a default which holds today is not one that holds across the next four-year jump.
-
-Each build writes `build-kernel/config-delta.txt`, diffed against the previous build of the tree. A
-reconfigure that changes nothing leaves the last meaningful report standing.
+The kernel configuration is specified in `savedefconfig` form in `assets/kernel/tctish.config` as a
+minimal list of what differs from the kernel's defaults. We assert every configuration parameter
+that differs after the `configure` step, as `kconfig` likes to fail silently.
 
 ### Booting the Guest Locally
 
+When working directly on the kernel for paravirtualisation or feature-enablement reasons it can be
+very useful to boot the guest kernel locally. This can be done as follows:
+
 ```sh
-make boot-guest              # serial console, guest logs in as root
-make boot-guest ARGS=--ssh   # connect over SSH instead
+make boot-guest                   # JIT, serial console, guest logs in as root
+make boot-guest BACKEND=tcti      # the same, under TCTI
+make boot-guest ARGS=--ssh        # connect over SSH instead
+make boot-guest ARGS=--help       # the other options
 ```
 
 `assets/boot_guest.sh` boots the shipped `bzImage`, `initrd.img` and a writable copy of `empty.qcow`
-on this Mac. `--help` lists the rest: `--fresh` to discard the working disk, `--share` to offer a
-different host directory over 9p (it appears at `/ios_host`), `--snapshot` to resume one, and
-`--memory`/`--cpus`.
+on the developer's mac, using **our QEMU fork** built for macOS. `BACKEND` picks the JIT (the
+default) or TCTI, which runs natively on Apple Silicon. The first boot with each backend builds it
+into `build-macOS-arm64/` if needed, and later boots rebuild only when the `third-party/qemu`
+checkout or the flake changes. `make host-qemu BACKEND=...` builds one without booting it.
 
-QEMU comes from the devshell, which is why this has a `make` target rather than being run directly.
+The build has its own devshell, `nix develop .#host-qemu`, as building for the mac needs host
+libraries that the default devshell deliberately keeps away from the iOS build. The build script
+enters it by itself, and keeps those libraries from nix's garbage collector with a GC root in
+`build-macOS-arm64/`. `make unroot-host-qemu` removes the root if you want the space back, and the
+next boot fetches whatever was collected without recompiling.
 
-**It tests the guest image, not TCTI.** The emulator here is an ordinary host QEMU running plain
-TCG; the QEMU the app ships is cross-compiled for iOS, links the TCTI backend, and is built as a
-dylib the app `dlopen`s, so it cannot run on macOS at all. Anything about execution under
-translation still needs a device.
+Running the guest on our QEMU cannot exercise the iOS-specific code paths, including the debugger
+blessing of the code buffer, the purgeable code cache, and TXM enforcement, as well as the app's own
+launcher. Testing those still needs to be done on a real device.
 
-It does pin the machine _type_ to `pc-i440fx-11.1`, the default of the QEMU we ship, so that a newer
-host QEMU does not quietly test a different machine. That axis is not hypothetical: `pc-i440fx-6.2`
-changed what a bare `-smp 4` meant and cost the guest three of its four CPUs.
+### Formatting
 
-This replaces `start_qemu.sh`, which was the 2022 developer loop and had been unrunnable for years —
-it built QEMU from a submodule that no longer exists, passed `-soundhw hda` (removed from QEMU in
-6.0), and packed the ramdisk with a `cpio` flag pair GNU cpio rejects.
-
-### Hand-Editing Instead
-
-`dev_ramdisk.sh` unpacks `initrd.img` into `assets/ramdisk/` and `make_ramdisk.sh` packs it back,
-for quick experiments inside the guest. That path is not reproducible and `build_rootfs.sh` will
-overwrite whatever it produces. It's for trying something, not for shipping it.
-
-## Formatting
+We have comprehensive code and documentation formatting set up in the repository, which must be run
+before any commit.
 
 ```sh
 make format         # rewrite everything
 make format-check   # report, change nothing
 ```
 
-One formatter per language, all of them pinned by the flake except `swift-format` and
-`clang-format`, which come from the active Xcode toolchain so that they apply exactly what the IDE
-applies on save. An Xcode upgrade can therefore move the Swift and C formatting on its own.
-
-|                            | tool                                                   | config                          |
-| -------------------------- | ------------------------------------------------------ | ------------------------------- |
-| Swift                      | `swift-format` (Xcode)                                 | `.swift-format`                 |
-| C, Objective-C             | `clang-format` (Xcode)                                 | `.clang-format`                 |
-| Rust                       | `rustfmt`, from nightly -- the config is nightly-gated | `rustfmt.toml`                  |
-| Shell                      | `shfmt`                                                | `SHFMT_FLAGS` in the `Makefile` |
-| Python                     | `ruff format`                                          | `ruff.toml`                     |
-| Nix                        | `nixfmt`                                               | --                              |
-| Ruby                       | `rufo`                                                 | --                              |
-| Markdown, JSON, TOML, YAML | `dprint`                                               | `dprint.json`                   |
-
-100 columns throughout. Submodules, `Pods/`, `assets/` and `patches/` are excluded and stay that
-way: the first two are not ours, the guest-side scripts are their own world, and reformatting a
-patch breaks it silently, because its context lines are literal.
-
-The QEMU command line in `qemu_launcher.c` sits inside a `// clang-format off` fence. It is laid out
-one option pair per line on purpose, and bin-packing it loses the structure -- along with, in one
-case, splitting a string literal through the middle of `192.168.100.0/24`.
-
-## Running
-
-### JIT
-
-JIT needs a debugger, because on iOS 26+ TXM stops a process making its own mappings executable.
-There are two ways to provide one.
-
-**With StikJIT, standalone.** What ships. Needs:
-
-- [LocalDevVPN](https://github.com/jkcoxson/LocalDevVPN), or some other loopback VPN, running on the
-  device, and
-- an RPPairing file, generated by [`idevice_pair`](https://github.com/jkcoxson/idevice_pair).
-
-Launch the app and it offers to import one if it is missing. Everything after that is automatic: it
-checks the tunnel, has the helper extension attach a debugger, and boots the VM with JIT. A device's
-first launch fetches a developer disk image first, and runs without JIT while it does.
-
-**With Xcode.** For development. Install the LLDB script once, into `~/.lldbinit-Xcode`:
-
-```
-command script import /path/to/tctiSH/utils/jit-bless/jit_bless.py
-```
-
-The app notices a debugger is already attached and leaves the JIT region to it, so StikJIT is not
-involved at all. Blessing takes ~15s under LLDB against ~1.2s via StikJIT, because the SB API cannot
-batch its writes; the app is frozen throughout, which is expected rather than a hang. Watch
-`/tmp/jit-bless.log` to see it working.
-
-The script scopes itself to the QEMU JIT framework, so it stays inert in every other project you
-debug. See [`utils/README.md`](utils/README.md).
-
 ### Logs
 
-Console.app, filtered on subsystem `<bundle-id>.tctish` for everything, or one of:
+Console.app, filtered on subsystem `<bundle-id>` (e.g. `io.ara.tctish`) for everything, or one of:
 
-| subsystem               | what is in it                                       |
-| ----------------------- | --------------------------------------------------- |
-| `io.ara.tctish.jit`     | enablement decisions, and the helper extension      |
-| `io.ara.tctish.qemu`    | which QEMU build and boot image the VM started with |
-| `io.ara.tctish.network` | tunnel, developer disk image, SSH                   |
-| `io.ara.tctish.fs`      | files and where they live                           |
-| `io.ara.tctish.ui`      | app lifecycle                                       |
-
-All processes log there.
-
-### When the VM Fails to Boot
-
-The status pill in the top right turns red and offers a recovery boot after 30 seconds without a
-shell. That resets the machine and boots Linux from scratch, losing the resumed session. Same effect
-as choosing Recovery Boot in Settings, without having to go and find it.
+| Subsystem             | What it Logs                                        |
+| --------------------- | --------------------------------------------------- |
+| `<bundle-id>.jit`     | Enablement decisions, and the helper extension      |
+| `<bundle-id>.qemu`    | Which QEMU build and boot image the VM started with |
+| `<bundle-id>.network` | Tunnel, developer disk image, SSH                   |
+| `<bundle-id>.fs`      | Files and where they live                           |
+| `<bundle-id>.ui`      | App lifecycle                                       |
