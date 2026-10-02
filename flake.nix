@@ -174,21 +174,27 @@
       # its own defaults, so the config would look applied and not be.
       nightlyRustfmt = pkgs.rust-bin.nightly.latest.rustfmt;
 
-      # Running the guest locally, which `assets/boot_guest.sh` drives.
-      #
-      # This is QEMU-the-emulator for the *host*. It is not the QEMU the app
-      # ships: that one is cross-compiled for iOS by build_dependencies.sh, links
-      # against the TCTI backend, and cannot run here. They are different builds
-      # of the same project, and the distinction is worth keeping in mind when
-      # reading a local boot as it exercises the guest image, not TCTI.
-      #
-      # qemu-img comes along, which is what makes a working copy of the shipped
-      # disk possible without a second tool.
-      #
-      # It has to be at least as new as the QEMU the app ships: boot_guest.sh
-      # pins that QEMU's machine type (pc-i440fx-11.1) and CPU model, and an
-      # older one has neither.
-      guestTools = [ pkgs.qemu ];
+      # Everything a shell resolves by bare name comes from this flake or from
+      # Apple. The inherited $PATH is filtered rather than replaced, so Xcode
+      # and the base system keep working -- xcrun, otool, install_name_tool,
+      # xcodebuild, codesign, plutil, sysctl -- while Homebrew, /usr/local, the
+      # nix-darwin system profile and per-user bin directories cannot decide
+      # what a build picks up.
+      filterPath = ''
+        _tctish_path=""
+        _tctish_oldifs="$IFS"
+        IFS=":"
+        for _tctish_dir in $PATH; do
+          case "$_tctish_dir" in
+            /nix/store/* | /usr/bin | /bin | /usr/sbin | /sbin                 | /Library/Apple/usr/bin | /System/Cryptexes/*                 | /var/run/com.apple.security.cryptexd/*)
+              _tctish_path="$_tctish_path:$_tctish_dir"
+              ;;
+          esac
+        done
+        IFS="$_tctish_oldifs"
+        export PATH="''${_tctish_path#:}"
+        unset _tctish_path _tctish_oldifs _tctish_dir
+      '';
 
       # Everything `make format` drives, minus swift-format and clang-format,
       # which come from the active Xcode toolchain via `xcrun` so that they match
@@ -202,57 +208,42 @@
       ];
     in
     {
-      # mkShellNoCC because mkShell pulls in stdenv's cc-wrapper, which puts an
-      # old nix clang ahead of Xcode's on $PATH. QEMU's configure emits a bare
-      # `objc = ['clang']` into its meson cross file, so that wrapper gets picked
-      # up and injects -mmacos-version-min, conflicts with -miphoneos-version-min
-      # and breaks the ObjC probe. This build must use only the Xcode toolchain.
-      devShells.${system}.default = pkgs.mkShellNoCC {
-        packages = buildDependencies ++ formatters ++ guestTools;
+      devShells.${system} = {
+        # mkShellNoCC because mkShell pulls in stdenv's cc-wrapper, which puts an
+        # old nix clang ahead of Xcode's on $PATH. QEMU's configure emits a bare
+        # `objc = ['clang']` into its meson cross file, so that wrapper gets picked
+        # up and injects -mmacos-version-min, conflicts with -miphoneos-version-min
+        # and breaks the ObjC probe. This build must use only the Xcode toolchain.
+        default = pkgs.mkShellNoCC {
+          packages = buildDependencies ++ formatters;
 
-        # Apple's `ld` does not understand GNU linker options, so linking the
-        # musl target with it fails on `--as-needed`. rustc ships an lld that
-        # does; it just isn't on $PATH. Pointing cargo straight at it is what
-        # makes utils/tctictl/build_and_copy.sh work from a Mac at all.
-        #
-        # The directory is rustc's own triple, `aarch64-apple-darwin`, which is
-        # spelled differently to nix's `aarch64-darwin`.
-        CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER = "${rustToolchain}/lib/rustlib/aarch64-apple-darwin/bin/rust-lld";
+          # Apple's `ld` does not understand GNU linker options, so linking the
+          # musl target with it fails on `--as-needed`. rustc ships an lld that
+          # does; it just isn't on $PATH. Pointing cargo straight at it is what
+          # makes utils/tctictl/build_and_copy.sh work from a Mac at all.
+          #
+          # The directory is rustc's own triple, `aarch64-apple-darwin`, which is
+          # spelled differently to nix's `aarch64-darwin`.
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER = "${rustToolchain}/lib/rustlib/aarch64-apple-darwin/bin/rust-lld";
 
-        # Everything the build resolves by bare name comes from this flake or
-        # from Apple. The inherited $PATH is filtered rather than replaced, so
-        # Xcode and the base system keep working -- xcrun, otool,
-        # install_name_tool, xcodebuild, codesign, plutil, sysctl -- while
-        # Homebrew, /usr/local, the nix-darwin system profile and per-user bin
-        # directories cannot decide what a build picks up.
+          # See filterPath above.
+          shellHook = filterPath;
+        };
+
+        # Building our QEMU for this Mac: build_host_qemu.sh enters this shell by
+        # itself, and `make boot-guest` boots what it builds.
         #
-        # This is not hypothetical. Homebrew ships a complete glib toolset, and a
-        # Homebrew gdbus-codegen once generated QEMU sources against its own glib
-        # and emitted a symbol our build did not have. pkg-config was the same
-        # story quieter: build_dependencies.sh builds its own into
-        # $PREFIX/host/bin exactly to keep host .pc files out, and Homebrew's sat
-        # in front of it on $PATH regardless.
-        #
-        # Two consequences worth knowing. `git` and `curl` now resolve to
-        # different binaries than before -- nixpkgs' git, Apple's curl -- so a
-        # per-process firewall like Little Snitch will ask about them afresh.
-        # And `nix` itself is dropped, which is fine because the Makefile only
-        # reaches for it when IN_NIX_SHELL is unset.
-        shellHook = ''
-          _tctish_path=""
-          _tctish_oldifs="$IFS"
-          IFS=":"
-          for _tctish_dir in $PATH; do
-            case "$_tctish_dir" in
-              /nix/store/* | /usr/bin | /bin | /usr/sbin | /sbin                 | /Library/Apple/usr/bin | /System/Cryptexes/*                 | /var/run/com.apple.security.cryptexd/*)
-                _tctish_path="$_tctish_path:$_tctish_dir"
-                ;;
-            esac
-          done
-          IFS="$_tctish_oldifs"
-          export PATH="''${_tctish_path#:}"
-          unset _tctish_path _tctish_oldifs _tctish_dir
-        '';
+        # Separate from the default shell, and with a compiler, as a build *for*
+        # the host needs host glib, pixman and slirp headers and .pc files, but
+        # we cannot let those leak to iOS builds. QEMU's own nixpkgs derivation
+        # already knows how to build QEMU on Darwin, we steal its inputs; the
+        # configure flags in build_host_qemu.sh pick what is used from them.
+        host-qemu = pkgs.mkShell {
+          inputsFrom = [ pkgs.qemu ];
+          packages = [ pkgs.git ];
+          TCTISH_DEVSHELL = "host-qemu";
+          shellHook = filterPath;
+        };
       };
     };
 }

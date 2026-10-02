@@ -16,3 +16,4 @@ build-StikJIT/
 build-idevice/
 build-libssh2/
 build-kernel/
+build-macOS-arm64/

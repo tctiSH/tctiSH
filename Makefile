@@ -32,6 +32,30 @@ GUEST_INITRD      := assets/initrd.img
 GUEST_DISK        := assets/empty.qcow
 GUEST_KERNEL      := assets/bzImage
 
+# Our QEMU, built for this Mac, which is what `boot-guest` runs. One build per backend:
+# build-macOS-arm64/qemu_{jit,tcti}. BACKEND picks which one a target means. The GC root keeps the
+# nix libraries those builds link against; see build_host_qemu.sh.
+BACKEND           ?= jit
+HOST_QEMU_BUILD   := build-macOS-arm64
+HOST_QEMU          = $(HOST_QEMU_BUILD)/qemu_$(1)/qemu-system-x86_64
+HOST_QEMU_ROOT    := $(HOST_QEMU_BUILD)/nix-gc-root
+
+# Checked only for the targets that use it, so that a BACKEND some other tool left in the
+# environment cannot stop every other target from running.
+ifneq ($(filter host-qemu boot-guest,$(MAKECMDGOALS)),)
+    ifeq ($(filter $(BACKEND),jit tcti),)
+        $(error BACKEND must be jit or tcti, not '$(BACKEND)')
+    endif
+endif
+
+# The Makefile passes --backend from BACKEND, and builds for BACKEND; one in ARGS as well would boot
+# a backend other than the one just built.
+ifneq ($(filter boot-guest,$(MAKECMDGOALS)),)
+    ifneq ($(filter --backend,$(ARGS)),)
+        $(error Choose the backend with BACKEND=jit|tcti, not ARGS=--backend)
+    endif
+endif
+
 # -- Building -------------------------------------------------------------------------------------
 
 # QEMU is the third-party/qemu submodule, which points at tctiSH's fork. What decides what gets
@@ -57,8 +81,29 @@ $(QEMU_STAMP): qemu-source-changed
 	 } 2>/dev/null | shasum > $@.new
 	@if cmp -s $@.new $@; then rm $@.new; else mv $@.new $@; fi
 
-$(QEMU_LIBRARY): build_dependencies.sh third-party/dependencies/sources $(QEMU_STAMP)
+$(QEMU_LIBRARY): build_dependencies.sh qemu_source.sh third-party/dependencies/sources $(QEMU_STAMP)
 	$(SHELL_WRAPPER) ./build_dependencies.sh
+
+# The same checkout and the same stamp, built for this Mac instead. ninja decides what actually
+# needs recompiling, so a stamp change it finds nothing in costs seconds; the touch is for that
+# case, where nothing is relinked and the binary would otherwise stay older than the stamp.
+#
+# The flake is an input because the build links against its libraries; the script configures again
+# when the host-qemu shell it describes has changed.
+#
+# No $(SHELL_WRAPPER): the script enters the flake's host-qemu shell itself, which is not the
+# default one. See build_host_qemu.sh.
+$(HOST_QEMU_BUILD)/qemu_%/qemu-system-x86_64: build_host_qemu.sh qemu_source.sh flake.nix flake.lock \
+                                              $(QEMU_STAMP) $(HOST_QEMU_ROOT)
+	./build_host_qemu.sh $*
+	touch $@
+
+# Made by the script, never here. The empty recipe is what makes a missing root -- after
+# `make unroot-host-qemu` -- count as new, so the binaries depending on it run the script again and
+# it comes back, along with any libraries a garbage collection took. A root that exists never counts
+# as new: it is a symlink, make reads the mtime of what it points at, and the store dates everything
+# to the epoch.
+$(HOST_QEMU_ROOT): ;
 
 # Pinned by version inside build_idevice.sh, so that is the only prerequisite: a
 # bump there is what should trigger a rebuild.
@@ -124,6 +169,9 @@ $(GUEST_KERNEL): assets/build_kernel.sh assets/kernel/tctish.config assets/kerne
 .PHONY: deps
 deps: $(QEMU_LIBRARY) ## Build QEMU and its libraries into sysroot-iOS-arm64/ (slow)
 
+.PHONY: host-qemu
+host-qemu: $(call HOST_QEMU,$(BACKEND)) ## Build our QEMU for this Mac into build-macOS-arm64/ (BACKEND=jit|tcti)
+
 .PHONY: idevice
 idevice: $(IDEVICE_LIBRARY) ## Build idevice's FFI library for iOS from source
 
@@ -149,11 +197,14 @@ kernel: $(GUEST_KERNEL) ## Build just the guest kernel into assets/bzImage (slow
 kernel-config: ## Resolve the guest kernel config and report the delta, without building
 	./assets/build_kernel.sh --config-only
 
-# Runs on the host rather than in a container, so it goes through the devshell like everything else
-# that needs a pinned tool: QEMU, in this case.
+# Boots on our QEMU, built for this Mac, so the kernel is tested against the emulator the app ships.
+# BACKEND=tcti for TCTI. Setting TCTISH_QEMU to some other qemu-system-x86_64 runs that instead, and
+# skips the build, as does asking for --help.
+#
+# No $(SHELL_WRAPPER): nothing it runs comes from the devshell any more.
 .PHONY: boot-guest
-boot-guest: ## Boot the guest image locally and drop into a shell (see --help for options)
-	$(SHELL_WRAPPER) ./assets/boot_guest.sh $(ARGS)
+boot-guest: $(if $(or $(TCTISH_QEMU),$(filter --help -h,$(ARGS))),,$(call HOST_QEMU,$(BACKEND))) ## Boot the guest image locally on our QEMU (BACKEND=jit|tcti; ARGS=--help for options)
+	./assets/boot_guest.sh --backend $(BACKEND) $(ARGS)
 
 .PHONY: rootfs-lock
 rootfs-lock: ## Re-resolve the guest's Alpine packages and rewrite assets/rootfs.lock
@@ -368,13 +419,26 @@ clean-kernel: ## Remove the kernel build tree and the pinned toolchain volume
 clean-deps: ## Remove the QEMU sysroot and its build tree (~6 minutes to rebuild, plus downloads)
 	rm -rf $(QEMU_SYSROOT) build-iOS-arm64
 
+# Both backends at once, and the GC root with them. Also what a change to build_host_qemu.sh's
+# configure flags needs, since a configured build tree is kept and only rebuilt.
+.PHONY: clean-host-qemu
+clean-host-qemu: ## Remove the Mac builds of QEMU and their GC root (~5 minutes each to rebuild)
+	rm -rf $(HOST_QEMU_BUILD)
+
+# Keeps the builds and lets the libraries go: the next garbage collection takes them, and the next
+# `make boot-guest` or `make host-qemu` fetches them again and puts the root back, without
+# recompiling. The -N-link entries are the profile's generations, each a root of its own.
+.PHONY: unroot-host-qemu
+unroot-host-qemu: ## Let nix garbage-collect the Mac QEMU builds' libraries (the next boot restores them)
+	rm -f $(HOST_QEMU_ROOT) $(HOST_QEMU_ROOT)-*-link
+
 # The two cheap ones. StikJIT and the QEMU sysroot are both minutes, but neither is something you
 # want thrown away by a reflexive `make clean`; that is what distclean is for.
 .PHONY: clean
 clean: clean-app clean-rust ## Remove the app and tctictl build output
 
 .PHONY: distclean
-distclean: clean clean-stikjit clean-idevice clean-libssh2 clean-deps clean-kernel ## Remove everything, including the slow QEMU, StikJIT and kernel builds
+distclean: clean clean-stikjit clean-idevice clean-libssh2 clean-deps clean-host-qemu clean-kernel ## Remove everything, including the slow QEMU, StikJIT and kernel builds
 
 # -- Utility --------------------------------------------------------------------------------------
 
