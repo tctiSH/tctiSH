@@ -607,6 +607,23 @@ final class SettingsViewController: SettingsListViewController,
                 ]),
 
             SettingsSection(
+                header: "In the Foreground",
+                footer:
+                    "Keep Screen Awake stops the screen locking while tctiSH is open, so that a long-running command isn't interrupted by the app going to the background. The screen uses more battery while it stays on.",
+                rows: [
+                    SettingsRow(
+                        id: "keep-screen-awake",
+                        title: "Keep Screen Awake",
+                        symbol: "sun.max",
+                        toggle: ToggleValue(
+                            isOn: AppSetting.keepScreenAwake.bool,
+                            commit: {
+                                AppSetting.keepScreenAwake.set($0)
+                                ScreenAwake.apply()
+                            }))
+                ]),
+
+            SettingsSection(
                 header: "In the Background",
                 footer:
                     "Release Memory gives Linux's memory back to iOS once your session is saved, so other apps are less likely to be closed to make room. Coming back takes a moment longer, while the session is read back in. Release Code Cache, with it, gives back all of the translated code as well. It's prepared again on return as it is at launch, which under JIT on newer devices means a pause, and translated again as it's needed.",
@@ -1001,11 +1018,17 @@ private final class DebugToolsViewController: SettingsListViewController {
                 footer: nil,
                 rows: [
                     SettingsRow(
+                        id: "system-info",
+                        title: "System Info",
+                        symbol: "cpu",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.push(SystemInfoViewController()) }),
+                    SettingsRow(
                         id: "logs",
                         title: "Logs",
                         symbol: "doc.text",
                         accessory: .disclosure,
-                        select: { [weak self] in self?.push(LogsViewController()) })
+                        select: { [weak self] in self?.push(LogsViewController()) }),
                 ]),
         ]
     }
@@ -1222,6 +1245,53 @@ private final class JitStatusViewController: SettingsListViewController {
                     SettingsRow(id: "cache", title: "Downloaded DDI", detail: cache),
                 ]),
         ]
+    }
+}
+
+// MARK: - Debug tools: system info
+
+/// The device, its CPU and the features QEMU looks for; see `SystemInfo`.
+///
+/// Opening it also writes the report to the log, so it can be read off a device
+/// with the rest of the log.
+private final class SystemInfoViewController: SettingsListViewController {
+
+    private var info = SystemInfo.gather()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        title = "System Info"
+        navigationItem.largeTitleDisplayMode = .never
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            image: UIImage(systemName: "square.and.arrow.up"),
+            primaryAction: UIAction { [weak self] _ in self?.shareReport() })
+
+        Log.ui.note("debug: system info\n\(info.text)")
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        info = SystemInfo.gather()
+        super.viewWillAppear(animated)
+    }
+
+    fileprivate override func buildSections() -> [SettingsSection] {
+        info.sections.map { section in
+            SettingsSection(
+                header: section.title,
+                footer: nil,
+                rows: section.rows.map { row in
+                    SettingsRow(
+                        id: "\(section.title)-\(row.label)", title: row.label, detail: row.value)
+                })
+        }
+    }
+
+    private func shareReport() {
+        let sheet = UIActivityViewController(
+            activityItems: [info.text], applicationActivities: nil)
+        sheet.popoverPresentationController?.barButtonItem = navigationItem.rightBarButtonItem
+        present(sheet, animated: true)
     }
 }
 

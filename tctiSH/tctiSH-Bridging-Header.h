@@ -4,3 +4,4 @@
 
 #include "qemu_launcher.h"
 #include "JITHelperLauncher.h"
+#include "SystemProbe.h"

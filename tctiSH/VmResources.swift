@@ -96,7 +96,7 @@ enum VmMemory {
 
     /// Every amount offered, smallest first.
     static let sizes = [
-        256, 512, 1024, 2048, 3072, 4096, 6144, 8192, 12288, 16384, 24576, 32768,
+        256, 512, 1024, 2048, 3072, 4096, 5120, 6144, 8192, 12288, 16384, 24576, 32768,
     ]
 
     /// What the guest gets when nothing has been chosen.
@@ -611,6 +611,7 @@ enum AppSetting: String {
     case codeCacheNotifications = "code_cache_notifications"
     case parkInBackground = "park_in_background"
     case releaseCodeCacheInBackground = "release_code_cache_in_background"
+    case keepScreenAwake = "keep_screen_awake"
 
     var string: String {
         UserDefaults.standard.string(forKey: rawValue) ?? ""

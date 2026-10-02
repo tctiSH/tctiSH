@@ -57,7 +57,21 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         appDelegate?.handleWillEnterForeground()
     }
 
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        ScreenAwake.apply()
+    }
+
     private var appDelegate: AppDelegate? {
         UIApplication.shared.delegate as? AppDelegate
+    }
+}
+
+/// The Keep Screen Awake setting: while it is on, the screen does not lock
+/// while tctiSH is in front, so a long-running command is not interrupted by
+/// the app going to the background. iOS only honors this for the foreground
+/// app, so leaving tctiSH still lets the device lock as usual.
+enum ScreenAwake {
+    static func apply() {
+        UIApplication.shared.isIdleTimerDisabled = AppSetting.keepScreenAwake.bool
     }
 }
