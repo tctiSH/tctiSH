@@ -44,6 +44,10 @@ have the following dependencies:
 - `nix`, the declarative package manager, installed and available on your `$PATH`.
 - [Xcode](https://apps.apple.com/nl/app/xcode/id497799835) installed, with `xcrun` available on your
   `$PATH`.
+- [`container`](https://github.com/apple/container) installed and on your path with the container
+  runtime service started. `make build` uses it to rebuild the guest image when it looks out of
+  date, which in a fresh clone it always does. If you **only want to build the app**, you can skip
+  it with `make build GUEST=prebuilt`, which uses the checked-in image as it is.
 
 The build is handled through the [`Makefile`](./Makefile), which provides a number of utility
 commands and also abstracts away the usage of `nix` for you. In other words, you can run bare
@@ -120,13 +124,8 @@ fixed-size code cache and do not set the app to evict the code cache in the back
 ## Development
 
 If you are interested in developing tctiSH, we work on a PR-based workflow. We recommend that you
-fork the repo to make your changes before PRing back. You will need the following additional
-prerequisites to be able to perform all development tasks:
-
-- [`container`](https://github.com/apple/container) installed and on your path with the container
-  runtime service started.
-
-Some additional things to know for developing the app:
+fork the repo to make your changes before PRing back. Some additional things to know for developing
+the app:
 
 - The minimum deployment target is intentionally iOS and iPadOS 18 as we rely on some newer kernel
   features for performance. This must be kept in sync across the app.
@@ -159,7 +158,7 @@ if you change the definitions of the kernel or root filesystem builds.
 | `assets/initrd.img` | The root filesystem the VM boots.                                                                |
 | `assets/empty.qcow` | The blank persistent store that the app copies out of its bundle whenever starting from scratch. |
 
-They can be built, assuming the additional prerequisites are available, as follows:
+They can be built as follows:
 
 ```sh
 make guest
@@ -168,6 +167,11 @@ make guest
 Note that while `make build` will force rebuilds of the root filesystem and disk if their
 definitions change, it explicitly does not depend on the kernel as this is an extremely
 time-consuming build.
+
+A fresh clone always looks changed to `make` as git gives every file its checkout time, and the root
+filesystem depends on `tctictl`, which is built rather than checked into the repo. The first
+`make build` in a new clone therefore rebuilds the root filesystem and disk by default, but this can
+be skipped using `make build GUEST=prebuilt`.
 
 `assets/rootfs.lock` names all the packages the build fetches, with a hash for each. A plain build
 fetches exactly those and verifies every one. You can move the current package set by:
