@@ -32,6 +32,11 @@ GUEST_INITRD      := assets/initrd.img
 GUEST_DISK        := assets/empty.qcow
 GUEST_KERNEL      := assets/bzImage
 
+# Whether `build` rebuilds the checked-in guest images when their definitions change. GUEST=build
+# (the default) does, and needs `container` to. GUEST=prebuilt takes them as checked in, and builds
+# them only if they are missing, which is what CI wants as a fresh clone always looks stale.
+GUEST             ?= build
+
 # Our QEMU, built for this Mac, which is what `boot-guest` runs. One build per backend:
 # build-macOS-arm64/qemu_{jit,tcti}. BACKEND picks which one a target means. The GC root keeps the
 # nix libraries those builds link against; see build_host_qemu.sh.
@@ -45,6 +50,12 @@ HOST_QEMU_ROOT    := $(HOST_QEMU_BUILD)/nix-gc-root
 ifneq ($(filter host-qemu boot-guest,$(MAKECMDGOALS)),)
     ifeq ($(filter $(BACKEND),jit tcti),)
         $(error BACKEND must be jit or tcti, not '$(BACKEND)')
+    endif
+endif
+
+ifneq ($(filter build,$(MAKECMDGOALS)),)
+    ifeq ($(filter $(GUEST),build prebuilt),)
+        $(error GUEST must be build or prebuilt, not '$(GUEST)')
     endif
 endif
 
@@ -135,8 +146,9 @@ $(PODS_MANIFEST): Podfile third-party/SwiftSH/SwiftSH.podspec
 # tree that could only build them would eventually be a tree that could not.
 #
 # They are still rules on the files they produce, so a change to the overlay or the lock rebuilds
-# them and a clean tree stays quiet. Note the consequence: these two are the only targets that need
-# the container runtime, and only when something they depend on has actually moved.
+# them and a tree that has built them once stays quiet. Note the consequence: these two are the only
+# targets that need the container runtime, and only when something they depend on has actually
+# moved -- which, in a fresh clone, it always seems to have. GUEST=prebuilt is for that.
 #
 # No $(SHELL_WRAPPER) on either. Both re-exec themselves into a container, and the devshell's $PATH
 # filter would take Homebrew's `container` away from them -- the scripts look in Homebrew's prefix
@@ -210,8 +222,16 @@ boot-guest: $(if $(or $(TCTISH_QEMU),$(filter --help -h,$(ARGS))),,$(call HOST_Q
 rootfs-lock: ## Re-resolve the guest's Alpine packages and rewrite assets/rootfs.lock
 	./assets/build_rootfs.sh --lock
 
+# GUEST=prebuilt depends only on the guest images that are missing, so ones that exist are used as
+# they are. Not order-only prerequisites: make still brings those up to date, container and all.
+ifeq ($(GUEST),prebuilt)
+    GUEST_IMAGES := $(filter-out $(wildcard $(GUEST_INITRD) $(GUEST_DISK)),$(GUEST_INITRD) $(GUEST_DISK))
+else
+    GUEST_IMAGES := $(GUEST_INITRD) $(GUEST_DISK)
+endif
+
 .PHONY: build
-build: $(QEMU_LIBRARY) $(STIKJIT_FRAMEWORK) $(LIBSSH2_LIBRARY) $(PODS_MANIFEST) $(GUEST_INITRD) $(GUEST_DISK) ## Build the app for a generic iOS device
+build: $(QEMU_LIBRARY) $(STIKJIT_FRAMEWORK) $(LIBSSH2_LIBRARY) $(PODS_MANIFEST) $(GUEST_IMAGES) ## Build the app for a generic iOS device (GUEST=prebuilt to skip rebuilding the guest images)
 	xcodebuild -workspace tctiSH.xcworkspace -scheme tctiSH -destination 'generic/platform=iOS' build
 
 .PHONY: tctictl
