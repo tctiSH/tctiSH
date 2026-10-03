@@ -3,11 +3,13 @@
 # Builds tctiSH's QEMU fork for this Mac, so that a guest booted here runs on
 # the emulator the app ships rather than on an upstream one.
 #
-#   build_host_qemu.sh tcti|jit
+#   build_host_qemu.sh tcti|jit|hybrid-tcti|hybrid-jit|hybrid
 #
 # The output is build-macOS-arm64/qemu_<backend>/qemu-system-x86_64, which is
 # what assets/boot_guest.sh runs. TCTI runs natively on Apple Silicon, so both
-# backends can be built and booted here.
+# backends can be built and booted here. The hybrid flavors build both backends
+# into one QEMU (--enable-tcg-hybrid), using the one named, or for plain
+# `hybrid` the one chosen at startup (-accel tcg,tcti=on for TCTI).
 #
 # For comparing builds, two variables let trees coexist:
 #
@@ -46,7 +48,10 @@ BACKEND="${1:-}"
 case "$BACKEND" in
     tcti) BACKEND_FLAGS="--enable-tcg-threaded-interpreter" ;;
     jit) BACKEND_FLAGS="" ;;
-    *) die "usage: $(basename "$0") tcti|jit" ;;
+    hybrid-tcti) BACKEND_FLAGS="--enable-tcg-hybrid=tcti" ;;
+    hybrid-jit) BACKEND_FLAGS="--enable-tcg-hybrid=jit" ;;
+    hybrid) BACKEND_FLAGS="--enable-tcg-hybrid=runtime" ;;
+    *) die "usage: $(basename "$0") tcti|jit|hybrid-tcti|hybrid-jit|hybrid" ;;
 esac
 
 BUILD_ROOT="$BASEDIR/build-macOS-arm64"
@@ -80,15 +85,51 @@ if [ "${TCTISH_DEVSHELL:-}" != "host-qemu" ]; then
     exec "$NIX" develop --profile "$GC_ROOT" "$BASEDIR#host-qemu" --command "$0" "$@"
 fi
 
-# A build tree configured in one environment goes on pointing at its libraries
-# after the flake moves to others: meson records their paths at configure time.
-# So each tree remembers the environment it was configured in, and one that has
-# changed -- a nixpkgs bump, an edit to the host-qemu shell -- is configured
-# afresh. Unknown when run by hand from inside the shell, with no profile.
+# The flags follow QEMU_PLATFORM_BUILD_FLAGS in build_dependencies.sh, so that
+# what is compiled in matches the app's: configure enables whatever it finds,
+# and the host-qemu shell has QEMU's full nixpkgs set of libraries on offer.
+# That means slirp built from its subproject and linked statically, as the app
+# has it, rather than nixpkgs' libslirp, and libucontext coroutines.
+#
+# Where this deliberately differs:
+#
+#   - Debug info stays on, as this build is the one a debugger gets pointed at.
+#   - Capstone is in, so that -d in_asm and out_asm disassemble the guest's
+#     code and the JIT's. It only runs when something is logged.
+#   - It is an executable, not --enable-shared-lib.
+#   - It also turns off what an iOS SDK simply lacks and a Mac has: spice,
+#     opengl, vde, curses, smartcards, the guest agent, the tools.
+#
+# --disable-download because prepare_qemu_source has already fetched every
+# subproject configure needs.
+CONFIGURE_FLAGS=(
+    --target-list=x86_64-softmmu
+    --disable-hvf --disable-cocoa --disable-coreaudio --disable-sdl --disable-gtk
+    --disable-vnc --disable-spice --disable-opengl --disable-dbus-display
+    --disable-virglrenderer --enable-capstone --disable-fdt --disable-rust
+    --disable-gnutls --disable-gcrypt --disable-nettle --disable-libssh
+    --disable-curl --disable-libusb --disable-usb-redir --disable-libiscsi
+    --disable-lzo --disable-snappy --disable-zstd --disable-png
+    --disable-vde --disable-curses --disable-smartcard
+    --disable-docs --disable-werror --disable-tools --disable-guest-agent
+    --enable-slirp --disable-slirp-smbd -Dforce_fallback_for=slirp
+    -Dslirp:default_library=static
+    --with-coroutine=libucontext --enable-ucontext
+    --enable-virtfs --disable-download
+)
+[ -z "$BACKEND_FLAGS" ] || CONFIGURE_FLAGS+=("$BACKEND_FLAGS")
+
+# A build tree goes on with what it was configured with: meson records the
+# libraries' paths at configure time, and ninja reconfigures by itself only
+# when a meson.build changes. So each tree remembers its environment and flags,
+# and one where either has changed -- a nixpkgs bump, an edit to the host-qemu
+# shell or to the flags above -- is configured afresh. The environment is
+# unknown when this is run by hand from inside the shell, with no profile.
 ENVIRONMENT="$(readlink -f "$GC_ROOT" 2>/dev/null || true)"
+CONFIGURED="$ENVIRONMENT ${CONFIGURE_FLAGS[*]}"
 if [ -n "$ENVIRONMENT" ] && [ -f "$BUILD_DIR/build.ninja" ] &&
-    [ "$(cat "$BUILD_DIR/environment" 2>/dev/null)" != "$ENVIRONMENT" ]; then
-    echo "${GREEN}The host-qemu shell has changed; configuring QEMU ($BACKEND) again...${NC}"
+    [ "$(cat "$BUILD_DIR/environment" 2>/dev/null)" != "$CONFIGURED" ]; then
+    echo "${GREEN}The host-qemu shell or the configure flags have changed; configuring QEMU ($BACKEND) again...${NC}"
     rm -rf "$BUILD_DIR"
 fi
 
@@ -96,45 +137,17 @@ fi
 source "$BASEDIR/qemu_source.sh"
 prepare_qemu_source
 
-# Configured once, and then left to ninja, which reconfigures by itself when a
-# meson.build changes. A change of the flags below needs the directory removed:
-# `make clean-host-qemu`.
-#
-# The flags follow QEMU_PLATFORM_BUILD_FLAGS in build_dependencies.sh, so that
-# what is compiled in matches the app's: configure enables whatever it finds,
-# and the host-qemu shell has QEMU's full nixpkgs set of libraries on offer.
-# That means slirp built from its subproject and linked statically, as the app
-# has it, rather than nixpkgs' libslirp, and libucontext coroutines.
-#
-# Where this deliberately differs: debug info stays on, as this build is the one
-# a debugger gets pointed at; it is an executable, not --enable-shared-lib; and
-# it also turns off what an iOS SDK simply lacks and a Mac has (spice, opengl,
-# vde, curses, smartcards, the guest agent, the tools). --disable-download because prepare_qemu_source
-# has already fetched every subproject configure needs.
 if [ ! -f "$BUILD_DIR/build.ninja" ]; then
     rm -rf "$BUILD_DIR"
     mkdir -p "$BUILD_DIR"
     echo "${GREEN}Configuring QEMU ($BACKEND) for this Mac...${NC}"
-    # shellcheck disable=SC2086 # BACKEND_FLAGS is empty or one flag
-    if ! (cd "$BUILD_DIR" && "$QEMU_DIR/configure" --target-list=x86_64-softmmu \
-        --disable-hvf --disable-cocoa --disable-coreaudio --disable-sdl --disable-gtk \
-        --disable-vnc --disable-spice --disable-opengl --disable-dbus-display \
-        --disable-virglrenderer --disable-capstone --disable-fdt --disable-rust \
-        --disable-gnutls --disable-gcrypt --disable-nettle --disable-libssh \
-        --disable-curl --disable-libusb --disable-usb-redir --disable-libiscsi \
-        --disable-lzo --disable-snappy --disable-zstd --disable-png \
-        --disable-vde --disable-curses --disable-smartcard \
-        --disable-docs --disable-werror --disable-tools --disable-guest-agent \
-        --enable-slirp --disable-slirp-smbd -Dforce_fallback_for=slirp \
-        -Dslirp:default_library=static \
-        --with-coroutine=libucontext --enable-ucontext \
-        --enable-virtfs --disable-download $BACKEND_FLAGS); then
+    if ! (cd "$BUILD_DIR" && "$QEMU_DIR/configure" "${CONFIGURE_FLAGS[@]}"); then
         # Removed so the next run configures afresh rather than building a
         # half-configured tree.
         rm -rf "$BUILD_DIR"
         die "configure failed"
     fi
-    [ -z "$ENVIRONMENT" ] || echo "$ENVIRONMENT" >"$BUILD_DIR/environment"
+    [ -z "$ENVIRONMENT" ] || echo "$CONFIGURED" >"$BUILD_DIR/environment"
 fi
 
 echo "${GREEN}Building QEMU ($BACKEND) for this Mac...${NC}"
