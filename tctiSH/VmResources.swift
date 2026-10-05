@@ -355,12 +355,10 @@ enum CodeCache {
         }
     }
 
-    /// Whether the next launch is expected to have to bless the cache.
-    ///
-    /// Deliberately not `JitEnablement.outcome`: that describes the launch
-    /// already running, and these settings apply to the next one.
+    /// Whether the cache is expected to be blessed: at launch under Always JIT,
+    /// or at a switch to JIT in the Dynamic modes.
     static var blessingExpected: Bool {
-        guard UserDefaults.standard.string(forKey: "jit_mode") == "jit_when_possible" else {
+        guard ExecutionMode.setting != .never else {
             return false
         }
 
@@ -607,6 +605,7 @@ enum AppSetting: String {
     case bootSnapshot = "boot_snapshot"
     case diskName = "disk_name"
     case jitMode = "jit_mode"
+    case flushJitBuffers = "flush_jit_buffers"
     case fontSize = "font_size"
     case codeCacheNotifications = "code_cache_notifications"
     case parkInBackground = "park_in_background"

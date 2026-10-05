@@ -151,8 +151,35 @@ enum CodeCacheMonitor {
             "code cache: \(reason.logDescription); not offering again unless turned back on")
 
         report(.failed(reason))
-        DispatchQueue.main.async { offersEnabled = false }
+        DispatchQueue.main.async {
+            offersEnabled = false
+            offersStoppedByFailure = true
+
+            switch reason {
+            case .noPairingFile, .attachTimedOut: helperWasMissing = true
+            case .declined: break
+            }
+        }
     }
+
+    /// The VM has moved to the other backend, whose buffer is another one
+    /// entirely: start again from what QEMU now says. Main thread.
+    static func backendChanged() {
+        abandonCountdown()
+        hasReportedShape = false
+        lastLoggedUsed = 0
+        lastReleased = qemu_code_cache_released()
+        reachedMib = 0
+
+        // A failure stopped the offers for the cache that was in use.
+        if offersStoppedByFailure {
+            offersEnabled = true
+        }
+    }
+
+    /// Whether `offersEnabled` is off because an expansion failed rather than
+    /// because the user said so. Cleared by any other change.
+    private static var offersStoppedByFailure = false
 
     // MARK: - Tuning
 
@@ -194,14 +221,21 @@ enum CodeCacheMonitor {
     /// the current conditions for the user, not about permanent app behavior.
     /// It is kept as a setting, however, to allow the user to toggle them back
     /// on without restarting the VM.
-    static var offersEnabled = true
+    static var offersEnabled = true {
+        didSet { offersStoppedByFailure = false }
+    }
 
     /// Whether an expansion is under way.
     ///
     /// Main-thread only as the expansion itself runs on a background queue, so
     /// the flag it clears on the way out hops back rather than being written
-    /// from there; `setPreparing` and `setReached` do the same.
-    private static var isGrowing = false
+    /// from there; `setPreparing` and `setReached` do the same. Read by
+    /// `Backend`, which does not switch in the middle of one.
+    private(set) static var isGrowing = false
+
+    /// Set when an expansion failed for want of a helper, for `beginGrowth` to
+    /// pass on once the expansion is over. Main thread.
+    private static var helperWasMissing = false
 
     private static var countdownEndsAt: Date?
     private static var countdownWork: DispatchWorkItem?
@@ -328,6 +362,7 @@ enum CodeCacheMonitor {
     /// the main thread.
     static func debugGrow() -> String? {
         guard !isGrowing else { return "An expansion is already under way." }
+        guard !Backend.isBusy else { return "A switch of backend is under way." }
         guard canGrow, let next = nextTargetMib else {
             return "There's no room to grow, or it isn't allowed to."
         }
@@ -459,6 +494,12 @@ enum CodeCacheMonitor {
     /// How long to wait for the flush before carrying on.
     private static let parkedReleaseDeadline: TimeInterval = 5
 
+    /// Calls off an expansion that is counting down, for a switch of backend,
+    /// which leaves it describing a buffer no longer in use. Main thread.
+    static func cancelPendingGrowth() {
+        abandonCountdown()
+    }
+
     /// Calls off an expansion that is counting down. Main thread.
     private static func abandonCountdown() {
         guard case .countingDown = state else { return }
@@ -470,9 +511,8 @@ enum CodeCacheMonitor {
     }
 
     /// Prepares the cache again after `releaseWhileParked`, as at launch. Under
-    /// TXM that's a blessing with its freeze: of the whole of a fixed cache, or
-    /// the first rung of a dynamic one. Everywhere else it's the whole buffer,
-    /// and only a raised limit.
+    /// TXM that's a blessing with its freeze. Everywhere else it's the whole
+    /// buffer.
     ///
     /// Calls `completion` on the main queue with whether it worked. Until it
     /// has, the machine must stay parked. Main thread.
@@ -511,8 +551,9 @@ enum CodeCacheMonitor {
         size: Int, blessing: Bool, completion: @escaping (Bool) -> Void
     ) {
         // An expansion that began before the park finishes first, or `beginGrowth` would turn this
-        // one away. Whatever it prepared, QEMU says below whether it was enough.
-        guard !isGrowing else {
+        // one away. Whatever it prepared, QEMU says below whether it was enough. Likewise a switch
+        // of backend, which changes which buffer there is to prepare.
+        guard !isGrowing, !Backend.isBusy else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 prepareOnceIdle(size: size, blessing: blessing, completion: completion)
             }
@@ -556,8 +597,13 @@ enum CodeCacheMonitor {
     /// What the last release came to, so a change in it can be reported once.
     private static var lastReleased = 0
 
+    /// In MiB, or in KiB below one, where whole MiB would read as nothing at
+    /// all.
     private static func mib(_ bytes: Int) -> String {
-        "\(bytes / bytesPerMib)MiB"
+        if bytes > 0 && bytes < bytesPerMib {
+            return "\(bytes / 1024)KiB"
+        }
+        return "\(bytes / bytesPerMib)MiB"
     }
 
     private static let bytesPerMib = 1024 * 1024
@@ -689,7 +735,7 @@ enum CodeCacheMonitor {
             Log.jit.note("code cache: \(mib(used)) of \(mib(usable)) translated")
         }
 
-        guard !isGrowing, offersEnabled, state == .quiet, canGrow else { return }
+        guard !isGrowing, !Backend.isBusy, offersEnabled, state == .quiet, canGrow else { return }
         guard Double(used) / Double(usable) >= offerAt else { return }
         guard let nextMib = nextTargetMib else { return }
 
@@ -753,7 +799,10 @@ enum CodeCacheMonitor {
     /// `completion`, if given, is called on the main queue with whether the
     /// cache grew.
     private static func beginGrowth(to next: Int, completion: ((Bool) -> Void)? = nil) {
-        guard !isGrowing else {
+        // Nor during a switch of backend. A countdown can run out in the middle of one, and growing
+        // then decides on a debugger for one buffer and traps for the other -- or not at all,
+        // leaving the helper's script waiting for a trap that never comes.
+        guard !isGrowing, !Backend.isBusy else {
             completion?(false)
             return
         }
@@ -771,6 +820,11 @@ enum CodeCacheMonitor {
             DispatchQueue.main.async {
                 isGrowing = false
                 completion?(grew)
+
+                if helperWasMissing {
+                    helperWasMissing = false
+                    Backend.growthNeedsHelper()
+                }
             }
             publish(.quiet)
         }
@@ -790,7 +844,6 @@ enum CodeCacheMonitor {
 
             setReached(next / bytesPerMib)
             Log.jit.note("code cache: now \(mib(usable)) usable, without preparing anything")
-            report(.grew(to: next))
             return true
         }
 

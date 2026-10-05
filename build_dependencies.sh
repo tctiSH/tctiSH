@@ -344,14 +344,13 @@ build() {
     cd "$pwd"
 }
 
-build_qemu_tcti() {
-    NAME="QEMU_TCTI"
+build_qemu() {
+    NAME="QEMU"
 
-    # Out of tree, and out of the checkout too; each variant gets its own
-    # directory so the second does not have to undo the first. Emptied first,
-    # as the old tarball tree used to be by being re-extracted: a stale
-    # configuration surviving a change of flags is the failure this avoids.
-    BUILD_SUBDIR="$BUILD_DIR/qemu_tcti"
+    # Out of tree, and out of the checkout too. Emptied first, as the old
+    # tarball tree used to be by being re-extracted: a stale configuration
+    # surviving a change of flags is the failure this avoids.
+    BUILD_SUBDIR="$BUILD_DIR/qemu"
     if [ -z "$REBUILD" ]; then
         rm -rf "$BUILD_SUBDIR"
     fi
@@ -376,43 +375,6 @@ build_qemu_tcti() {
     ninja
     echo "${GREEN}Installing QEMU...${NC}"
     ninja install
-    cd "$pwd"
-}
-
-build_qemu_jit() {
-    NAME="QEMU_JIT"
-
-    # Out of tree, and out of the checkout too; each variant gets its own
-    # directory so the second does not have to undo the first. Emptied first,
-    # as the old tarball tree used to be by being re-extracted: a stale
-    # configuration surviving a change of flags is the failure this avoids.
-    BUILD_SUBDIR="$BUILD_DIR/qemu_jit"
-    if [ -z "$REBUILD" ]; then
-        rm -rf "$BUILD_SUBDIR"
-    fi
-
-    # QEMU's configure reads $CFLAGS/$CXXFLAGS/$LDFLAGS straight out of the
-    # environment and writes them into its meson cross file. It used to take
-    # them as $QEMU_CFLAGS instead, which is why this function once moved them
-    # aside; that spelling is gone, and moving them aside now builds QEMU with
-    # no -isysroot and no deployment target -- against the macOS SDK, silently.
-
-    pwd="$(pwd)"
-    mkdir -p "$BUILD_SUBDIR"
-    cd "$BUILD_SUBDIR"
-    echo "${GREEN}Configuring QEMU-JIT...${NC}"
-    # QEMU's configure defaults objcc to a bare `clang` and lets meson resolve it from $PATH, even
-    # though every other binary it writes into the cross file is a full Xcode path. Pass it
-    # explicitly so the ObjC probe cannot be captured by whatever clang happens to come first --
-    # a nix one links against the macOS SDK and fails against our iOS target.
-    "$QEMU_DIR/configure" --prefix="$PREFIX" --host="$CHOST" --cross-prefix="" \
-        --with-coroutine=libucontext --objcc="$OBJCC" $@
-    echo "${GREEN}Building QEMU-JIT...${NC}"
-    ninja
-    echo "${GREEN}Copying single library...${NC}"
-    echo cp "libqemu-x86_64-softmmu.dylib" "$PREFIX/lib/libqemu-x86_64-softmmu_jit.dylib"
-    cp "libqemu-x86_64-softmmu.dylib" "$PREFIX/lib/libqemu-x86_64-softmmu_jit.dylib"
-
     cd "$pwd"
 }
 
@@ -544,18 +506,17 @@ fixup() {
         libname=${basefilename#lib*}
         dir=$(dirname "$g")
 
-        # Two spellings reach this, because the two QEMU builds get here by
-        # different routes. build_qemu_tcti runs `ninja install`, and meson
-        # rewrites install names on the way, so its dependencies arrive as
-        # "$PREFIX/lib/libfoo.dylib". build_qemu_jit copies the dylib straight
-        # out of the build tree to avoid clobbering the TCTI one, so its
-        # dependencies still carry whatever the linker emitted -- normally
+        # Two spellings can reach this. Anything installed with `ninja
+        # install` has had its install names rewritten by meson on the way, so
+        # its dependencies arrive as "$PREFIX/lib/libfoo.dylib"; a dylib copied
+        # straight out of a build tree, as the separate JIT build of QEMU once
+        # was, still carries whatever the linker emitted -- normally
         # "@rpath/libfoo.dylib".
         #
-        # Matching only the first meant the JIT build kept raw @rpath names for
-        # anything we ship, which resolve to nothing once the library is inside
-        # a framework: a dlopen failure at runtime, with no build-time sign of
-        # it. Guarded on the library being one of ours -- tested against
+        # Matching only the first would leave raw @rpath names for anything we
+        # ship, which resolve to nothing once the library is inside a
+        # framework: a dlopen failure at runtime, with no build-time sign of it.
+        # Guarded on the library being one of ours -- tested against
         # $PREFIX/lib rather than against the framework, because fixup_all
         # builds the frameworks as it walks and a later one would not exist yet.
         if [ "$dir" == "$PREFIX/lib" ] ||
@@ -661,7 +622,10 @@ QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-fdt"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --enable-virtfs --target-list=x86_64-softmmu"
 # prepare_qemu_source() has already fetched every subproject this needs.
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-download"
-QEMU_PLATFORM_TCTI_FLAGS="--enable-tcg-threaded-interpreter"
+# Both of TCG's AArch64 backends in one library: TCTI, the threaded interpreter that needs no JIT,
+# and native code. Which one runs is chosen at launch (-accel tcg,tcti=on|off) and can be switched
+# while the VM runs, so the app ships one QEMU rather than one of each.
+QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --enable-tcg-hybrid=runtime"
 
 # Setup directories
 BASEDIR="$(dirname "$(realpath $0)")"
@@ -773,8 +737,7 @@ rm -f "$BUILD_DIR/meson.cross"
 copy_private_headers
 build_pkg_config
 build_qemu_dependencies
-build_qemu_tcti $QEMU_PLATFORM_BUILD_FLAGS $QEMU_PLATFORM_TCTI_FLAGS
-build_qemu_jit $QEMU_PLATFORM_BUILD_FLAGS
+build_qemu $QEMU_PLATFORM_BUILD_FLAGS
 fixup_all
 echo "${GREEN}All done!${NC}"
 touch "$BUILD_DIR/BUILD_SUCCESS"

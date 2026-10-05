@@ -95,8 +95,8 @@ public class QEMUInterface {
         // a snapshot taken under one QEMU build is not necessarily loadable by the other.
         Log.qemu.note(
             "\(getAppropriateQemuFramework().lastPathComponent), "
-                + "accel tcg\(AppDelegate.usingJitHacks ? ",split-wx=on" : ""),tb-size=\(tbSize), "
-                + "bless \(AppDelegate.blessJitRegions)")
+                + "accel tcg,tcti=\(AppDelegate.startsNative ? "off" : "on"),split-wx=on,"
+                + "tb-size=\(tbSize), bless \(AppDelegate.blessJitRegions)")
         Log.qemu.note(
             "\(bootImageName.map { "resuming from '\($0)'" } ?? "cold boot"), "
                 + "memory \(memoryValue), code cache \(CodeCache.summary)")
@@ -104,7 +104,7 @@ public class QEMUInterface {
         // ... and start up the QEMU kernel, which will start paused.
         run_background_qemu(
             qemuImage, kernelPath, initrdPath, bundlePrefix, diskPath, sharedFolder, bootImageName,
-            memoryValue, monitorSocketPath, AppDelegate.usingJitHacks, AppDelegate.blessJitRegions,
+            memoryValue, monitorSocketPath, AppDelegate.startsNative, AppDelegate.blessJitRegions,
             UInt32(tbSize), UInt32(CodeCache.initialSize));
 
         // Mark what we booted with, so the next launch can tell whether the settings moved.
@@ -1082,18 +1082,13 @@ public class QEMUInterface {
     }
 
     /// Fetches the path to the QEMU framework appropriate for this environment.
-    /// Will return a JIT-capable image if JIT is supported; or a TCTI image
-    /// otherwise.
+    /// The one QEMU there is, which holds both TCTI and native code and is told
+    /// which to start on.
     private func getAppropriateQemuFramework() -> URL {
         var frameworkURL = Bundle.main.bundleURL
         frameworkURL.appendPathComponent("Frameworks", isDirectory: true)
 
-        // Select our QEMU binary based on whether or not we're allowed to JIT.
-        var qemuName = "qemu-x86_64-softmmu"
-        if (AppDelegate.usingJitHacks) {
-            qemuName += "_jit"
-            AppDelegate.usingJitHacks = true
-        }
+        let qemuName = "qemu-x86_64-softmmu"
 
         frameworkURL.appendPathComponent("\(qemuName).framework", isDirectory: true)
         frameworkURL.appendPathComponent(qemuName)

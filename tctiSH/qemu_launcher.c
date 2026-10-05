@@ -67,7 +67,6 @@ struct qemu_args {
     char *dll_name;
     char *memory_value;
     char *accel_args;
-    bool is_jit;
 };
 
 /// Matches `Log.qemu` on the Swift side, so one filter catches both.
@@ -230,6 +229,67 @@ size_t qemu_code_cache_grow(size_t target) {
         fn = qemu_symbol("tctish_code_cache_grow");
     }
     return fn ? fn(target) : 0;
+}
+
+int qemu_backend_current(void) {
+    static bool (*fn)(void);
+    if (!fn) {
+        fn = qemu_symbol("tctish_backend_is_tcti");
+    }
+
+    // The library is open well before TCG is up, and until it is this answer is useless.
+    if (!fn || qemu_code_cache_total() == 0) {
+        return -1;
+    }
+    return fn() ? 1 : 0;
+}
+
+bool qemu_backend_native_ready(void) {
+    static bool (*fn)(void);
+    if (!fn) {
+        fn = qemu_symbol("tctish_backend_native_ready");
+    }
+    return fn ? fn() : false;
+}
+
+int qemu_backend_prepare_native(void) {
+    static int (*fn)(void);
+    if (!fn) {
+        fn = qemu_symbol("tctish_backend_prepare_native");
+    }
+    return fn ? fn() : 0;
+}
+
+bool qemu_backend_release_native(void) {
+    static bool (*fn)(void);
+    if (!fn) {
+        fn = qemu_symbol("tctish_backend_release_native");
+    }
+    return fn ? fn() : false;
+}
+
+bool qemu_backend_switch(bool tcti) {
+    static bool (*fn)(bool);
+    if (!fn) {
+        fn = qemu_symbol("tctish_backend_switch");
+    }
+    return fn ? fn(tcti) : false;
+}
+
+size_t qemu_backend_switches(void) {
+    static size_t (*fn)(void);
+    if (!fn) {
+        fn = qemu_symbol("tctish_backend_switches");
+    }
+    return fn ? fn() : 0;
+}
+
+char *qemu_backend_last_error(void) {
+    static char *(*fn)(void);
+    if (!fn) {
+        fn = qemu_symbol("tctish_backend_last_error");
+    }
+    return fn ? fn() : NULL;
 }
 
 /// The parts of the QEMU command line that define the *shape* of the machine.
@@ -451,8 +511,9 @@ static void *qemu_thread(void *raw_args) {
 void run_background_qemu(const char *qemu_path, const char *kernel_path, const char *initrd_path,
                          const char *bios_path, const char *disk_path,
                          const char *shared_folder_path, const char *boot_image_name,
-                         const char *memory_value, const char *monitor_socket_path, bool is_jit,
-                         bool bless_jit_regions, unsigned int tb_size_mib, unsigned int chunk_mib) {
+                         const char *memory_value, const char *monitor_socket_path,
+                         bool start_native, bool bless_jit_regions, unsigned int tb_size_mib,
+                         unsigned int chunk_mib) {
     pthread_t thread;
     pthread_attr_t qosAttribute;
 
@@ -471,7 +532,6 @@ void run_background_qemu(const char *qemu_path, const char *kernel_path, const c
 
     struct qemu_args *args = calloc(1, sizeof(struct qemu_args));
 
-    args->is_jit = is_jit;
     args->qemu_image = calloc(PATH_MAX, sizeof(char));
     args->kernel_filename = calloc(PATH_MAX, sizeof(char));
     args->initrd_filename = calloc(PATH_MAX, sizeof(char));
@@ -498,12 +558,16 @@ void run_background_qemu(const char *qemu_path, const char *kernel_path, const c
 
     // Create our accelerator argument.
     //
-    // tb_size_mib is passed whatever it is, including zero: QEMU reads `tb-size=0` as "use the
-    // default", which is the same decision size_code_gen_buffer() makes when the property is left
-    // off entirely. One line, and no branch whose other half nothing ever takes.
+    // QEMU starts the named backend: TCTI (tcti=on), which needs no JIT, or the native JIT. It can
+    // be switched dynamically while it runs. split-wx is for the native code's buffer, which is
+    // mapped split whenever it is mapped.
+    //
+    // tb_size_mib is passed regardless of size: QEMU reads `tb-size=0` as "use the default", which
+    // is the same decision size_code_gen_buffer() makes when the property is left off entirely. One
+    // line, and no branch whose other half nothing ever takes.
     args->accel_args = calloc(ARGUMENT_MAX, sizeof(char));
-    snprintf(args->accel_args, ARGUMENT_MAX, "tcg%s,tb-size=%u", is_jit ? ",split-wx=on" : "",
-             tb_size_mib);
+    snprintf(args->accel_args, ARGUMENT_MAX, "tcg,tcti=%s,split-wx=on,tb-size=%u",
+             start_native ? "off" : "on", tb_size_mib);
 
     // Copy in each of our filenames/arguments.
     strncpy(args->qemu_image, qemu_path, PATH_MAX - 1);

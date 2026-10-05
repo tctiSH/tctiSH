@@ -75,7 +75,7 @@ To build the app onto your device, you can follow these steps:
 ### Basic Usage
 
 When the app launches you will be met with a terminal and a keyboard, as well as a little pill
-telling you that no tunnel has been found and hence it is running without JIT. What you have is a
+telling you that it is starting with TCTI, the interpreter that needs no JIT. What you have is a
 bare [Alpine Linux](https://www.alpinelinux.org) environment with little beyond busybox and some
 basic tools installed. How you use this is beyond the scope of this document.
 
@@ -93,8 +93,9 @@ basic tools installed. How you use this is beyond the scope of this document.
   will pop up a folder picker that lets you pick from any files app location. Once you submit, the
   folder you picked will be mounted at the specified mount point with the given name, but the mount
   point must exist first.
-- You can long-press on the app icon to get options to boot with or without JIT, or to trigger a
-  recovery boot if you are having problems.
+- You can long-press on the app icon to get options to run with or without JIT, or to trigger a
+  recovery boot if you are having problems. With the app already running, the JIT options switch the
+  running session's mode rather than restarting it.
 
 ### Setting Up JIT
 
@@ -112,7 +113,22 @@ You can get JIT working as follows:
      computer), and an RRPairing-capable application like
      [`idevice_pair`](https://github.com/jkcoxson/idevice_pair).
 
-4. Once tctiSH has your pairing file, it will tell you to restart the app to run with JIT. Do so.
+4. Once tctiSH has your pairing file, it switches to JIT by itself (or offers if configured to), and
+   the session you have carries on, just faster.
+
+How tctiSH moves between JIT and TCTI is up to you, and you can configure it in Settings > JIT >
+Execution Mode:
+
+- **Dynamic (Auto)**, the default, starts with JIT if it is available (the loopback VPN is up and
+  tctiSH has your pairing file), and otherwise launches TCTI straight away, switching to JIT by
+  itself as soon as it can. If the JIT code cache needs to grow while the loopback VPN is
+  unavailable, it switches to TCTI to prevent thrashing and conserve energy.
+- **Dynamic (Ask)** does the same, but offers each switch rather than performing it automatically.
+- **Always JIT** waits for JIT when the app opens, and switches to it by itself if it arrives later.
+- **Never JIT** always runs with TCTI.
+
+You can also switch by hand at any time with **Running with JIT** in the settings. Switching keeps
+the session: Linux carries on where it was without knowing that anything has changed.
 
 Note that for JIT to work you will always need your loopback VPN active, and to either be in
 airplane mode or connected to WiFi. Once the JIT helper has done its work you can fall back to
@@ -120,6 +136,12 @@ mobile data, at least until the helper is needed again. By default, the helper i
 the code cache size is changed (e.g. when it grows in dynamic mode, or when resuming from a
 background session that evicted the code cache). If you don't want this behavior, make sure to use a
 fixed-size code cache and do not set the app to evict the code cache in the background.
+
+Switching to JIT needs the helper to prepare the JIT's memory, and also to grow that memory.
+Switching back to TCTI keeps that memory prepared unless **Flush JIT Buffers** is on. That gives the
+memory back while running with TCTI, at the cost of needing the helper again to return. With
+**Release Memory** on, it is also given back whenever the session is put away in the background
+while running with TCTI.
 
 ## Development
 

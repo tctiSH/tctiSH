@@ -142,10 +142,12 @@ final class FreezeBanner: UIView {
             return
         }
 
-        guard let host = ViewController.getCurrent()?.view else {
+        // Over the window so that it covers a sheet when needed.
+        guard let view = ViewController.getCurrent()?.view else {
             Log.ui.warn("freeze banner: nothing on screen to put it over")
             return
         }
+        let host: UIView = view.window ?? view
 
         let banner = FreezeBanner(frame: host.bounds)
         banner.message = message

@@ -61,6 +61,10 @@ enum JitEnablement {
             /// The helper never attached within `attachDeadline`.
             case attachTimedOut
 
+            /// A Dynamic mode, under TXM: the VM starts under TCTI at once, and
+            /// JIT is arranged once it is running; see `Backend`.
+            case deferred
+
             var logDescription: String {
                 switch self {
                 case .disabledInSettings: return "JIT is turned off in settings"
@@ -71,6 +75,8 @@ enum JitEnablement {
                 case .noPairingFile: return "no pairing file at \(JitPairingFile.url.path)"
                 case .attachTimedOut:
                     return String(format: "no debugger attached within %.0fs", attachDeadline)
+                case .deferred:
+                    return "starting under TCTI; JIT is arranged once the VM is running"
                 }
             }
 
@@ -85,6 +91,7 @@ enum JitEnablement {
                 case .noTunnel: return "No debug tunnel"
                 case .noPairingFile: return "No pairing file"
                 case .attachTimedOut: return "Debugger didn't attach"
+                case .deferred: return "Starting with TCTI"
                 }
             }
 
@@ -166,20 +173,26 @@ enum JitEnablement {
         let outcome = decide()
         publish(outcome)
 
+        // Native code's buffer is handed to a debugger wherever TXM is present, whichever backend
+        // the VM starts on. QEMU reads this when it maps that buffer, which for a VM started under
+        // TCTI is at the switch.
+        #if targetEnvironment(macCatalyst)
+            AppDelegate.blessJitRegions = false
+        #else
+            AppDelegate.blessJitRegions = TxmPresence.current == .present
+        #endif
+
         switch outcome {
         case .blessed:
-            AppDelegate.usingJitHacks = true
-            AppDelegate.blessJitRegions = true
+            AppDelegate.startsNative = true
             Log.jit.note("JIT enabled; QEMU will hand its code buffer to the debugger")
 
         case .ptrace:
-            AppDelegate.usingJitHacks = true
-            AppDelegate.blessJitRegions = false
+            AppDelegate.startsNative = true
             Log.jit.note("JIT enabled via the ptrace hack")
 
         case .interpreted(let reason):
-            AppDelegate.usingJitHacks = false
-            AppDelegate.blessJitRegions = false
+            AppDelegate.startsNative = false
             Log.jit.note("running under TCTI -- \(reason.logDescription)")
         }
 
@@ -209,16 +222,22 @@ enum JitEnablement {
         // as it was found, and answers for every launch that isn't asked about.
         switch QuickActions.jitRequest {
         case .some(false):
+            ExecutionMode.sessionOverride = .never
             return .interpreted(.declinedForThisLaunch)
 
         case .some(true):
-            break
+            ExecutionMode.sessionOverride = .always
 
         case .none:
-            guard UserDefaults.standard.string(forKey: "jit_mode") == "jit_when_possible" else {
+            if ExecutionMode.current == .never {
                 return .interpreted(.disabledInSettings)
             }
         }
+
+        // Always JIT holds the boot for a helper whatever it finds. The Dynamic modes do only when
+        // a helper looks reachable -- see `enableUnderTxm` -- and otherwise start under TCTI and
+        // leave JIT to `Backend`.
+        let waitsForHelper = ExecutionMode.current == .always
 
         #if targetEnvironment(macCatalyst)
             // Catalyst gets JIT from its entitlements. Nothing to arrange, and nothing to bless.
@@ -242,7 +261,7 @@ enum JitEnablement {
                 return .interpreted(.txmUnknown)
 
             case .present:
-                return enableUnderTxm()
+                return enableUnderTxm(waitsForHelper: waitsForHelper)
             }
         #endif
     }
@@ -253,17 +272,28 @@ enum JitEnablement {
     /// ptrace hack cannot grant JIT anyway, and it actively gets in the way: a
     /// self-traced process cannot be attached to, so calling it would lock out
     /// the very debugger we are trying to invite in.
-    private static func enableUnderTxm() -> Outcome {
-        // Already traced -- Xcode, most likely. Whatever is attached owns the trap; under Xcode
-        // that is the jit-bless stop hook (see utils/jit-bless), and a second debugger could not
-        // attach in any case.
+    private static func enableUnderTxm(waitsForHelper: Bool) -> Outcome {
+        // Already traced, so probably Xcode.
         if jit_debugger_tracing() {
-            // Deliberately without raising the banner. That debugger is the developer's, the
-            // blessing is jit-bless's ~15s rather than StikJIT's ~1.7s, and someone watching
-            // /tmp/jit-bless.log does not need the screen taken away from them to be told it is
-            // working.
             Log.jit.note("a debugger is already attached; leaving the region to it")
             return .blessed
+        }
+
+        guard waitsForHelper else {
+            // With a tunnel and a pairing file it takes JIT at launch as Always JIT does: a cold
+            // boot under TCTI is slow enough that the seconds the helper takes are paid back many
+            // times over. The probe answers within half a second, and at once where there is no
+            // tunnel at all.
+            let tunnel = TunnelProbe.probeAndReport().isAvailable
+
+            guard tunnel, let pairingData = JitPairingFile.read() else {
+                // Asked for as at launch, so that a JIT that wants only a pairing file can be
+                // offered the moment the window exists rather than at the first switch.
+                needsPairingFile = tunnel && !JitPairingFile.exists
+                return .interpreted(.deferred)
+            }
+
+            return attach(pairingData: pairingData)
         }
 
         guard TunnelProbe.probeAndReport().isAvailable else {
@@ -305,8 +335,8 @@ enum JitEnablement {
                 declined.close()
 
                 // Much the commonest reason is an unmounted developer disk image, and fixing that
-                // takes a network and minutes. Start it now so that the next launch can take the
-                // fast path.
+                // takes a network and minutes. Started now, and JIT comes once it is done; see
+                // `prepareInBackground`.
                 prepareInBackground(pairingData: pairingData)
                 return
             }
@@ -355,14 +385,14 @@ enum JitEnablement {
         return jit_debugger_tracing()
     }
 
-    /// Downloads and mounts the developer disk image, for next time.
+    /// Downloads and mounts the developer disk image.
     ///
-    /// Nothing waits on this: by the time it runs the VM is already booting
-    /// under TCTI. A device's first launch is therefore always JITless by
-    /// design -- preparation wants a network and minutes of it, and holding a
-    /// launch open for that would be worse than booting slow.
-    private static func prepareInBackground(pairingData: Data) {
-        Log.jit.note("preparing the device in the background, for the next launch")
+    /// Nothing waits on this: by the time it runs the VM is already running
+    /// under TCTI. Preparation wants a network and minutes of it, and holding a
+    /// launch open for that would be worse than booting slow. Once it is done,
+    /// JIT is offered or switched to, as Execution Mode says.
+    static func prepareInBackground(pairingData: Data) {
+        Log.jit.note("preparing the device in the background")
         setPreparation(.running(message: "Getting DDI", fraction: nil))
 
         // In-process, so it can say how it's getting on as it goes. Blocking, hence the queue.
@@ -374,7 +404,10 @@ enum JitEnablement {
             switch outcome {
             case .ready:
                 Log.jit.note("device prepared")
-                setPreparation(.finished(succeeded: true, message: "Relaunch for JIT"))
+                setPreparation(.finished(succeeded: true, message: "JIT is ready"))
+
+                // What JIT was waiting for, so it can be offered or switched to now.
+                DispatchQueue.main.async { Backend.conditionsMayHaveChanged() }
             case .failed(let reason):
                 Log.jit.note("could not prepare the device -- \(reason)")
                 setPreparation(.finished(succeeded: false, message: "Couldn't get DDI"))
@@ -436,8 +469,8 @@ enum JitEnablement {
 
     /// Called once a pairing file has been imported after launch.
     ///
-    /// Far too late to help this boot -- QEMU allocated its code buffer long
-    /// ago -- so all this can do is get the device ready for the next one.
+    /// Gets the device ready, after which JIT is offered or switched to; see
+    /// `prepareInBackground`.
     static func pairingFileArrived() {
         needsPairingFile = false
 

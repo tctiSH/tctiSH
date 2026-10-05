@@ -233,6 +233,10 @@ class ConfigServer {
                 command: "import_pairing_file", key: "path",
                 value: JitPairingFile.url.path, to: client)
 
+            // As for one imported through the app's own prompt: the device is got ready, and JIT is
+            // offered or switched to once it is.
+            DispatchQueue.main.async { JitEnablement.pairingFileArrived() }
+
         case .cancelled:
             sendResponse(
                 command: "import_pairing_file", key: "status",

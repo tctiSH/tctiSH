@@ -52,10 +52,10 @@ CMD_PREPARE_REGION = 1
 BLESS_BYTE = 0x69
 
 #: Module the trap is raised from -- the two jit calls are ordinary compiled
-#: code inside the JIT build of QEMU, so the pc at the stop is always in this
-#: binary. Scoping the stop hook to it is what confines this script to tctiSH;
-#: the TCTI build (`qemu-x86_64-softmmu`) never traps.
-JIT_MODULE = "qemu-x86_64-softmmu_jit"
+#: code inside QEMU, so the pc at the stop is always in this binary. Scoping the
+#: stop hook to it is what confines this script to tctiSH. QEMU holds both
+#: backends and only traps for native code, never while it runs under TCTI.
+JIT_MODULE = "qemu-x86_64-softmmu"
 
 #: Stop reasons a `brk` can plausibly arrive as. Filtering on this first spares
 #: a memory read on every step taken while debugging QEMU itself.

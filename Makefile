@@ -17,8 +17,8 @@ help:
 # What each build step actually produces. `build` depends on these files rather than on the phony
 # targets below, because a phony prerequisite would rebuild QEMU on every single `make build`.
 QEMU_SYSROOT      := sysroot-iOS-arm64
-QEMU_FRAMEWORK    := $(QEMU_SYSROOT)/Frameworks/qemu-x86_64-softmmu_jit.framework
-QEMU_LIBRARY      := $(QEMU_FRAMEWORK)/qemu-x86_64-softmmu_jit
+QEMU_FRAMEWORK    := $(QEMU_SYSROOT)/Frameworks/qemu-x86_64-softmmu.framework
+QEMU_LIBRARY      := $(QEMU_FRAMEWORK)/qemu-x86_64-softmmu
 STIKJIT_BUILD     := build-StikJIT
 STIKJIT_FRAMEWORK := $(STIKJIT_BUILD)/StikJIT.xcframework/Info.plist
 IDEVICE_BUILD     := build-idevice

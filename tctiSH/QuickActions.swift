@@ -67,19 +67,6 @@ enum QuickActions {
         adopt(request, from: "the home screen")
     }
 
-    /// Picks up a request left behind by `restart(for:)`, and spends it.
-    ///
-    /// Cleared as it is read. The user comes back by tapping the icon rather
-    /// than the action, so the request has to outlive the process that made it
-    /// -- but only just, or it would go on applying to every launch after.
-    static func adoptPending() {
-        let stored = UserDefaults.standard.string(forKey: pendingKey)
-        UserDefaults.standard.removeObject(forKey: pendingKey)
-
-        guard let stored, let request = Request(rawValue: stored) else { return }
-        adopt(request, from: "a restart")
-    }
-
     private static func adopt(_ value: Request, from source: String) {
         request = value
         Log.ui.note("quick action: booting \(value.bootDescription), asked for by \(source)")
@@ -99,8 +86,9 @@ enum QuickActions {
         /// The VM is already running the way the action asks.
         case alreadySatisfied(message: String, symbol: String)
 
-        /// Only a fresh process can honour it, and tapping arranges one.
-        case offersRestart(message: String, request: Request)
+        /// The VM can be switched to the backend asked for, and tapping does
+        /// it.
+        case offersSwitch(message: String, to: Backend.Kind)
 
         /// Recovery, which is the one thing that can be done where it stands.
         case recoverInPlace
@@ -145,10 +133,9 @@ enum QuickActions {
     private static func jitArrival(for request: Request) -> Arrival {
         let wanted = request.wantsJit == true
 
-        // Falls back to what this launch asked for while the verdict is still being settled, which
-        // is a second or two right at the start of one. It is the answer in all but the unluckiest
-        // cases, and being wrong here only costs a restart.
-        let running = JitEnablement.isJitting ?? (jitRequest ?? settingWantsJit)
+        // Falls back to how the launch settled while QEMU is still starting, which is a second or
+        // two right at the start of one.
+        let running = Backend.current.map { $0 == .native } ?? (JitEnablement.isJitting ?? false)
 
         guard running != wanted else {
             return .alreadySatisfied(
@@ -156,49 +143,8 @@ enum QuickActions {
                 symbol: wanted ? "hare.fill" : "tortoise.fill")
         }
 
-        return .offersRestart(
-            message: wanted ? "Tap to restart with JIT" : "Tap to restart without JIT",
-            request: request)
+        return .offersSwitch(
+            message: wanted ? "Tap to switch to JIT" : "Tap to switch to TCTI",
+            to: wanted ? .native : .tcti)
     }
-
-    private static var settingWantsJit: Bool {
-        UserDefaults.standard.string(forKey: "jit_mode") == "jit_when_possible"
-    }
-
-    // MARK: - Restarting
-
-    /// Leaves a request for the next launch, and ends this one.
-    ///
-    /// As close to restarting as iOS lets an app get. The session is
-    /// snapshotted exactly as backgrounding would snapshot it, the request is
-    /// written where the next launch will find it, and the process ends.
-    ///
-    /// Only ever called with a JIT request: recovery is done where it stands
-    /// and never reaches the pending slot. Worth keeping that way, because
-    /// `adopt` acts on a `.recovery` it finds and a later request would not
-    /// take the flag back off again.
-    static func restart(for request: Request) {
-        // Ahead of the banner, which owns the screen until the process ends: there is no lowering
-        // it from here, so nothing may raise it without a way to reach the exit underneath.
-        guard let delegate = UIApplication.shared.delegate as? AppDelegate else {
-            Log.ui.fail("no app delegate to quit through; not restarting")
-            return
-        }
-
-        UserDefaults.standard.set(request.rawValue, forKey: pendingKey)
-
-        // Now, rather than on the way out. `exit` runs none of UIKit's own shutdown, and a request
-        // that never reached the disk would leave the user with a relaunch that did nothing.
-        UserDefaults.standard.synchronize()
-
-        Log.ui.note("quick action: quitting so the next launch can boot \(request.bootDescription)")
-
-        // Up for the whole of the save, and it says what to do next because the app is about to
-        // vanish off the screen and nothing else will get the chance to.
-        FreezeBanner.raise("Saving; reopen tctiSH to restart")
-
-        delegate.saveAndExit()
-    }
-
-    private static let pendingKey = "pending_quick_action"
 }

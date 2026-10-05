@@ -178,6 +178,7 @@ class ViewController: UIViewController {
         reportBootProgress(for: currentTerminal)
         observeJitPreparation()
         observeCodeCache()
+        observeBackend()
         observeQuickActions()
 
         // Every moment someone could be told. Becoming active covers a launch that follows the
@@ -480,16 +481,19 @@ class ViewController: UIViewController {
                     state: .symbol(symbol),
                     duration: 4))
 
-        case .offersRestart(let message, let request):
+        case .offersSwitch(let message, let kind):
             // Open-ended, because this is a question rather than news: it waits either for the tap
             // that answers it or for the swipe that declines it.
             status?.present(
                 .init(
                     key: Self.quickActionStatusKey,
                     message: message,
-                    state: .symbol("arrow.clockwise"),
+                    state: .symbol(kind == .native ? "hare.fill" : "tortoise.fill"),
                     duration: nil,
-                    onTap: { QuickActions.restart(for: request) }))
+                    onTap: { [weak self] in
+                        self?.status?.dismiss(key: Self.quickActionStatusKey)
+                        Backend.switchTo(kind, asked: true)
+                    }))
 
         case .recoverInPlace:
             // The one action a running VM can honor by itself, so it is simply done. Resetting the
@@ -678,6 +682,82 @@ class ViewController: UIViewController {
                     duration: 3))
         }
     }
+
+    // MARK: - Backend
+
+    /// Follows the VM's backend: offers to switch, what a switch is doing, and
+    /// what came of it.
+    private func observeBackend() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(backendStateChanged),
+            name: Backend.stateDidChange,
+            object: nil)
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(backendEventOccurred),
+            name: Backend.eventDidOccur,
+            object: nil)
+
+        backendStateChanged()
+    }
+
+    @objc private func backendStateChanged() {
+        if let offer = Backend.offer {
+            // A question, so it waits to be answered or declined.
+            status?.present(
+                .init(
+                    key: Self.backendOfferKey,
+                    message: offer.message,
+                    state: .symbol(offer.symbol),
+                    duration: nil,
+                    onTap: { Backend.acceptOffer() },
+                    onSwipeAway: { Backend.declineOffer() }))
+        } else {
+            status?.dismiss(key: Self.backendOfferKey)
+        }
+
+        switch Backend.activity {
+        case .idle:
+            status?.dismiss(key: Self.backendActivityKey)
+
+        case .preparing:
+            // Finding and arming a debugger takes seconds during which the app is responsive. The
+            // freeze that follows has the banner.
+            status?.present(
+                .init(
+                    key: Self.backendActivityKey,
+                    message: JitEnablement.preparingMessage,
+                    state: .indeterminate,
+                    duration: nil))
+
+        case .switching(let kind):
+            status?.present(
+                .init(
+                    key: Self.backendActivityKey,
+                    message: "Switching to \(kind.name)…",
+                    state: .indeterminate,
+                    duration: nil))
+        }
+    }
+
+    @objc private func backendEventOccurred() {
+        guard let event = Backend.lastEvent else { return }
+        let warning = event.isWarning
+
+        status?.present(
+            .init(
+                key: Self.backendEventKey,
+                message: event.message,
+                state: .symbol(event.symbol),
+                duration: warning ? 6 : 4,
+                tint: warning ? .systemOrange : nil))
+    }
+
+    private static let backendOfferKey = "backend-offer"
+    private static let backendActivityKey = "backend-activity"
+    private static let backendEventKey = "backend-event"
 
     // MARK: - Code cache
 

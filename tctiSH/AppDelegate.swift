@@ -48,12 +48,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     // Global application state.
     // FIXME: move these to a nice, clean singleton
     static var forceRecoveryBoot = false
-    static var usingJitHacks = false
 
-    /// Whether QEMU should hand its code buffer to an attached debugger.
+    /// Whether QEMU starts on native code rather than TCTI. It can be switched
+    /// while it runs; see `Backend`.
+    static var startsNative = false
+
+    /// Whether QEMU should hand native code's buffer to an attached debugger.
     ///
     /// True only when TXM is present, matching StikJIT's own gate as the two
-    /// must never disagree.
+    /// must never disagree, and whichever backend the VM starts on.
     static var blessJitRegions = false
     static var isFirstBoot = false
     static var memoryValueChanged = false
@@ -110,7 +113,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             "font_size": 14,
             "theme": "solzarizedDark",
             "attempting_boot": false,
-            "jit_mode": "jit_when_possible",
+            "jit_mode": ExecutionMode.dynamicAuto.rawValue,
+            "flush_jit_buffers": false,
             "images": default_images,
             "memory": "1G",
             "code_cache_mode": CodeCache.Mode.fixed.rawValue,
@@ -119,6 +123,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             "park_in_background": false,
             "release_code_cache_in_background": false,
         ])
+
+        // Before anything reads it.
+        ExecutionMode.migrate()
 
         // If we attempted a boot, but did not finish one, something went wrong last time. Force a
         // recovery boot.
@@ -129,11 +136,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Mark ourselves as attempting a boot.
         UserDefaults.standard.set(true, forKey: "attempting_boot")
 
-        // `adoptPending` spends a request left behind by a restart; a shortcut in `launchOptions`
-        // is one arriving by the other door, and wins if both are there. Under the scene life cycle
-        // the item usually comes with the scene instead, which `handleSceneWillConnect` picks up.
-        QuickActions.adoptPending()
-
+        // Under the scene life cycle the item usually comes with the scene instead, which
+        // `handleSceneWillConnect` picks up.
         if let item = launchOptions?[.shortcutItem] as? UIApplicationShortcutItem {
             QuickActions.adopt(item)
         }
@@ -215,6 +219,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
             self?.bootQemu()
             Log.ui.note("launch: qemu started at \(AppDelegate.sinceLaunch())")
+
+            DispatchQueue.main.async { Backend.booted() }
         }
     }
 
@@ -331,6 +337,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Only now, with the machine parked: nothing can run into the cache until it has been
         // prepared again.
         let codeReleased = releasingCode && CodeCacheMonitor.releaseWhileParked()
+
+        // On TCTI, native code's buffer is idle and goes whenever Flush JIT Buffers says it should.
+        Backend.releaseNativeNow()
         return (tag, codeReleased)
     }
 
@@ -342,6 +351,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     /// 1.5s poll retries until the VM comes back.
     func handleWillEnterForeground() {
         away.store(false, ordering: .relaxed)
+
+        if parkedTag == nil {
+            Backend.conditionsMayHaveChanged()
+        }
 
         // Before looking at the terminal, which may well say it is connected: a parked machine has
         // to be brought back whatever the view thinks, or it stays parked for good.
@@ -369,8 +382,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     /// Whether the shell is waiting for a save before it reconnects.
     private var reconnectWhenSaved = false
 
-    /// Whether the process is waiting for a save before it quits.
-    private var exitWhenSaved = false
+    /// Whether the machine is being saved, is parked, or is coming back from a
+    /// park, any of which a switch of backend must wait out. Main thread.
+    var machineIsAway: Bool {
+        saving || parkedTag != nil || unparking
+    }
 
     /// Posted on the main queue when a reconnect has been held back.
     static let reconnectDeferred = Notification.Name("io.ara.tctish.reconnectDeferred")
@@ -380,12 +396,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         saving = false
         parkedTag = tag
         codeCacheNeedsPreparing = codeReleased
-
-        // Before the reconnect, which there is no point rebuilding a shell for.
-        if exitWhenSaved {
-            Log.ui.note("the save finished; quitting for a quick action")
-            exit(0)
-        }
 
         // Parked just as someone came back. `handleWillEnterForeground` saw a save running and left
         // it to us, or saw a dropped shell and left nothing at all; either way a parked machine in
@@ -526,11 +536,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         guard unparked else {
             // Still parked, and QEMU won't run it. What was in memory is in the snapshot on disk,
             // which the next launch would try again.
-            if exitWhenSaved {
-                Log.ui.note("unpark failed; quitting for a quick action, which retries it")
-                exit(0)
-            }
-
+            //
             // Not decided here: trying again, quitting to try from a fresh launch, and a cold boot
             // each cost something different, and only one of them loses the session. Left parked
             // meanwhile, which is safe; a return with the question unanswered simply tries again.
@@ -540,12 +546,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
 
         parkedTag = nil
-
-        // The machine is exactly what the snapshot holds, so nothing needs saving first.
-        if exitWhenSaved {
-            Log.ui.note("unparked; quitting for a quick action")
-            exit(0)
-        }
+        Log.jit.note(
+            "backend: back from the park on \(Backend.current?.name ?? "?"), JIT buffers "
+                + (Backend.nativePrepared ? "prepared" : "not prepared"))
+        Backend.conditionsMayHaveChanged()
 
         // Away again before the load finished. It's running now, so it gets saved (and parked)
         // again, as if it had just been backgrounded.
@@ -562,76 +566,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         Log.ui.note("unparked; rebuilding the shell")
         terminal.forceReconnect()
-    }
-
-    /// Snapshots the session and ends the process.
-    ///
-    /// The tail of a quick action that only a fresh launch can honour. Saving
-    /// first is what makes the restart cheap: "restart with JIT" then costs the
-    /// JIT decision and a tap on the icon, and not the session.
-    ///
-    /// Main thread only, because both the `saving` flag and the connectedness
-    /// it reads live there.
-    func saveAndExit() {
-        // A parked machine is a saved one, and the next launch is already pointed at it.
-        if parkedTag != nil, !unparking {
-            Log.ui.note("quitting while parked; the session is already saved")
-            exit(0)
-        }
-
-        // Either way the machine will match its snapshot once this is over.
-        if unparking {
-            Log.ui.note("an unpark is running; quitting once it finishes")
-            exitWhenSaved = true
-            return
-        }
-
-        // A save already running is this session's save, and it is the one that will point the next
-        // launch at its snapshot. A second one must not be started on top of it: the tag is chosen
-        // before the monitor lock is taken, so it would read a `resume_image` the first save has
-        // not moved yet and pick the same name.
-        guard !saving else {
-            Log.ui.note("a save is already running; quitting once it finishes")
-            exitWhenSaved = true
-            return
-        }
-
-        // The same judgement backgrounding makes, for the same reason: a machine that never
-        // finished booting has nothing in it worth resuming.
-        guard ViewController.getCurrentTerminal()?.connected == true else {
-            Log.ui.note("quitting without saving; the shell never connected")
-            exit(0)
-        }
-
-        // Claimed for the same reason backgrounding claims it: so that backgrounding on the way out
-        // doesn't start its own save alongside this one.
-        saving = true
-
-        let application = UIApplication.shared
-        var task = UIBackgroundTaskIdentifier.invalid
-
-        let releaseAssertion = {
-            guard task != .invalid else { return }
-
-            application.endBackgroundTask(task)
-            task = .invalid
-        }
-
-        // Expiry means "hand this back now", not "stop": the save carries on under its own
-        // deadlines, and the exit below still happens whichever way it ends.
-        task = application.beginBackgroundTask(
-            withName: "Saving Linux state", expirationHandler: releaseAssertion)
-
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            self?.qemu?.performBackgroundSave()
-
-            DispatchQueue.main.async {
-                releaseAssertion()
-
-                Log.ui.note("quitting for a quick action")
-                exit(0)
-            }
-        }
     }
 
     /// Attempts to background the app to Picture in Picture.

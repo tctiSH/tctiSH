@@ -472,7 +472,6 @@ final class SettingsViewController: SettingsListViewController,
         let memory = VmMemory.selected
         let codeCache = CodeCache.bootSignature
         let diskName = AppSetting.diskName.string
-        let jitMode = AppSetting.jitMode.string
         let resumeBehavior = AppSetting.resumeBehavior.string
         let bootSnapshot = AppSetting.bootSnapshot.string
     }
@@ -538,6 +537,8 @@ final class SettingsViewController: SettingsListViewController,
         reveal.cancelsTouchesInView = false
         reveal.delegate = self
         navigationController?.navigationBar.addGestureRecognizer(reveal)
+
+        followBackend()
     }
 
     @objc private func revealDebugTools() {
@@ -587,8 +588,7 @@ final class SettingsViewController: SettingsListViewController,
 
             SettingsSection(
                 header: "Startup",
-                footer:
-                    "How your terminal environment is executed, and what it does when you close the app.",
+                footer: "What your terminal environment does when you close the app.",
                 rows: [
                     SettingsRow(
                         id: "resume",
@@ -596,14 +596,32 @@ final class SettingsViewController: SettingsListViewController,
                         detail: Self.label(Self.resumeOptions, for: .resumeBehavior),
                         symbol: "arrow.clockwise",
                         accessory: .disclosure,
-                        select: { [weak self] in self?.pushResumeBehavior() }),
+                        select: { [weak self] in self?.pushResumeBehavior() })
+                ]),
+
+            SettingsSection(
+                header: "JIT",
+                footer:
+                    "Execution Mode decides when tctiSH runs Linux with JIT, which is much faster, and when with TCTI, which always works. Running with JIT shows which one is in use now, and switches between them. Flush JIT Buffers gives JIT's memory back while running with TCTI, so switching back to JIT needs the loopback VPN again.",
+                rows: [
                     SettingsRow(
                         id: "jit",
                         title: "Execution Mode",
                         detail: Self.label(Self.jitOptions, for: .jitMode),
                         symbol: "bolt",
                         accessory: .disclosure,
-                        select: { [weak self] in self?.pushJitMode() }),
+                        select: { [weak self] in self?.pushJitMode() })
+                ] + Self.backendRows(on: self) + [
+                    SettingsRow(
+                        id: "flush-jit-buffers",
+                        title: "Flush JIT Buffers",
+                        symbol: "arrow.3.trianglepath",
+                        toggle: ToggleValue(
+                            isOn: AppSetting.flushJitBuffers.bool,
+                            commit: {
+                                AppSetting.flushJitBuffers.set($0)
+                                Backend.flushSettingChanged()
+                            }))
                 ]),
 
             SettingsSection(
@@ -726,9 +744,31 @@ final class SettingsViewController: SettingsListViewController,
     ]
 
     fileprivate static let jitOptions = [
-        SettingsOption(title: "JIT When Possible", value: "jit_when_possible"),
-        SettingsOption(title: "Never JIT", value: "never_jit"),
+        SettingsOption(title: "Always JIT", value: ExecutionMode.always.rawValue),
+        SettingsOption(title: "Dynamic (Ask)", value: ExecutionMode.dynamicAsk.rawValue),
+        SettingsOption(title: "Dynamic (Auto)", value: ExecutionMode.dynamicAuto.rawValue),
+        SettingsOption(title: "Never JIT", value: ExecutionMode.never.rawValue),
     ]
+
+    /// Which backend the VM is on, as a switch that moves it to the other.
+    /// Greyed out before QEMU is up and while a switch is under way.
+    fileprivate static func backendRows(on screen: SettingsListViewController) -> [SettingsRow] {
+        let running = Backend.current
+        let busy = Backend.isBusy
+
+        return [
+            SettingsRow(
+                id: "backend",
+                title: busy ? "Switching…" : "Running with JIT",
+                symbol: running == .native ? "hare" : "tortoise",
+                toggle: ToggleValue(
+                    isOn: running == .native,
+                    isEnabled: running != nil && !busy,
+                    commit: { [weak screen] on in
+                        screen?.confirmSwitch(to: on ? .native : .tcti)
+                    }))
+        ]
+    }
 
     private static let fontSizes = [8, 10, 12, 14, 16, 18, 20, 22, 24, 28, 30]
 
@@ -759,12 +799,15 @@ final class SettingsViewController: SettingsListViewController,
     private func pushJitMode() {
         push(
             OptionListViewController(
-                title: "JIT Mode",
+                title: "Execution Mode",
                 footer:
-                    "JIT is much faster, but needs external support from a loopback VPN and may not always be available. Turning off JIT will be slower but should always work.",
+                    "JIT is much faster, but needs external support from a loopback VPN and may not always be available. TCTI is slower, but always works.\n\nAlways JIT waits for JIT when tctiSH opens, and switches to it by itself if it arrives later. The Dynamic modes start with JIT when it can be had at once, and otherwise with TCTI straight away, offering JIT once it can be had (Ask) or switching to it by themselves (Auto); they also offer TCTI, or switch to it, when the code cache needs to grow and JIT can't. Never JIT always runs with TCTI. A change applies straight away.",
                 options: Self.jitOptions,
                 selected: { AppSetting.jitMode.string },
-                choose: { AppSetting.jitMode.set($0) }))
+                choose: {
+                    AppSetting.jitMode.set($0)
+                    Backend.modeChanged()
+                }))
     }
 
     private func pushFontSize() {
@@ -790,7 +833,7 @@ final class SettingsViewController: SettingsListViewController,
     /// On dismissal rather than on each row: someone stepping through a ladder
     /// to see what is on offer should not be warned once per tap, and what
     /// matters is the change they settled on.
-    private func done() {
+    fileprivate func done() {
         guard let message = consequences() else {
             dismiss(animated: true)
             return
@@ -823,7 +866,6 @@ final class SettingsViewController: SettingsListViewController,
 
         var waiting: [String] = []
         if CodeCache.bootSignature != onEntry.codeCache { waiting.append("code cache size") }
-        if AppSetting.jitMode.string != onEntry.jitMode { waiting.append("JIT mode") }
         if AppSetting.resumeBehavior.string != onEntry.resumeBehavior {
             waiting.append("close behaviour")
         }
@@ -841,6 +883,53 @@ final class SettingsViewController: SettingsListViewController,
     private static func list(_ items: [String]) -> String {
         guard items.count > 1 else { return items.first ?? "" }
         return items.dropLast().joined(separator: ", ") + " and " + (items.last ?? "")
+    }
+}
+
+// MARK: - Switching backends
+
+extension SettingsListViewController {
+
+    /// Keeps a screen showing the backend in step with it, including after a
+    /// spell in the background, when what changed may not have been drawn.
+    fileprivate func followBackend() {
+        for name in [
+            Backend.stateDidChange, Backend.eventDidOccur,
+            UIApplication.didBecomeActiveNotification,
+        ] {
+            NotificationCenter.default.addObserver(
+                forName: name, object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.reload()
+            }
+        }
+    }
+
+    /// Asks before switching: a switch to JIT can mean a pause while it is
+    /// prepared, and either way everything is translated again. Canceling puts
+    /// the switch back where it was.
+    fileprivate func confirmSwitch(to target: Backend.Kind) {
+        let message =
+            target == .native
+            ? "Linux carries on where it is. Preparing JIT can pause tctiSH for a moment, and it needs the loopback VPN."
+            : "Linux carries on where it is, more slowly."
+
+        let alert = UIAlertController(
+            title: "Switch to \(target.name)?", message: message, preferredStyle: .alert)
+        alert.addAction(
+            UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in self?.reload() })
+        alert.addAction(
+            UIAlertAction(title: "Switch", style: .default) { [weak self] _ in
+                Backend.switchTo(target, asked: true)
+
+                // Out of the way, so that what the switch says -- the pills, the banner -- is seen.
+                // Through the root's own way out, which says if anything else changed needs a
+                // restart.
+                let root =
+                    self?.navigationController?.viewControllers.first as? SettingsViewController
+                root?.done()
+            })
+        present(alert, animated: true)
     }
 }
 
@@ -934,8 +1023,9 @@ private final class DebugToolsViewController: SettingsListViewController {
         return [
             SettingsSection(
                 header: "JIT",
-                footer: "Deleting the pairing file makes the next launch run without JIT and ask "
-                    + "for a new one. Until then the code cache can't grow.",
+                footer: "Deleting the pairing file stops JIT being prepared from then on: the code "
+                    + "cache can't grow under JIT, switching to JIT needs JIT Buffers already "
+                    + "prepared, and the next launch asks for a new one.",
                 rows: [
                     SettingsRow(
                         id: "jit-status",
@@ -1151,6 +1241,8 @@ private final class JitStatusViewController: SettingsListViewController {
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             image: UIImage(systemName: "arrow.clockwise"),
             primaryAction: UIAction { [weak self] _ in self?.check() })
+
+        followBackend()
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -1210,6 +1302,8 @@ private final class JitStatusViewController: SettingsListViewController {
         case .none: cache = "None"
         }
 
+        let running = Backend.current
+
         return [
             SettingsSection(
                 header: "This Launch",
@@ -1217,13 +1311,37 @@ private final class JitStatusViewController: SettingsListViewController {
                 rows: [
                     SettingsRow(
                         id: "outcome",
-                        title: "JIT",
+                        title: "At Launch",
                         detail: JitEnablement.outcome?.status.message ?? "Deciding…"),
                     SettingsRow(
                         id: "mode",
                         title: "Execution Mode",
                         detail: SettingsViewController.label(
                             SettingsViewController.jitOptions, for: .jitMode)),
+                ]),
+
+            SettingsSection(
+                header: "Now",
+                footer:
+                    "Running with JIT switches the VM between JIT and TCTI. Release JIT Buffers "
+                    + "gives native code's memory back while running with TCTI, as Flush JIT "
+                    + "Buffers does after every switch; switching back to JIT then prepares it "
+                    + "again.",
+                rows: SettingsViewController.backendRows(on: self) + [
+                    SettingsRow(
+                        id: "native-buffer",
+                        title: "JIT Buffers",
+                        detail: Backend.nativePrepared ? "Prepared" : "Not prepared"),
+                    SettingsRow(
+                        id: "switches",
+                        title: "Switches",
+                        detail: "\(qemu_backend_switches())"),
+                    SettingsRow(
+                        id: "release-native",
+                        title: "Release JIT Buffers",
+                        symbol: "arrow.3.trianglepath",
+                        select: running == .tcti && Backend.nativePrepared
+                            ? { Backend.releaseNative() } : nil),
                 ]),
 
             SettingsSection(

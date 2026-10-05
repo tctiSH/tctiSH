@@ -26,5 +26,5 @@ command script import /path/to/tctiSH/utils/jit-bless/jit_bless.py
 ```
 
 Xcode reads that file for every project on the machine, so the script scopes itself: it registers
-its stop hook against the `qemu-x86_64-softmmu_jit` module alone, and LLDB rules stops out by module
+its stop hook against the `qemu-x86_64-softmmu` module alone, and LLDB rules stops out by module
 before entering Python. Other projects see no handler, no output and no log file.
