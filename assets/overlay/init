@@ -186,5 +186,9 @@ make_misc_dev /var/tcti-rootfs/rw-union/dev/urandom hw_random
 #mkdir /var/tcti-rootfs/rw-union/ios_host
 #mount -t 9p -o trans=virtio shared /var/tcti-rootfs/rw-union/ios_host -oversion=9p2000.L
 
+# Bring CPUs the host plugs in online; see tctish-cpu-online. Last before init
+# proper, so that the boot's own events are over and none of them forks it.
+echo /usr/bin/tctish-cpu-online >/proc/sys/kernel/hotplug
+
 # Finally, pass control to real init.
 exec chroot /var/tcti-rootfs/rw-union /sbin/init

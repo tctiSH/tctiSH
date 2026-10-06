@@ -143,6 +143,18 @@ memory back while running with TCTI, at the cost of needing the helper again to 
 **Release Memory** on, it is also given back whenever the session is put away in the background
 while running with TCTI.
 
+### vCPUs
+
+The app gives Linux 4 vCPUs by default, and you can give the guest anywhere from one to as many as
+your device has cores. Changes, made in Settings > Virtual Machine > vCPUs, are applied straight
+away while Linux is running.
+
+You can also customize how many vCPUs the app retains in the background once your session is saved.
+There, you can also decide whether the background cores are run at low priority on the efficiency
+cores to save power, or are scheduled as iOS sees fit. Low priority scheduling will use
+significantly less power, but is also significantly slower. This is an alternative to **Release
+Memory**.
+
 ## Development
 
 If you are interested in developing tctiSH, we work on a PR-based workflow. We recommend that you

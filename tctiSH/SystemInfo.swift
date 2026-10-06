@@ -269,7 +269,7 @@ struct SystemInfo {
 }
 
 /// Reading sysctls by name.
-private enum Sysctl {
+enum Sysctl {
 
     /// A feature flag, or why it couldn't be read.
     struct Feature {

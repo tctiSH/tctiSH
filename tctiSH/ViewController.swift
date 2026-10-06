@@ -289,6 +289,9 @@ class ViewController: UIViewController {
             DispatchQueue.global(qos: .utility).async {
                 qemu?.discardPreUpgradeSnapshots()
             }
+
+            // Linux is up, so it can be handed the vCPUs wanted now.
+            Vcpus.shellConnected()
         }
     }
 

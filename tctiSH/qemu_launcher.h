@@ -11,6 +11,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <sys/qos.h>
 
 /// Sets up an environment where we can JIT.
 bool set_up_jit(void);
@@ -42,6 +43,10 @@ bool jit_may_map_executable(void);
 /// session can still be resumed.
 const char *qemu_machine_signature(void);
 
+/// The most vCPUs the guest can have, which is how many cores this device has,
+/// up to the guest kernel's 16. Part of the machine, and so of every snapshot.
+unsigned int qemu_max_vcpus(void);
+
 /// Runs QEMU in a background thread, providing our shell.
 ///
 /// `tb_size_mib` is the TCG code cache size in MiB, or 0 to let QEMU size the
@@ -58,12 +63,16 @@ const char *qemu_machine_signature(void);
 /// `bless_jit_regions` says whether native code's buffer is handed to a
 /// debugger, whichever backend the VM starts on, since it is read whenever that
 /// buffer is mapped.
+///
+/// `vcpus` is how many vCPUs are plugged in at launch, from 1 to
+/// `qemu_max_vcpus()`. A snapshot loaded at launch brings the machine to the
+/// vCPUs it was taken with, so its own count only saves that work.
 void run_background_qemu(const char *qemu_path, const char *kernel_path, const char *initrd_path,
                          const char *bios_path, const char *disk_path,
                          const char *shared_folder_path, const char *boot_image_name,
                          const char *memory_value, const char *monitor_socket_path,
                          bool start_native, bool bless_jit_regions, unsigned int tb_size_mib,
-                         unsigned int chunk_mib);
+                         unsigned int chunk_mib, unsigned int vcpus);
 
 /// The running VM's code cache, in bytes. All report 0 before QEMU is up.
 ///
@@ -169,5 +178,12 @@ size_t qemu_backend_switches(void);
 
 /// Why the last preparation or switch failed, or NULL. The caller frees it.
 char *qemu_backend_last_error(void);
+
+/// Puts every vCPU thread, and any plugged in later, in `qos_class`, and returns
+/// whether that was taken. `QOS_CLASS_UNSPECIFIED` puts each back in the class
+/// it started in. Under `QOS_CLASS_BACKGROUND` Darwin keeps them to the
+/// efficiency cores; no other placement can be insisted on. Each thread applies
+/// it to itself in QEMU's own time, normally milliseconds.
+bool qemu_vcpu_set_qos(qos_class_t qos_class);
 
 #endif /* qemu_launcher_h */

@@ -238,6 +238,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // no foreground left to reconnect for, and `handleWillEnterForeground` will ask again.
         reconnectWhenSaved = false
         away.store(true, ordering: .relaxed)
+        Vcpus.enteredBackground()
 
         // An unpark in flight saves again when it finishes, seeing that we are away; a parked
         // machine is already saved, and there is nothing running to save.
@@ -351,6 +352,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     /// 1.5s poll retries until the VM comes back.
     func handleWillEnterForeground() {
         away.store(false, ordering: .relaxed)
+        Vcpus.willEnterForeground()
 
         if parkedTag == nil {
             Backend.conditionsMayHaveChanged()
@@ -396,6 +398,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         saving = false
         parkedTag = tag
         codeCacheNeedsPreparing = codeReleased
+
+        // Still running, so its vCPUs can follow the app.
+        Vcpus.machineMayHaveChanged()
 
         // Parked just as someone came back. `handleWillEnterForeground` saw a save running and left
         // it to us, or saw a dropped shell and left nothing at all; either way a parked machine in
@@ -557,6 +562,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             handleEnteredBackground()
             return
         }
+
+        Vcpus.machineMayHaveChanged()
 
         // A dropped session needs no forcing, as elsewhere: the terminal's own poll is already on
         // it, and brings the pill down when it connects.

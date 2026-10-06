@@ -87,6 +87,11 @@ public class QEMUInterface {
         let memoryValue = VmMemory.qemuArgument
         let tbSize = CodeCache.tbSizeArgument
 
+        // ... and how many vCPUs: what a resumed session had, so that loading it has nothing to
+        // change, and otherwise the setting. Either way they are brought to what is wanted once
+        // Linux is up.
+        let vcpus = launchVcpus(bootImageName: bootImageName)
+
         // ... get a filename for our unix domain monitor-connection socket ...
         monitorSocketPath = getDatastoreURL("monitor", fileExtension: "socket").path
 
@@ -99,13 +104,15 @@ public class QEMUInterface {
                 + "tb-size=\(tbSize), bless \(AppDelegate.blessJitRegions)")
         Log.qemu.note(
             "\(bootImageName.map { "resuming from '\($0)'" } ?? "cold boot"), "
-                + "memory \(memoryValue), code cache \(CodeCache.summary)")
+                + "memory \(memoryValue), code cache \(CodeCache.summary), "
+                + "\(vcpus) of \(Vcpus.maximum) vCPUs")
 
         // ... and start up the QEMU kernel, which will start paused.
         run_background_qemu(
             qemuImage, kernelPath, initrdPath, bundlePrefix, diskPath, sharedFolder, bootImageName,
             memoryValue, monitorSocketPath, AppDelegate.startsNative, AppDelegate.blessJitRegions,
-            UInt32(tbSize), UInt32(CodeCache.initialSize));
+            UInt32(tbSize), UInt32(CodeCache.initialSize), UInt32(vcpus));
+        Vcpus.launched(with: vcpus)
 
         // Mark what we booted with, so the next launch can tell whether the settings moved.
         VmMemory.recordBooted()
@@ -321,6 +328,219 @@ public class QEMUInterface {
         runMonitorCommandCleanly("cont", purpose: "park: cont")
     }
 
+    // MARK: vCPUs
+
+    /// The vCPU slots QEMU has, plugged in or not.
+    struct VcpuSlots {
+
+        /// One slot: the QOM type to plug into it, its place in the topology,
+        /// and where the vCPU in it lives, if one exists.
+        struct Slot {
+            let type: String
+            let properties: [(name: String, value: String)]
+            let qomPath: String?
+
+            var core: Int {
+                properties.first { $0.name == "core-id" }.flatMap { Int($0.value) } ?? 0
+            }
+        }
+
+        /// Every slot, in core order.
+        let slots: [Slot]
+
+        var plugged: [Slot] { slots.filter { $0.qomPath != nil } }
+        var empty: [Slot] { slots.filter { $0.qomPath == nil } }
+
+        /// Reads the monitor's listing.
+        ///
+        /// Each slot starts at its `type:` line. The values are always quoted,
+        /// and the properties are the indented `name: "value"` lines after
+        /// `CPUInstance Properties:`, which name the slot exactly as
+        /// `device_add` wants it named.
+        init(parsing reply: String) {
+            var slots: [Slot] = []
+            var type: String?
+            var properties: [(name: String, value: String)] = []
+            var qomPath: String?
+
+            func finish() {
+                if let type {
+                    slots.append(Slot(type: type, properties: properties, qomPath: qomPath))
+                }
+                type = nil
+                properties = []
+                qomPath = nil
+            }
+
+            for line in QEMUInterface.lines(of: reply) {
+                let text = line.trimmingCharacters(in: .whitespaces)
+                guard let colon = text.firstIndex(of: ":") else { continue }
+
+                let name = String(text[..<colon])
+                let rest = text[text.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                guard rest.count >= 2, rest.first == "\"", rest.last == "\"" else { continue }
+                let value = String(rest.dropFirst().dropLast())
+
+                switch name {
+                case "type":
+                    finish()
+                    type = value
+                case "qom_path": qomPath = value
+                case "vcpus_count": break
+                default: properties.append((name, value))
+                }
+            }
+            finish()
+
+            self.slots = slots.sorted { $0.core < $1.core }
+        }
+    }
+
+    /// The vCPU slots, or nil if QEMU wouldn't list them.
+    private func vcpuSlots() -> VcpuSlots? {
+        guard
+            let reply = runMonitorCommand(
+                "info hotpluggable-cpus", timeout: Self.monitorReplyDeadline)
+        else {
+            return nil
+        }
+
+        if let failure = Self.monitorError(in: reply) {
+            Log.qemu.warn("vcpus: 'info hotpluggable-cpus' refused: \(failure)")
+            return nil
+        }
+
+        let slots = VcpuSlots(parsing: reply)
+        return slots.slots.isEmpty ? nil : slots
+    }
+
+    /// How long Linux may take to let a vCPU go.
+    ///
+    /// An unplug is a request: QEMU tells the guest, the guest moves its work
+    /// off the CPU and takes it offline, and only then ejects it.
+    private static let vcpuUnplugDeadline: TimeInterval = 5
+
+    /// The core of an unplug Linux hadn't finished when `unplugVcpu` stopped
+    /// waiting, while it is still plugged in.
+    ///
+    /// Asked for is asked for: the guest can still let it go at any moment.
+    /// Plugging another vCPU meanwhile would fill the slot above it, and then
+    /// its going would leave a gap, cores 0 to n-1 no longer being what is
+    /// there. So nothing is plugged while one is outstanding. Touched only from
+    /// `changeVcpus`, which runs on `Vcpus`'s one serial queue.
+    private var unplugOutstanding: Int?
+
+    /// Forgets an unplug that was still outstanding, because Linux was reset.
+    ///
+    /// A reset withdraws the eject request along with everything else, so the
+    /// vCPU it was for stays, and plugging must not wait for it to go. Only
+    /// from `Vcpus`'s queue, like `changeVcpus`.
+    func forgetOutstandingUnplug() {
+        if let core = unplugOutstanding {
+            Log.qemu.note("vcpus: no longer waiting for core \(core) to go, as Linux was reset")
+        }
+        unplugOutstanding = nil
+    }
+
+    /// Plugs vCPUs in or unplugs them, one at a time, toward `target`, and
+    /// returns how many there are afterwards, or nil if QEMU wouldn't say.
+    ///
+    /// Always at the top: plugging fills the lowest empty core, and unplugging
+    /// empties the highest, which is never core 0. The vCPUs are then cores 0
+    /// to n-1, which is what `-smp cpus=n` builds, so the launch that resumes a
+    /// session usually has nothing to change. When it does, QEMU brings the
+    /// machine to the snapshot's vCPUs as it loads.
+    ///
+    /// Each `device_add` and `device_del` is made under `snapshotWorkLock`, so
+    /// never in the middle of a save or a park, but the lock is not held while
+    /// Linux lets a vCPU go, or between steps: a save waits for one command at
+    /// most. Blocks while Linux lets each vCPU go, so only from `Vcpus`'s
+    /// queue.
+    func changeVcpus(toward target: () -> Int?) -> Int? {
+        guard var slots = vcpuSlots() else { return nil }
+        let before = slots.plugged.count
+
+        if let core = unplugOutstanding, !slots.plugged.contains(where: { $0.core == core }) {
+            Log.qemu.note("vcpus: Linux has let core \(core) go after all")
+            unplugOutstanding = nil
+        }
+
+        while let wanted = target() {
+            let wanted = min(max(wanted, 1), slots.slots.count)
+            let present = slots.plugged.count
+            guard present != wanted else { break }
+
+            if present < wanted, let core = unplugOutstanding {
+                Log.qemu.note("vcpus: not plugging in while core \(core) is still being unplugged")
+                break
+            }
+
+            let changed = present < wanted ? plugVcpu(into: slots) : unplugVcpu(from: slots)
+            guard changed, let after = vcpuSlots() else { break }
+            slots = after
+        }
+
+        let now = slots.plugged.count
+        if now != before {
+            Log.qemu.note("vcpus: \(before) -> \(now)")
+        }
+        return now
+    }
+
+    /// Plugs a vCPU into the lowest empty core, and says whether it went in.
+    ///
+    /// Done as far as QEMU is concerned once `device_add` returns. Linux hears
+    /// of it over ACPI and brings it online, through `tctish-cpu-online`.
+    private func plugVcpu(into slots: VcpuSlots) -> Bool {
+        guard let slot = slots.empty.first else { return false }
+
+        let placement = slot.properties.map { "\($0.name)=\($0.value)" }.joined(separator: ",")
+
+        Self.snapshotWorkLock.lock()
+        defer { Self.snapshotWorkLock.unlock() }
+        return runMonitorCommandCleanly(
+            "device_add \(slot.type),id=vcpu\(slot.core),\(placement)", purpose: "vcpus")
+    }
+
+    /// Unplugs the vCPU in the highest core, and says whether it has gone.
+    ///
+    /// Waits for Linux to let it go, up to `vcpuUnplugDeadline`, without the
+    /// snapshot lock: a save meanwhile stops the guest, so the vCPU can't go in
+    /// the middle of one, and QEMU records which vCPUs a snapshot has. One that
+    /// hasn't gone by then is remembered in `unplugOutstanding`.
+    private func unplugVcpu(from slots: VcpuSlots) -> Bool {
+        guard let slot = slots.plugged.last, slot.core != 0, let path = slot.qomPath else {
+            return false
+        }
+
+        let asked: Bool = {
+            Self.snapshotWorkLock.lock()
+            defer { Self.snapshotWorkLock.unlock() }
+            return runMonitorCommandCleanly("device_del \(path)", purpose: "vcpus")
+        }()
+        guard asked else { return false }
+
+        let gone = { [self] in
+            vcpuSlots().map { !$0.plugged.contains(where: { $0.core == slot.core }) } ?? false
+        }
+
+        let deadline = Date().addingTimeInterval(Self.vcpuUnplugDeadline)
+        while Date() < deadline {
+            if gone() { return true }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+
+        // Once more past the deadline: a process suspended in the middle of the wait wakes up with
+        // it already gone, and Linux may have finished long ago.
+        if gone() { return true }
+
+        Log.qemu.warn(
+            "vcpus: Linux hasn't let core \(slot.core) go within "
+                + "\(Int(Self.vcpuUnplugDeadline))s; leaving it asked for")
+        unplugOutstanding = slot.core
+        return false
+    }
+
     /// Runs a monitor command, and says whether it came back without an error.
     ///
     /// The refusal goes to the log verbatim, under `purpose`.
@@ -377,10 +597,14 @@ public class QEMUInterface {
             return false
         }
 
+        // How many vCPUs to launch with to resume it. A head start rather than a requirement: QEMU
+        // records which vCPUs the snapshot has, and brings the machine to them as it loads.
+        let vcpus = vcpuSlots()?.plugged.count
+
         // Only having been told the snapshot is really there. Stamped with the machine that is
         // running, which is what the snapshot holds; see `resumeStamp`.
         let stamp = VmMemory.bootedArgument.map { VmSnapshots.resumeStamp(memory: $0) } ?? ""
-        setResumeImage(tag: tag, stamp: stamp)
+        setResumeImage(tag: tag, stamp: stamp, vcpus: vcpus)
         Self.lastSaveFailed = false
         Self.lastSavedAt = Date()
 
@@ -1150,6 +1374,7 @@ public class QEMUInterface {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             return (snapshot?.isEmpty ?? true) ? nil : snapshot
         case "recovery_boot":
+            forgetSession(because: "this launch boots Linux afresh")
             return nil
         case "clean_boot":
             return "instantboot"
@@ -1324,9 +1549,70 @@ public class QEMUInterface {
     /// Both in one write, so a pointer is never seen with another session's
     /// stamp. Anything that isn't a save leaves the stamp empty, which never
     /// matches, and a pointer without one is never resumed.
-    private func setResumeImage(tag: String, stamp: String = "", diskName: String? = nil) {
+    ///
+    /// The vCPU count goes in the same write. It is not in the stamp, as a
+    /// session saved with another count is not stale: it is resumed with the
+    /// count it had, and brought to the setting after.
+    private func setResumeImage(
+        tag: String, stamp: String = "", vcpus: Int? = nil, diskName: String? = nil
+    ) {
         let diskName = diskName ?? disk
-        setImageProperties(diskName: diskName, ["resume_image": tag, "resume_stamp": stamp])
+        setImageProperties(
+            diskName: diskName,
+            [
+                "resume_image": tag, "resume_stamp": stamp,
+                "resume_vcpus": vcpus.map(String.init) ?? "",
+            ])
+    }
+
+    /// Stops pointing the next launch at the saved session.
+    ///
+    /// For a recovery boot, which throws the session away. The pointer used to
+    /// outlive it: a launch that booted afresh left `resume_image` as it was,
+    /// and if the app was killed before that fresh session was saved, the next
+    /// launch quietly brought back the very session the recovery boot was meant
+    /// to discard. The snapshots themselves stay on the disk, as after any
+    /// other save, and the next save rotates over them.
+    private func forgetSession(because reason: String) {
+        let tag = getResumeImage()
+        guard !tag.isEmpty, tag != "instantboot" else { return }
+
+        Log.qemu.note("resume: forgetting '\(tag)', as \(reason)")
+        setResumeImage(tag: "")
+    }
+
+    /// How many vCPUs to launch with: the count the resumed session was saved
+    /// with, and otherwise the setting.
+    ///
+    /// Not a requirement but a head start. Our QEMU brings the machine to the
+    /// snapshot's own count as the snapshot loads, plugging vCPUs in or taking
+    /// them away before any device state is restored, so a snapshot with no
+    /// record (one named under Boot From Snapshot, or taken from inside Linux)
+    /// still comes back exactly as it was. Launching with the right count just
+    /// means there is nothing to change.
+    private func launchVcpus(bootImageName: String?) -> Int {
+        let setting = Vcpus.foreground
+
+        guard let bootImageName, bootImageName == getResumeImage(),
+            let saved = recordedResumeVcpus()
+        else {
+            return setting
+        }
+
+        return saved
+    }
+
+    /// The vCPU count saved with the resume image, or nil if there isn't a
+    /// usable one.
+    private func recordedResumeVcpus() -> Int? {
+        guard
+            let saved = Int(
+                getImageProperty(diskName: disk, property: "resume_vcpus", defaultValue: "")),
+            (1...Vcpus.maximum).contains(saved)
+        else {
+            return nil
+        }
+        return saved
     }
 
     /// Ensures we have a connection to our VM over the QEMU management
@@ -1397,6 +1683,15 @@ public class QEMUInterface {
         guard writeMonitorCommand("system_reset") else {
             Log.qemu.fail("the monitor didn't take system_reset; QEMU itself is stuck")
             return false
+        }
+
+        // Only now that the reset is on its way: a refused one leaves the session running. Linux
+        // restarting can't be handed vCPUs until its shell is back.
+        forgetSession(because: "Linux was reset")
+        if Thread.isMainThread {
+            Vcpus.guestRestarting(qemu: self)
+        } else {
+            DispatchQueue.main.async { Vcpus.guestRestarting(qemu: self) }
         }
 
         // Harmless if it's already running, and necessary if it isn't.

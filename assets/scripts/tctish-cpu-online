@@ -1,0 +1,26 @@
+#!/bin/sh
+#
+# Brings a CPU online when the host plugs one in.
+#
+# tctiSH changes the number of vCPUs while the guest runs, through ACPI CPU
+# hotplug. Taking one away needs nothing from userspace: the kernel answers
+# QEMU's eject request by offlining the CPU itself. Adding one does: Linux
+# registers the new CPU and leaves it offline, waiting for something to write
+# to its `online`. On a distribution that something is udev; this guest has
+# neither udev nor mdev, so it is this.
+#
+# The kernel's uevent helper, not a daemon, so it costs nothing until an event
+# arrives. init installs it once the boot's own events are over, which is what
+# keeps the Kconfig help's warning about a fork per event at boot from
+# applying. Usermode helpers share init's root, so this runs in the overlay that
+# init chroots into; its lower layer is the initramfs, where this script is, and
+# init mounts sysfs there too.
+#
+# Everything else that raises an event leaves straight away. A CPU the guest
+# already has online, as every CPU at boot does, takes a write of 1 as a no-op.
+[ "$SUBSYSTEM" = cpu ] && [ "$ACTION" = add ] || exit 0
+
+online="/sys$DEVPATH/online"
+[ -w "$online" ] || exit 0
+
+echo 1 >"$online"

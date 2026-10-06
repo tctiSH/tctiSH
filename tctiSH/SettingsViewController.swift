@@ -539,6 +539,7 @@ final class SettingsViewController: SettingsListViewController,
         navigationController?.navigationBar.addGestureRecognizer(reveal)
 
         followBackend()
+        followVcpus()
     }
 
     @objc private func revealDebugTools() {
@@ -568,7 +569,7 @@ final class SettingsViewController: SettingsListViewController,
             SettingsSection(
                 header: "Virtual Machine",
                 footer:
-                    "Properties of the virtual machine. VM Memory sets how much RAM is given to Linux. Code Cache determines how much memory is used to hold translated x86_64 code.",
+                    "Properties of the virtual machine. VM Memory sets how much RAM is given to Linux. vCPUs sets how many processors it has, and changes them straight away, while it runs. Code Cache determines how much memory is used to hold translated x86_64 code.",
                 rows: [
                     SettingsRow(
                         id: "memory",
@@ -577,6 +578,13 @@ final class SettingsViewController: SettingsListViewController,
                         symbol: "memorychip",
                         accessory: .disclosure,
                         select: { [weak self] in self?.push(VmMemoryViewController()) }),
+                    SettingsRow(
+                        id: "vcpus",
+                        title: "vCPUs",
+                        detail: Self.vcpuDetail,
+                        symbol: "cpu.fill",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.push(VcpuCountViewController()) }),
                     SettingsRow(
                         id: "code-cache",
                         title: "Code Cache",
@@ -644,8 +652,22 @@ final class SettingsViewController: SettingsListViewController,
             SettingsSection(
                 header: "In the Background",
                 footer:
-                    "Release Memory gives Linux's memory back to iOS once your session is saved, so other apps are less likely to be closed to make room. Coming back takes a moment longer, while the session is read back in. Release Code Cache, with it, gives back all of the translated code as well. It's prepared again on return as it is at launch, which under JIT on newer devices means a pause, and translated again as it's needed.",
+                    "Release Memory gives Linux's memory back to iOS once your session is saved, so other apps are less likely to be closed to make room. Coming back takes a moment longer, while the session is read back in. Release Code Cache, with it, gives back all of the translated code as well. It's prepared again on return as it is at launch, which under JIT on newer devices means a pause, and translated again as it's needed.\n\nvCPUs and vCPU Cores here apply once your session is saved, for as long as Linux keeps running in the background. With Release Memory on, Linux stops there instead, so they don't apply.",
                 rows: [
+                    SettingsRow(
+                        id: "background-vcpus",
+                        title: "vCPUs",
+                        detail: Self.shareTitle(Vcpus.backgroundShare),
+                        symbol: "cpu.fill",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.pushBackgroundShare() }),
+                    SettingsRow(
+                        id: "background-vcpu-cores",
+                        title: "vCPU Cores",
+                        detail: Vcpus.backgroundCores.title,
+                        symbol: "square.grid.2x2",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.pushBackgroundVcpuCores() }),
                     SettingsRow(
                         id: "park",
                         title: "Release Memory",
@@ -810,6 +832,56 @@ final class SettingsViewController: SettingsListViewController,
                 }))
     }
 
+    /// The foreground's count, and what Linux has instead, while that differs.
+    private static var vcpuDetail: String {
+        let wanted = Vcpus.foreground
+        guard let present = Vcpus.present, present != wanted, Vcpus.wanted == wanted else {
+            return "\(wanted)"
+        }
+        return Vcpus.isChanging ? "\(wanted) (changing)" : "\(wanted) (Linux has \(present))"
+    }
+
+    /// A background share, and the count it comes to now.
+    fileprivate static func shareTitle(_ share: BackgroundShare) -> String {
+        let count = share.count(of: Vcpus.foreground)
+        return "\(share.title) (\(count))"
+    }
+
+    private func pushBackgroundShare() {
+        push(
+            OptionListViewController(
+                title: "Background vCPUs",
+                footer: "How many of the foreground's \(Vcpus.foreground) vCPUs Linux keeps "
+                    + "while tctiSH is in the background, rounded up. The rest are taken away "
+                    + "once your session is saved, and given back when you return.",
+                options: BackgroundShare.allCases.map {
+                    SettingsOption(title: Self.shareTitle($0), value: $0)
+                },
+                selected: { Vcpus.backgroundShare },
+                choose: { Vcpus.backgroundShare = $0 }))
+    }
+
+    private func pushBackgroundVcpuCores() {
+        let footer =
+            "Where Linux's vCPUs run while tctiSH is in the background. iOS doesn't let an app "
+            + "choose particular cores, but it does let an app keep its threads to the "
+            + "efficiency cores, which use much less power. Linux runs significantly slower "
+            + "there. Any Core leaves the choice to iOS. In the foreground, Linux always runs "
+            + "on any core."
+            + (Vcpus.coreClusters.map {
+                " This device has \($0.performance) performance and \($0.efficiency) "
+                    + "efficiency cores."
+            } ?? "")
+
+        push(
+            OptionListViewController(
+                title: "Background vCPU Cores",
+                footer: footer,
+                options: CoreClass.allCases.map { SettingsOption(title: $0.title, value: $0) },
+                selected: { Vcpus.backgroundCores },
+                choose: { Vcpus.backgroundCores = $0 }))
+    }
+
     private func pushFontSize() {
         push(
             OptionListViewController(
@@ -889,6 +961,16 @@ final class SettingsViewController: SettingsListViewController,
 // MARK: - Switching backends
 
 extension SettingsListViewController {
+
+    /// Keeps a screen showing the vCPUs in step with them, as a change takes a
+    /// moment to land.
+    fileprivate func followVcpus() {
+        NotificationCenter.default.addObserver(
+            forName: Vcpus.stateDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.reload()
+        }
+    }
 
     /// Keeps a screen showing the backend in step with it, including after a
     /// spell in the background, when what changed may not have been drawn.
@@ -1758,6 +1840,59 @@ private final class LogViewerViewController: UIViewController {
 
     private func shareLaunch() {
         share(launch.files, from: navigationItem.rightBarButtonItem)
+    }
+}
+
+// MARK: - vCPUs
+
+/// How many vCPUs Linux has in the foreground.
+private final class VcpuCountViewController: SettingsListViewController {
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        title = "vCPUs"
+        navigationItem.largeTitleDisplayMode = .never
+        followVcpus()
+    }
+
+    /// What Linux has now, while that isn't what is chosen.
+    private static var presentFooter: String? {
+        guard let present = Vcpus.present, present != Vcpus.wanted else { return nil }
+        if Vcpus.isChanging {
+            return "Linux has \(present) now, and is being given \(Vcpus.wanted)."
+        }
+        if present > Vcpus.wanted {
+            return "Linux has \(present) now. Any it hasn't let go of yet, it will when it's "
+                + "done with them."
+        }
+        return "Linux has \(present) now. The rest will be plugged in once Linux has let go of "
+            + "one it was asked to give back."
+    }
+
+    fileprivate override func buildSections() -> [SettingsSection] {
+        let clusters = Vcpus.coreClusters.map {
+            " This device has \($0.performance) performance and \($0.efficiency) efficiency cores."
+        }
+
+        return [
+            SettingsSection(
+                header: "In the Foreground",
+                footer: "One vCPU for each of this device's cores at most, since more would only "
+                    + "wait for one.\(clusters ?? "") A change applies straight away, and Linux "
+                    + "carries on throughout."
+                    + (Self.presentFooter.map { "\n\n" + $0 } ?? ""),
+                rows: (1...Vcpus.maximum).map { count in
+                    SettingsRow(
+                        id: "vcpus-\(count)",
+                        title: count == 1 ? "1 vCPU" : "\(count) vCPUs",
+                        accessory: count == Vcpus.foreground ? .checkmark : .none,
+                        select: { [weak self] in
+                            Vcpus.foreground = count
+                            self?.popToRoot()
+                        })
+                })
+        ]
     }
 }
 

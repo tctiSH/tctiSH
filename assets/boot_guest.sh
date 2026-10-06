@@ -45,6 +45,11 @@ MONITOR_PORT="10045"
 BACKEND="jit"
 MEMORY="1G"
 CPUS="4"
+
+# One slot per core, as qemu_launcher.c makes them, capped at the guest's
+# NR_CPUS. The rest of the slots are there to hot-plug into from the monitor.
+MAX_CPUS="$(sysctl -n hw.logicalcpu_max 2>/dev/null || nproc 2>/dev/null || echo 4)"
+[ "$MAX_CPUS" -gt 16 ] && MAX_CPUS=16
 SHARE="/tmp"
 DISK="$ASSETS/boot_guest.qcow"
 KEY="$ASSETS/placeholder_keys/placeholder_key"
@@ -81,7 +86,8 @@ usage: boot_guest.sh [options]
   --snapshot NAME   Resume from a saved snapshot instead of booting cold.
   --share DIR       Host directory offered over 9p as "shared" (default: /tmp).
   --memory SIZE     Guest RAM, as QEMU spells it (default: 1G).
-  --cpus N          Guest CPUs (default: 4).
+  --cpus N          Guest CPUs plugged in at boot (default: 4).
+  --max-cpus N      Slots to hot-plug into (default: this host's cores, up to 16).
   -h, --help        This.
 
 Boots assets/bzImage + assets/initrd.img against a writable copy of
@@ -205,6 +211,10 @@ main() {
                 CPUS="${2:-}"
                 shift
                 ;;
+            --max-cpus)
+                MAX_CPUS="${2:-}"
+                shift
+                ;;
             -h | --help)
                 usage
                 exit 0
@@ -226,7 +236,7 @@ main() {
         "$QEMU"
         -M "$MACHINE"
         -m "$MEMORY"
-        -smp "$CPUS"
+        -smp "cpus=$CPUS,maxcpus=$MAX_CPUS,sockets=1,cores=$MAX_CPUS,threads=1"
         -cpu Haswell-v4,-pcid,-tsc-deadline,-invpcid,-spec-ctrl
         -kernel "$ASSETS/bzImage"
         -initrd "$ASSETS/initrd.img"
@@ -234,7 +244,7 @@ main() {
         -netdev "user,id=net0,net=192.168.100.0/24,dhcpstart=$GUEST_IP,hostfwd=tcp:127.0.0.1:$SSH_PORT-:22"
         -device virtio-rng-pci
         -device virtio-balloon-pci,free-page-reporting=on
-        -device virtio-blk-pci,id=disk1,drive=drive1
+        -device "virtio-blk-pci,id=disk1,drive=drive1,num-queues=$MAX_CPUS"
         -drive "file=$DISK,id=drive1,if=none,format=qcow2"
         -fsdev "local,path=$SHARE,security_model=none,id=fsdev0"
         -device virtio-9p-pci,fsdev=fsdev0,mount_tag=shared
@@ -256,7 +266,9 @@ main() {
 
     [ -n "$SNAPSHOT" ] && argv+=(-loadvm "$SNAPSHOT")
 
-    note "$QEMU, machine $MACHINE, $CPUS cpus, $MEMORY"
+    [ "$CPUS" -le "$MAX_CPUS" ] || die "--cpus $CPUS is more than --max-cpus $MAX_CPUS"
+
+    note "$QEMU, machine $MACHINE, $CPUS of $MAX_CPUS cpus, $MEMORY"
     note "9p share: $SHARE (tag 'shared')"
     note "monitor: telnet localhost $MONITOR_PORT"
 

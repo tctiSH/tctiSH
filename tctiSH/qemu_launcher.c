@@ -67,6 +67,7 @@ struct qemu_args {
     char *dll_name;
     char *memory_value;
     char *accel_args;
+    char *smp_args;
 };
 
 /// Matches `Log.qemu` on the Swift side, so one filter catches both.
@@ -90,6 +91,7 @@ static void free_qemu_args(struct qemu_args *args) {
     free(args->monitor_channel_args);
     free(args->memory_value);
     free(args->accel_args);
+    free(args->smp_args);
     if (args->boot_image_name) {
         free(args->boot_image_name);
     }
@@ -292,6 +294,68 @@ char *qemu_backend_last_error(void) {
     return fn ? fn() : NULL;
 }
 
+bool qemu_vcpu_set_qos(qos_class_t qos_class) {
+    static bool (*fn)(int);
+    if (!fn) {
+        fn = qemu_symbol("tctish_vcpu_set_qos");
+    }
+    return fn ? fn((int)qos_class) : false;
+}
+
+/// The most vCPUs the guest can have.
+///
+/// QEMU makes a slot for each, and the guest sizes its per-CPU data for each,
+/// but only the vCPUs plugged in run. More than the host's cores would only
+/// have vCPUs queue for them.
+unsigned int qemu_max_vcpus(void) {
+    static unsigned int max;
+    static dispatch_once_t once;
+
+    dispatch_once(&once, ^{
+        int cores = 0;
+        size_t size = sizeof(cores);
+
+        if (sysctlbyname("hw.logicalcpu_max", &cores, &size, NULL, 0) != 0 || cores < 1) {
+            os_log_error(QemuLauncherLog(), "can't count this device's cores; allowing 4 vCPUs");
+            cores = 4;
+        }
+        max = cores > 16 ? 16 : (unsigned int)cores;
+    });
+
+    return max;
+}
+
+/// The vCPU topology, without the count of vCPUs plugged in at launch.
+///
+/// Part of the machine signature. The count is not: see `run_background_qemu`.
+static const char *qemu_smp_shape(void) {
+    static char shape[64];
+    static dispatch_once_t once;
+
+    dispatch_once(&once, ^{
+        unsigned int max = qemu_max_vcpus();
+        snprintf(shape, sizeof(shape), "maxcpus=%u,sockets=1,cores=%u,threads=1", max, max);
+    });
+
+    return shape;
+}
+
+/// The controller for the disk; the -drive that backs it carries a path and is
+/// separate.
+///
+/// Part of the machine signature, being device state a snapshot holds.
+static const char *qemu_disk_device(void) {
+    static char device[96];
+    static dispatch_once_t once;
+
+    dispatch_once(&once, ^{
+        snprintf(device, sizeof(device), "virtio-blk-pci,id=disk1,drive=drive1,num-queues=%u",
+                 qemu_max_vcpus());
+    });
+
+    return device;
+}
+
 /// The parts of the QEMU command line that define the *shape* of the machine.
 ///
 /// Everything here is a literal, and everything dynamic (paths, sizes, the
@@ -328,9 +392,6 @@ char *qemu_backend_last_error(void) {
        ram_block_discard_range(). */                                                               \
     "-device", "virtio-balloon-pci,free-page-reporting=on",                                        \
                                                                                                    \
-    /* The controller for the disk; the -drive that backs it carries a path and is separate. */    \
-    "-device", "virtio-blk-pci,id=disk1,drive=drive1",                                             \
-                                                                                                   \
     /* Kernel command line. `tcti_disk=file` tells our image to use the provided qcow disk file.   \
                                                                                                    \
        `page_reporting_order=2` reports free blocks from 16 KiB, one host page, up. The default    \
@@ -343,19 +404,6 @@ char *qemu_backend_last_error(void) {
        KVM guests are told when they were paused; under TCG there is no way to tell them. */       \
     "-append", "tcti_disk=file page_reporting.page_reporting_order=2 "                             \
                "rcupdate.rcu_cpu_stall_suppress=1",                                                \
-                                                                                                   \
-    /* Provide a few cores.                                                                        \
-                                                                                                   \
-       Plain, and deliberately so. This used to be spelled out as                                  \
-       `4,sockets=4,cores=1,threads=1` to work around a guest kernel built without ACPI, which     \
-       discovered CPUs through the Intel MP table: that enumerates by socket, so cores inside a    \
-       socket were invisible. QEMU had handed us the matching shape for free until pc-i440fx-6.2   \
-       dropped smp_props.prefer_sockets, at which point the same string started meaning one        \
-       socket of four cores and the guest came up with one CPU.                                    \
-                                                                                                   \
-       The 6.18 kernel enables CONFIG_ACPI, so discovery comes from the MADT and the topology no   \
-       longer has to be spelled out. Verified under TCG: a plain `-smp 4` gives nproc == 4. */     \
-    "-smp", "4",                                                                                   \
                                                                                                    \
     /* The CPU model: x86-64-v3 (AVX2, FMA, BMI2 and MOVBE on top of SSE4.2), which the software   \
        people want to run increasingly assumes. QEMU's default, qemu64, stops at SSE3.             \
@@ -373,8 +421,6 @@ char *qemu_backend_last_error(void) {
 // clang-format on
 
 const char *qemu_machine_signature(void) {
-    static const char *const parts[] = { TCTISH_MACHINE_ARGS };
-
     // Comfortably more than the ~530 bytes the current list needs. Built under
     // dispatch_once rather than a flag, because this is reached both from the
     // main thread at launch and from the boot queue when the epoch is recorded.
@@ -384,6 +430,11 @@ const char *qemu_machine_signature(void) {
     static dispatch_once_t once;
 
     dispatch_once(&once, ^{
+        // The vCPU topology and the disk's queues are the parts that are not
+        // literals, as they follow the device; see `qemu_smp_shape` and
+        // `qemu_disk_device`. They are in the signature all the same.
+        const char *const parts[] = { TCTISH_MACHINE_ARGS, "-smp", qemu_smp_shape(), "-device",
+                                      qemu_disk_device() };
         size_t used = 0;
 
         for (size_t i = 0; i < ARRAY_SIZE(parts); i++) {
@@ -438,6 +489,14 @@ static void *qemu_thread(void *raw_args) {
         // Everything that defines the shape of the machine. Kept in one list so
         // that qemu_machine_signature() describes exactly what is built.
         TCTISH_MACHINE_ARGS,
+
+        // The vCPUs: how many are plugged in at launch, in the topology that
+        // qemu_smp_shape() describes and the signature covers. The count is
+        // left out of the signature because the app changes it while the VM runs and records what each saved session had.
+        "-smp", args->smp_args,
+
+        // The disk's controller, its queues sized to the topology's slots.
+        "-device", (char *)qemu_disk_device(),
 
         // The disk, the kernel and the ramdisk. Paths rather than shape: they
         // differ per install, and what is *in* the kernel and initrd is covered
@@ -513,7 +572,7 @@ void run_background_qemu(const char *qemu_path, const char *kernel_path, const c
                          const char *shared_folder_path, const char *boot_image_name,
                          const char *memory_value, const char *monitor_socket_path,
                          bool start_native, bool bless_jit_regions, unsigned int tb_size_mib,
-                         unsigned int chunk_mib) {
+                         unsigned int chunk_mib, unsigned int vcpus) {
     pthread_t thread;
     pthread_attr_t qosAttribute;
 
@@ -568,6 +627,18 @@ void run_background_qemu(const char *qemu_path, const char *kernel_path, const c
     args->accel_args = calloc(ARGUMENT_MAX, sizeof(char));
     snprintf(args->accel_args, ARGUMENT_MAX, "tcg,tcti=%s,split-wx=on,tb-size=%u",
              start_native ? "off" : "on", tb_size_mib);
+
+    // Create our vCPU argument. Plugged in in order from core 0, which is how
+    // the app keeps them, so that a snapshot taken with this many loads with
+    // nothing to change; QEMU brings the machine to a snapshot's vCPUs either way.
+    unsigned int max_vcpus = qemu_max_vcpus();
+    if (vcpus < 1 || vcpus > max_vcpus) {
+        os_log_error(QemuLauncherLog(), "asked for %u vCPUs of %u; using %u", vcpus, max_vcpus,
+                     vcpus < 1 ? 1 : max_vcpus);
+        vcpus = vcpus < 1 ? 1 : max_vcpus;
+    }
+    args->smp_args = calloc(ARGUMENT_MAX, sizeof(char));
+    snprintf(args->smp_args, ARGUMENT_MAX, "cpus=%u,%s", vcpus, qemu_smp_shape());
 
     // Copy in each of our filenames/arguments.
     strncpy(args->qemu_image, qemu_path, PATH_MAX - 1);
