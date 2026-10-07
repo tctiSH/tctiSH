@@ -17,8 +17,12 @@ const MOUNT_ALLOWED: bool = true;
 ///
 /// Unused while the mount below is still a FIXME, and kept rather than deleted
 /// because it is the one part of that work already known to be right.
+///
+/// `cache=readahead` as the other mounts have it, for reads several times
+/// faster and still coherent from one open to the next; see
+/// `assets/overlay/etc/profile.d/mount_shared.sh`.
 #[allow(dead_code)]
-const HOST_MOUNT_OPTIONS: &str = "trans=virtio,version=9p2000.L,debug=0x40";
+const HOST_MOUNT_OPTIONS: &str = "trans=virtio,version=9p2000.L,cache=readahead,debug=0x40";
 
 /// The delay between a successful prepare_mount() and returning. Gives QEMU
 /// time to actually make things available.

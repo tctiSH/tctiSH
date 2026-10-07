@@ -37,8 +37,11 @@ EOF
 echo 1 > /sys/bus/pci/rescan
 
 # ... and finally, mount the device.
+#
+# cache=readahead for reads several times faster, coherent from one open to the next; see
+# /etc/profile.d/mount_shared.sh.
 #/bin/sleep 1
-/bin/mount -t 9p -o trans=virtio "$TAG" "$MOUNTPOINT" -oversion=9p2000.L
+/bin/mount -t 9p -o trans=virtio,cache=readahead "$TAG" "$MOUNTPOINT" -oversion=9p2000.L
 
 
 
