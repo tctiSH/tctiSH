@@ -245,7 +245,7 @@ main() {
         -device virtio-rng-pci
         -device virtio-balloon-pci,free-page-reporting=on
         -device "virtio-blk-pci,id=disk1,drive=drive1,num-queues=$MAX_CPUS"
-        -drive "file=$DISK,id=drive1,if=none,format=qcow2"
+        -drive "file=$DISK,id=drive1,if=none,format=qcow2,discard=unmap,detect-zeroes=unmap"
         -fsdev "local,path=$SHARE,security_model=none,id=fsdev0"
         -device virtio-9p-pci,fsdev=fsdev0,mount_tag=shared
         -monitor "tcp:localhost:$MONITOR_PORT,server=on,wait=off"

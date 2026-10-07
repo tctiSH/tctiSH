@@ -77,82 +77,10 @@ class ViewController: UIViewController {
         ViewController.currentTerminal = currentTerminal
         ViewController.currentTerminalController = self
 
-        // If we're doing a recovery boot by user choice provide a message letting the user know
-        // that this will take a moment.
-        //
-        // Ahead of the `forceRecoveryBoot` branch below, which would otherwise catch the quick
-        // action and apologize for a resume that never went wrong.
-        if QuickActions.request == .recovery
-            || UserDefaults.standard.string(forKey: "resume_behavior") == "recovery_boot"
-        {
-            currentTerminal.feed(text: "(Recovery booting; startup will take a bit.)\r\n\r\n")
-        }
-
-        // If this is our first boot, create the image we'll use for resuming.
-        else if AppDelegate.isFirstBoot {
-            tv.feed(text: "Welcome to tctiSH! This first boot will take\r\n")
-            tv.feed(text: "just a bit longer, as we set up this environment\r\n")
-            tv.feed(text: "for later use. Future boots will be way faster!\r\n\r\n")
-
-            tv.feed(text: "This will take ~20 seconds or so.\r\n\r\n")
-        }
-
-        // If we're forcing a recovery boot by something other than user choice, provide a message
-        // letting the user know
-        else if AppDelegate.forceRecoveryBoot {
-            tv.feed(text: "It seems like our last attempt at resuming\r\n")
-            tv.feed(text: "might not have gone so well. We'll recover\r\n")
-            tv.feed(text: "by restarting things the slow way.\r\n\r\n")
-
-            tv.feed(text: "This will take ~20 seconds or so.\r\n\r\n")
-        }
-
-        // An updated app can mean an updated guest kernel, an updated QEMU, or a different machine
-        // shape while a snapshot is a whole machine, including a kernel already running in its RAM.
-        // None of those can be resumed into. Says "updated" rather than naming which, because the
-        // distinction is ours and not the user's.
-        else if AppDelegate.snapshotEpochChanged {
-            tv.feed(text: "tctiSH has been updated, so we'll need to\r\n")
-            tv.feed(text: "re-create our 'instant boot' environment,\r\n")
-            tv.feed(text: "just this once after the update.\r\n\r\n")
-
-            tv.feed(text: "This will take ~20 seconds or so.\r\n\r\n")
-        }
-
-        // If the user has just changed the amount of memory in the VM, they'll need a full boot to
-        // re-populate the environment. Let them know.
-        else if AppDelegate.memoryValueChanged {
-            tv.feed(text: "The memory limit placed on tctiSH has changed.\r\n")
-            tv.feed(text: "We'll need to re-create our 'instant boot'\r\n")
-            tv.feed(text: "environment, just this once after the change.\r\n\r\n")
-
-            tv.feed(text: "This will take ~20 seconds or so.\r\n\r\n")
-
-        }
-
-        // A code cache change costs nothing at the guest's end so this says what changed without
-        // promising a slow boot the way the branches above have to.
-        else if AppDelegate.codeCacheChanged {
-            tv.feed(text: "The code cache size has changed.\r\n")
-            tv.feed(text: "tctiSH is now using \(CodeCache.summary).\r\n\r\n")
-
-            for _ in 0...20 {
-                tv.feed(text: "\n")
-            }
-
-        } else {
-            // Provide some filler content,to ensure the ScrollView starts with something in it;
-            // and then issue a "clear", so it's off the backlog. This is a cheap, hackish way of
-            // getting there to be something in the UIScrollView buffer; which means that we avoid
-            // the nasty "transparent" boxes it tries to squish at either end if there's not enough
-            // content.
-            //
-            // We could squish in spacer controls; but these do the same thing and don't muck up the
-            // position math SwiftTerm does later.
-            for _ in 0...25 {
-                tv.feed(text: "\n")
-            }
-
+        // Held back while Settings First keeps the boot waiting, since what it says can change in
+        // there; see `AppDelegate.releaseBootHeldForSettings`.
+        if !AppDelegate.bootHeldForSettings {
+            showBootMessage()
         }
 
         setupKeyboardMonitor()
@@ -214,6 +142,11 @@ class ViewController: UIViewController {
         // window yet, so there is nothing to present *from* -- and the symptom is simply that the
         // alert never appears.
         offerPairingFileIfWanted()
+
+        // Settings First: the boot waits for these to close.
+        if AppDelegate.bootHeldForSettings {
+            openSettings(nil)
+        }
     }
 
     // MARK: - JIT status
@@ -504,6 +437,9 @@ class ViewController: UIViewController {
             // would cost a relaunch and buy nothing.
             status?.dismiss(key: Self.quickActionStatusKey)
             performRecoveryBoot()
+
+        case .openSettings:
+            openSettings(nil)
         }
     }
 
@@ -1150,5 +1086,119 @@ class ViewController: UIViewController {
     /// change of size go through, so nothing else needs to.
     override func viewWillLayoutSubviews() {
         tv.frame = makeFrame(keyboardDelta: keyboardDelta)
+    }
+}
+
+// MARK: - Keyboard
+
+extension ViewController {
+
+    /// ⌘, from the app menu; see `AppDelegate.buildMenu(with:)`. Reached
+    /// through the responder chain from the terminal, which holds focus.
+    ///
+    /// Does nothing while something is already up over the terminal: the
+    /// settings sheet itself, or an alert that wants answering first.
+    @objc func openSettings(_ sender: Any?) {
+        guard presentedViewController == nil else { return }
+        SettingsViewController.present(from: self)
+    }
+
+    /// The same ⌘, on iPhone, which has no menu bar for the app menu's command
+    /// to live in. Not on iPad, where the menu's command already answers it and
+    /// a second would only compete with it.
+    override var keyCommands: [UIKeyCommand]? {
+        guard traitCollection.userInterfaceIdiom == .phone else { return super.keyCommands }
+
+        let settings = UIKeyCommand(
+            title: "Settings…", action: #selector(openSettings(_:)), input: ",",
+            modifierFlags: .command)
+        return (super.keyCommands ?? []) + [settings]
+    }
+}
+
+// MARK: - Boot message
+
+extension ViewController {
+
+    /// What the terminal says before Linux starts. Called as the view loads, or
+    /// once settings close when Settings First held the boot.
+    func showBootMessage() {
+        // If we're doing a recovery boot by user choice provide a message letting the user know
+        // that this will take a moment.
+        //
+        // Ahead of the `forceRecoveryBoot` branch below, which would otherwise catch the quick
+        // action and apologize for a resume that never went wrong.
+        if QuickActions.request == .recovery
+            || UserDefaults.standard.string(forKey: "resume_behavior") == "recovery_boot"
+        {
+            tv.feed(text: "(Recovery booting; startup will take a bit.)\r\n\r\n")
+        }
+
+        // If this is our first boot, create the image we'll use for resuming.
+        else if AppDelegate.isFirstBoot {
+            tv.feed(text: "Welcome to tctiSH! This first boot will take\r\n")
+            tv.feed(text: "just a bit longer, as we set up this environment\r\n")
+            tv.feed(text: "for later use. Future boots will be way faster!\r\n\r\n")
+
+            tv.feed(text: "This will take ~20 seconds or so.\r\n\r\n")
+        }
+
+        // If we're forcing a recovery boot by something other than user choice, provide a message
+        // letting the user know
+        else if AppDelegate.forceRecoveryBoot {
+            tv.feed(text: "It seems like our last attempt at resuming\r\n")
+            tv.feed(text: "might not have gone so well. We'll recover\r\n")
+            tv.feed(text: "by restarting things the slow way.\r\n\r\n")
+
+            tv.feed(text: "This will take ~20 seconds or so.\r\n\r\n")
+        }
+
+        // An updated app can mean an updated guest kernel, an updated QEMU, or a different machine
+        // shape while a snapshot is a whole machine, including a kernel already running in its RAM.
+        // None of those can be resumed into. Says "updated" rather than naming which, because the
+        // distinction is ours and not the user's.
+        else if AppDelegate.snapshotEpochChanged {
+            tv.feed(text: "tctiSH has been updated, so we'll need to\r\n")
+            tv.feed(text: "re-create our 'instant boot' environment,\r\n")
+            tv.feed(text: "just this once after the update.\r\n\r\n")
+
+            tv.feed(text: "This will take ~20 seconds or so.\r\n\r\n")
+        }
+
+        // If the user has just changed the amount of memory in the VM, they'll need a full boot to
+        // re-populate the environment. Let them know.
+        else if AppDelegate.memoryValueChanged {
+            tv.feed(text: "The memory limit placed on tctiSH has changed.\r\n")
+            tv.feed(text: "We'll need to re-create our 'instant boot'\r\n")
+            tv.feed(text: "environment, just this once after the change.\r\n\r\n")
+
+            tv.feed(text: "This will take ~20 seconds or so.\r\n\r\n")
+
+        }
+
+        // A code cache change costs nothing at the guest's end so this says what changed without
+        // promising a slow boot the way the branches above have to.
+        else if AppDelegate.codeCacheChanged {
+            tv.feed(text: "The code cache size has changed.\r\n")
+            tv.feed(text: "tctiSH is now using \(CodeCache.summary).\r\n\r\n")
+
+            for _ in 0...20 {
+                tv.feed(text: "\n")
+            }
+
+        } else {
+            // Provide some filler content, to ensure the ScrollView starts with something in it;
+            // and then issue a "clear", so it's off the backlog. This is a cheap, hackish way of
+            // getting there to be something in the UIScrollView buffer; which means that we avoid
+            // the nasty "transparent" boxes it tries to squish at either end if there's not enough
+            // content.
+            //
+            // We could squish in spacer controls; but these do the same thing and don't muck up the
+            // position math SwiftTerm does later.
+            for _ in 0...25 {
+                tv.feed(text: "\n")
+            }
+
+        }
     }
 }

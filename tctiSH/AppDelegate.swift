@@ -133,9 +133,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             AppDelegate.forceRecoveryBoot = true
         }
 
-        // Mark ourselves as attempting a boot.
-        UserDefaults.standard.set(true, forKey: "attempting_boot")
-
         // Under the scene life cycle the item usually comes with the scene instead, which
         // `handleSceneWillConnect` picks up.
         if let item = launchOptions?[.shortcutItem] as? UIApplicationShortcutItem {
@@ -145,8 +142,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Create a QEMU interface, which will launch our background kernel.
         qemu = QEMUInterface()
 
-        // All of these are cheap, and all have to be read before the boot below records this
-        // launch's values over the top of them.
+        // All of these are cheap, and all have to be read before the boot records this launch's
+        // values over the top of them.
         AppDelegate.memoryValueChanged = qemu!.memoryValueChanged()
         AppDelegate.codeCacheChanged = CodeCache.changedSinceLastBoot
         AppDelegate.snapshotEpochChanged = VmSnapshots.changedSinceLastBoot
@@ -156,14 +153,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // the scene callbacks can rely on finding it.
         configServer = ConfigServer(qemuInterface: qemu!, listenImmediately: true)
 
-        // The scene connects a few hundredths of a second after this returns and `beginBoot` is a
-        // no-op by the time this fires; it is here so that a scene that somehow never connects
-        // costs a late boot rather than a VM that never starts at all.
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.sceneConnectionGrace) { [weak self] in
-            guard let self, !self.bootRequested else { return }
-
-            Log.ui.warn("the scene never connected; booting anyway")
-            self.beginBoot()
+        // Settings First holds the boot until settings is closed.
+        NotificationCenter.default.addObserver(
+            forName: SettingsViewController.didClose, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.releaseBootHeldForSettings()
         }
 
         // Nothing slow left above, so this is the point at which UIKit is free to draw.
@@ -172,40 +166,103 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         return true
     }
 
-    /// How long to let the scene connect before booting without it.
-    private static let sceneConnectionGrace: TimeInterval = 1
-
     /// Whether the boot has been asked for. Main thread only.
     private var bootRequested = false
 
-    /// Takes whatever the scene brought with it, and starts the boot.
-    ///
-    /// The boot waits for this rather than going at the end of
-    /// `didFinishLaunchingWithOptions` because a quick action does not arrive
-    /// until the scene connects, and two of the three mean nothing to a process
-    /// that has already allocated QEMU's code buffer.
-    ///
-    /// Called by `SceneDelegate`, which is where UIKit delivers this.
-    func handleSceneWillConnect(shortcutItem: UIApplicationShortcutItem?) {
-        if let shortcutItem {
-            if bootRequested {
-                // A scene connecting onto a process whose VM is already up. Nothing here can change
-                // how that VM was started, so this is handled as though it had come through
-                // `performActionFor`, which is what it amounts to.
-                QuickActions.performWhileRunning(shortcutItem)
-            } else {
-                QuickActions.adopt(shortcutItem)
-            }
-        }
+    /// Whether the boot waits for settings to be closed: the Settings First
+    /// quick action, for changing something before Linux starts rather than
+    /// after. Main thread only.
+    static var bootHeldForSettings = false
 
+    /// Lets the held boot go, once settings are closed.
+    ///
+    /// What the launch read ahead of the boot is read again first, as settings
+    /// may have changed it: the disk, which `QEMUInterface` fixes when it is
+    /// made, and whether memory, the code cache or the machine changed since
+    /// the last boot, which decide what the terminal says.
+    private func releaseBootHeldForSettings() {
+        guard Self.bootHeldForSettings else { return }
+        Self.bootHeldForSettings = false
+
+        let qemu = QEMUInterface()
+        self.qemu = qemu
+        configServer?.qemu = qemu
+        AppDelegate.memoryValueChanged = qemu.memoryValueChanged()
+        AppDelegate.codeCacheChanged = CodeCache.changedSinceLastBoot
+        AppDelegate.snapshotEpochChanged = VmSnapshots.changedSinceLastBoot
+        AppDelegate.isFirstBoot = qemu.isFirstBoot()
+
+        Log.ui.note("settings first: settings closed; booting")
+        (ViewController.getCurrent() as? ViewController)?.showBootMessage()
         beginBoot()
     }
 
-    /// Settles how we're going to run, arranges it, and boots -- once, and all
-    /// off the main thread.
+    /// Puts Settings… in the app menu with ⌘, as on the Mac, so that a keyboard
+    /// reaches it without the accessory bar. In the menu bar so that it is
+    /// listed there and in the ⌘-hold overlay, and works whatever has focus.
+    /// iPhone, with no menu bar, gets the same shortcut from
+    /// `ViewController.keyCommands`.
+    override func buildMenu(with builder: UIMenuBuilder) {
+        super.buildMenu(with: builder)
+        guard builder.system == .main else { return }
+
+        let settings = UIKeyCommand(
+            title: "Settings…",
+            action: #selector(ViewController.openSettings(_:)),
+            input: ",",
+            modifierFlags: .command)
+
+        // Where the system keeps its own Settings item, if it offers one there; otherwise at the
+        // top of the app menu, which is where that item goes on the Mac.
+        if builder.menu(for: .preferences) != nil {
+            builder.replaceChildren(ofMenu: .preferences) { _ in [settings] }
+        } else {
+            builder.insertChild(
+                UIMenu(options: .displayInline, children: [settings]),
+                atStartOfMenu: .application)
+        }
+    }
+
+    /// Takes whatever the scene brought with it.
+    ///
+    /// A quick action does not arrive until the scene connects, and two of the
+    /// three mean nothing to a process that has already allocated QEMU's code
+    /// buffer, so it has to be in hand before the boot. The boot itself waits a
+    /// step longer, for the scene to come to the foreground; see `beginBoot`.
+    ///
+    /// Called by `SceneDelegate`, which is where UIKit delivers this.
+    func handleSceneWillConnect(shortcutItem: UIApplicationShortcutItem?) {
+        guard let shortcutItem else { return }
+        handleQuickAction(shortcutItem)
+    }
+
+    /// A quick action from either of UIKit's two doors, settled by whether the
+    /// boot has started rather than by which door it came through.
+    func handleQuickAction(_ shortcutItem: UIApplicationShortcutItem) {
+        if bootRequested {
+            QuickActions.performWhileRunning(shortcutItem)
+        } else {
+            QuickActions.adopt(shortcutItem)
+        }
+    }
+
+    /// Starts the boot if nothing has yet. Called by `SceneDelegate` from
+    /// `sceneDidBecomeActive`, as a backstop: `handleWillEnterForeground`
+    /// starts it first, and this is here in case UIKit ever skips that on a
+    /// launch, which would otherwise leave the app with no machine at all.
+    func handleSceneInForeground() {
+        beginBoot()
+    }
+
+    /// Settles how we're going to run, arranges it, and boots.
     private func beginBoot() {
-        guard !bootRequested else { return }
+        guard !bootRequested, !Self.bootHeldForSettings else { return }
         bootRequested = true
+
+        // Mark ourselves as attempting a boot. Here rather than at launch, so that a background
+        // launch iOS kills before the user ever opens the app is not mistaken for a failed boot,
+        // which would force a recovery boot and throw away the saved session.
+        UserDefaults.standard.set(true, forKey: "attempting_boot")
 
         bootQueue.async { [weak self] in
             let outcome = JitEnablement.prepareForBoot()
@@ -351,6 +408,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     /// machine that is not executing: the attempt fails, and the terminal's own
     /// 1.5s poll retries until the VM comes back.
     func handleWillEnterForeground() {
+        // The first time, this is the launch: what follows then finds no machine and nothing to do.
+        beginBoot()
+
         away.store(false, ordering: .relaxed)
         Vcpus.willEnterForeground()
 

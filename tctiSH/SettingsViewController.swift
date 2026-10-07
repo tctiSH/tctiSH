@@ -105,6 +105,22 @@ private final class FixedWidthTextField: UITextField {
     }
 }
 
+/// The settings sheet's navigation controller, which says when the sheet has
+/// gone.
+///
+/// Here rather than on the root screen, because the sheet can be swiped away
+/// from a screen pushed over the root, and the root then has no
+/// `viewDidDisappear` of its own to notice it by: it disappeared at the push.
+private final class SettingsNavigationController: UINavigationController {
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+
+        if isBeingDismissed {
+            NotificationCenter.default.post(name: SettingsViewController.didClose, object: nil)
+        }
+    }
+}
+
 /// The list plumbing, so each screen below is content only.
 ///
 /// Internal rather than private only because `SettingsViewController` inherits
@@ -193,6 +209,14 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
             content.secondaryText = row.detail
             content.image = row.symbol.flatMap { UIImage(systemName: $0) }
             content.imageProperties.tintColor = .tintColor
+
+            // A row that does something when tapped, with nothing else to say so -- no arrow, no
+            // switch, no field -- reads as a label otherwise. Tinted like a button, as the system's
+            // own action rows are.
+            if row.select != nil, row.accessory == .none, row.toggle == nil, row.editable == nil {
+                content.textProperties.color = .tintColor
+            }
+
             cell.contentConfiguration = content
 
             if let toggle = row.toggle {
@@ -487,7 +511,7 @@ final class SettingsViewController: SettingsListViewController,
 
     /// Puts the settings sheet up over whatever is on screen.
     static func present(from presenter: UIViewController) {
-        let navigation = UINavigationController(rootViewController: SettingsViewController())
+        let navigation = SettingsNavigationController(rootViewController: SettingsViewController())
         navigation.navigationBar.prefersLargeTitles = true
 
         // A sheet rather than a full-screen presentation: the terminal stays visible behind it,
@@ -540,7 +564,12 @@ final class SettingsViewController: SettingsListViewController,
 
         followBackend()
         followVcpus()
+        followCompaction()
     }
+
+    /// Posted on the main queue when the settings sheet has gone, however it
+    /// was closed; see `SettingsNavigationController`.
+    static let didClose = Notification.Name("io.ara.tctish.settings.didClose")
 
     @objc private func revealDebugTools() {
         guard navigationController?.topViewController === self, !Self.debugToolsRevealed else {
@@ -691,7 +720,7 @@ final class SettingsViewController: SettingsListViewController,
             SettingsSection(
                 header: "Storage",
                 footer:
-                    "Where your session is stored, including the disk image and boot snapshot (used for resume) file names. A disk name that doesn't yet exist creates a fresh machine.",
+                    "Where your session is stored, including the disk image and boot snapshot (used for resume) file names. A disk name that doesn't yet exist creates a fresh machine.\n\nThe disk image grows as Linux writes, and space Linux frees goes back to iOS, but the file itself never gets shorter. Compact Disk copies what Linux is using into a fresh image, which takes the old one's place, while Linux keeps running. Your session is saved again afterwards, and older saves are discarded.",
                 rows: [
                     SettingsRow(
                         id: "disk-name",
@@ -709,6 +738,7 @@ final class SettingsViewController: SettingsListViewController,
                             text: AppSetting.bootSnapshot.string,
                             placeholder: "none",
                             commit: { AppSetting.bootSnapshot.set($0) })),
+                    Self.compactionRow(on: self),
                 ]),
 
             SettingsSection(
@@ -925,6 +955,9 @@ final class SettingsViewController: SettingsListViewController,
 
     /// What to say about what changed.
     private func consequences() -> String? {
+        // Nothing has booted yet, so everything changed here applies to the boot about to happen.
+        guard !AppDelegate.bootHeldForSettings else { return nil }
+
         if VmMemory.selected != onEntry.memory {
             return
                 "Linux will start again from scratch the next time you open tctiSH. Anything in the resumed session is lost."
@@ -955,6 +988,86 @@ final class SettingsViewController: SettingsListViewController,
     private static func list(_ items: [String]) -> String {
         guard items.count > 1 else { return items.first ?? "" }
         return items.dropLast().joined(separator: ", ") + " and " + (items.last ?? "")
+    }
+}
+
+// MARK: - Compacting the disk
+
+extension SettingsListViewController {
+
+    /// Compact Disk, with the image's length and the space it takes up beside
+    /// it, or how far it has got in the compaction process.
+    fileprivate static func compactionRow(on screen: SettingsListViewController) -> SettingsRow {
+        let symbol = "arrow.down.right.and.arrow.up.left"
+
+        if case .running(let fraction) = DiskCompaction.state {
+            return SettingsRow(
+                id: "compact-disk",
+                title: "Compacting…",
+                detail: fraction.map { "\(Int($0 * 100))%" },
+                symbol: symbol)
+        }
+
+        return SettingsRow(
+            id: "compact-disk",
+            title: "Compact Disk",
+            detail: DiskCompaction.diskSizes.map {
+                "\(QEMUInterface.bytes($0.length)) · \(QEMUInterface.bytes($0.onDisk)) on disk"
+            },
+            symbol: symbol,
+            select: { [weak screen] in screen?.confirmCompaction() })
+    }
+
+    /// Keeps the row in step with a compaction as it goes.
+    fileprivate func followCompaction() {
+        NotificationCenter.default.addObserver(
+            forName: DiskCompaction.stateDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.reload()
+        }
+    }
+
+    /// Says what compacting does and asks first: older saves go with the old
+    /// image, and there's no taking that back.
+    fileprivate func confirmCompaction() {
+        if let refusal = DiskCompaction.refusal {
+            showAlert(title: "Can't Compact Disk Now", message: refusal)
+            return
+        }
+
+        confirm(
+            title: "Compact Disk?",
+            message:
+                "Linux keeps running while what it's using is copied into a fresh disk image, which then replaces the old one. Your session is saved again afterwards, and older saves are discarded.",
+            action: "Compact"
+        ) {
+            DiskCompaction.start { outcome in
+                Self.report(outcome)
+            }
+        }
+    }
+
+    /// Says how it went, over whatever is on screen by then: the settings may
+    /// well have been closed while it ran.
+    private static func report(_ outcome: QEMUInterface.Compaction) {
+        guard let root = ViewController.getCurrent() else { return }
+
+        switch outcome {
+        case .compacted(let before, let beforeOnDisk, let after, let withSave):
+            let sizes =
+                "The disk image was \(QEMUInterface.bytes(before)) (\(QEMUInterface.bytes(beforeOnDisk)) on disk), and compacted to \(QEMUInterface.bytes(after))."
+            let session =
+                withSave.map {
+                    "Your session has been saved again, which brings it to \(QEMUInterface.bytes($0))."
+                }
+                ?? "Your session couldn't be saved again, so the next launch starts Linux afresh. Your files are kept."
+            root.showAlert(title: "Disk Compacted", message: "\(sizes) \(session)")
+
+        case .notDone(let reason):
+            root.showAlert(
+                title: "Couldn't Compact Disk",
+                message: reason.prefix(1).uppercased() + reason.dropFirst() + ".")
+        }
     }
 }
 

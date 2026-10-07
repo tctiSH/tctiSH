@@ -198,7 +198,7 @@
 
       # Everything `make format` drives, minus swift-format and clang-format,
       # which come from the active Xcode toolchain via `xcrun` so that they match
-      # what the IDE applies on save. See tmp/plans/autoformatting.md.
+      # what the IDE applies on save.
       formatters = with pkgs; [
         dprint # Markdown, JSON, TOML, YAML
         nixfmt # Nix (RFC 166 style)

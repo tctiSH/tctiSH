@@ -67,7 +67,15 @@ if grep "tcti_disk=file" /proc/cmdline; then
 	# recognises anything. Checking the status instead makes every disk look
 	# occupied -- which fails safe, but turns a genuinely blank disk into a guest
 	# that silently never persists anything. Found by testing it.
-	if ! mount /dev/vda /var/tcti-rootfs/rw-ios; then
+	#
+	# -o discard so that space the guest frees goes back to the phone as it is
+	# freed. Without it ext4 never reports a deleted block, and disk.qcow only
+	# ever grows: virtio-blk would carry the discard, and QEMU would punch the
+	# hole in the file (qemu_launcher.c opens the drive with discard=unmap), but
+	# nothing ever asks. It costs a discard per freed extent at commit, which a
+	# mass delete pays for in one go. A device that cannot discard only earns a
+	# warning from ext4, never a failed mount.
+	if ! mount -o discard /dev/vda /var/tcti-rootfs/rw-ios; then
 		if [ -n "$(blkid /dev/vda 2>/dev/null)" ]; then
 			echo "--------------------------------------------------------------------------"
 			echo "The persistent disk has a filesystem, but it could not be mounted."
@@ -82,7 +90,7 @@ if grep "tcti_disk=file" /proc/cmdline; then
 
 			mkfs.ext4 /dev/vda
 
-			if mount /dev/vda /var/tcti-rootfs/rw-ios; then
+			if mount -o discard /dev/vda /var/tcti-rootfs/rw-ios; then
 				echo "Persistent disk created and mounted."
 			else
 				echo "----------------------------------------------------------------------"
@@ -91,6 +99,34 @@ if grep "tcti_disk=file" /proc/cmdline; then
 				echo "----------------------------------------------------------------------"
 			fi
 		fi
+	fi
+
+	# Trim once per cold boot, in the background:
+	#
+	#   - Everything a disk freed before it was mounted with -o discard.
+	#   - Partial clusters. QEMU only frees a qcow2 cluster (64 KiB) when the
+	#     whole of it is discarded, so a 4 KiB delete inside a live cluster is
+	#     dropped, and online discard never revisits it once its neighbors go too.
+	#     fstrim walks free extents, so it sends them whole.
+	#
+	# From here because the mount is outside the chroot: it is not in the
+	# guest's mount table, so nothing inside would ever think to trim it.
+	# Resuming a saved session skips this script, but a resumed guest has
+	# already mounted with discard: this script is in initrd.img, which the
+	# snapshot epoch digests, so no session saved under an older init resumes.
+	#
+	# Backgrounded and niced, since it walks every block group under emulation
+	# and the boot should not wait for that. It survives the exec below as a child
+	# of PID 1, which busybox init reaps. Its report goes to the kernel log, so
+	# `dmesg` shows what it reclaimed and when it finished.
+	#
+	# /sbin/fstrim by path because nice does the lookup, not the shell: the
+	# kernel starts init with no PATH, and nice's execvp then falls back to
+	# libc's default of /bin:/usr/bin, which misses /sbin. The shell has a
+	# default of its own that includes it, which is why nothing else here
+	# needs a path.
+	if mountpoint -q /var/tcti-rootfs/rw-ios; then
+		nice -n 19 /sbin/fstrim -v /var/tcti-rootfs/rw-ios >/dev/kmsg 2>&1 &
 	fi
 
 else

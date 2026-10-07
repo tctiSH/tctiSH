@@ -241,8 +241,11 @@ public class QEMUInterface {
 
     /// Gives a stopped, saved machine's RAM back to the host.
     ///
+    /// Our QEMU's `park` hands all of the stopped machine's RAM back to iOS,
+    /// and `unpark` loads it back from the snapshot just taken, so a parked
+    /// machine costs nothing for its memory while the app is away.
+    ///
     /// Returns whether it is parked. If it isn't, it has been started again.
-    /// See background-footprint.md, Lever C.
     func park() -> Bool {
         Self.snapshotWorkLock.lock()
         defer { Self.snapshotWorkLock.unlock() }
@@ -1420,6 +1423,8 @@ public class QEMUInterface {
             setResumeImage(tag: "instantboot")
         }
 
+        Self.removeAbandonedCompactions(of: targetURL)
+
         return targetURL
     }
 
@@ -1823,5 +1828,304 @@ extension QEMUInterface {
         }
 
         return nil
+    }
+}
+
+// MARK: - Compacting the disk
+
+extension QEMUInterface {
+
+    /// How a compaction ended.
+    enum Compaction {
+        /// The machine runs on the compacted disk. Lengths are the file's, in
+        /// bytes: `before`, with `beforeOnDisk` the space it took; `after` as
+        /// compacted; and `withSave` once the session was saved onto it, which
+        /// adds the guest's memory. `withSave` is nil if that save failed, in
+        /// which case the next launch boots afresh.
+        case compacted(before: Int64, beforeOnDisk: Int64, after: Int64, withSave: Int64?)
+
+        /// Nothing changed, because of `reason`.
+        case notDone(String)
+    }
+
+    /// Copies the running disk into a fresh qcow2 and moves the machine onto
+    /// it, without stopping.
+    ///
+    /// The file only ever grows, as a qcow2 is as long as the furthest cluster
+    /// it has used. QEMU's mirror copies only the clusters in use, and the
+    /// guest discards what's frees, so the copy is only as long as what Linux
+    /// holds. The guest runs throughout: the mirror tracks what it writes, and
+    /// `block_job_complete` switches the drive over once the copy has caught
+    /// up.
+    ///
+    /// Saved sessions don't come across as they are only in the old file, which
+    /// the copy replaces, so the session is saved again onto the new one
+    /// immediately.
+    ///
+    /// Blocks for as long as the copy takes, so never call it on the main
+    /// thread. `progress` is called from this thread too.
+    func compactDisk(progress: (Double) -> Void) -> Compaction {
+        // Against a save above all, which writes into the very file this replaces.
+        guard Self.snapshotWorkLock.try() else {
+            return .notDone("a session save is running; try again in a moment")
+        }
+        defer { Self.snapshotWorkLock.unlock() }
+
+        let current = getDatastoreURL(disk, fileExtension: "qcow", create: false)
+        let target = Self.compactionTarget(for: current)
+
+        guard let before = Self.fileLength(current) else {
+            return .notDone("the disk image couldn't be read")
+        }
+
+        // What the copy can need at most: everything the old file holds. Its saves don't come
+        // across, so this overstates it, which is the right way to be wrong here.
+        let allocated = Self.allocatedSize(current) ?? before
+        let needed = allocated + Self.compactionHeadroom
+        if let available = Self.availableSpace(near: current), available < needed {
+            return .notDone(
+                "compacting needs up to \(Self.bytes(needed)) free, and there is "
+                    + "\(Self.bytes(available))")
+        }
+
+        Log.fs.note(
+            "compact: copying \(current.lastPathComponent), \(Self.bytes(before)) long, "
+                + "\(Self.bytes(allocated)) allocated")
+        let started = Date()
+
+        // Undoes everything QEMU might have started, and removes the copy. Only for before the
+        // switch: afterwards the copy is the disk.
+        func abandon(_ reason: String) -> Compaction {
+            runMonitorCommand("block_job_cancel -f drive1", timeout: Self.monitorReplyDeadline)
+            waitForNoBlockJobs(within: Self.compactionSettleDeadline)
+            try? FileManager.default.removeItem(at: target)
+            Log.fs.warn("compact: abandoned: \(reason)")
+            return .notDone(reason)
+        }
+
+        let quotedTarget = Self.hmpQuoted(target.path)
+        guard
+            let reply = runMonitorCommand(
+                "drive_mirror -f drive1 \(quotedTarget) qcow2",
+                timeout: Self.monitorReplyDeadline)
+        else {
+            return abandon("the monitor didn't answer")
+        }
+        if let failure = Self.monitorError(in: reply) {
+            return abandon("QEMU wouldn't start the copy: \(failure)")
+        }
+
+        // Until it has caught up, then until QEMU agrees to switch. `block_job_complete` is refused
+        // until the job is ready: the counts keep moving for as long as the guest writes.
+        var caughtUp = false
+        var unanswered = 0
+        while true {
+            guard
+                let jobs = runMonitorCommand(
+                    "info block-jobs", timeout: Self.monitorReplyDeadline)
+            else {
+                unanswered += 1
+                if unanswered >= Self.compactionUnansweredLimit {
+                    return abandon("the monitor stopped answering")
+                }
+                continue
+            }
+            unanswered = 0
+
+            guard let (done, total) = Self.mirrorProgress(in: jobs) else {
+                return abandon("the copy stopped with an error")
+            }
+
+            if total > 0 {
+                progress(min(1, Double(done) / Double(total)))
+            }
+            caughtUp = caughtUp || (total > 0 && done == total)
+
+            if caughtUp,
+                let reply = runMonitorCommand(
+                    "block_job_complete drive1", timeout: Self.monitorReplyDeadline),
+                Self.monitorError(in: reply) == nil
+            {
+                break
+            }
+
+            Thread.sleep(forTimeInterval: Self.compactionPollInterval)
+        }
+
+        // Nothing may touch the copy while the job could still switch onto it: deleting it then
+        // would leave the drive writing into a file that is gone.
+        if !waitForNoBlockJobs(within: Self.compactionSettleDeadline) {
+            runMonitorCommand("block_job_cancel -f drive1", timeout: Self.monitorReplyDeadline)
+            guard waitForNoBlockJobs(within: Self.compactionSettleDeadline) else {
+                Log.fs.fail("compact: the job won't finish or cancel; leaving both files")
+                return .notDone("QEMU didn't finish switching to the copy")
+            }
+        }
+
+        // Checked rather than assumed. If the drive is still on the old file the switch failed, and
+        // the copy goes. If the answer can't be had at all, neither file can safely be touched:
+        // both are left, and the next launch, which runs from the old one, removes the copy.
+        guard let block = runMonitorCommand("info block drive1", timeout: Self.monitorReplyDeadline)
+        else {
+            Log.fs.fail("compact: couldn't ask QEMU which file the drive is on; leaving both")
+            return .notDone("QEMU didn't say whether it switched to the copy")
+        }
+        guard block.contains(target.lastPathComponent) else {
+            try? FileManager.default.removeItem(at: target)
+            Log.fs.warn("compact: QEMU didn't switch; monitor said: " + Self.forLogging(block))
+            return .notDone("QEMU didn't switch to the copy")
+        }
+
+        // The machine is on the copy now, under the copy's name. Moved over the old one at once,
+        // since the next launch opens the disk by its usual name. Until this lands, a crash leaves
+        // the old file and its saves, which resume consistently, as after any crash.
+        //
+        // rename() to perform it in one atomic step, and QEMU's open descriptor follows the file to
+        // its new name. The old file is unlinked here, and its space comes back once QEMU, which
+        // let go of it at the switch, has closed it.
+        guard rename(target.path, current.path) == 0 else {
+            let reason = String(cString: strerror(errno))
+            Log.fs.fail("compact: couldn't move the copy over the disk: \(reason)")
+            return .notDone(
+                "the copy couldn't replace the disk (\(reason)); changes from now on will be "
+                    + "lost when the app closes")
+        }
+
+        let after = Self.fileLength(current) ?? 0
+
+        // The saves went with the old file.
+        setResumeImage(tag: "")
+        let saved = saveSession(as: getNextInstantResumeTag())
+        let withSave = saved ? Self.fileLength(current) : nil
+
+        Log.fs.note(
+            String(
+                format: "compact: %@ now %@ long, was %@; took %.1fs; %@",
+                current.lastPathComponent, Self.bytes(after), Self.bytes(before),
+                -started.timeIntervalSinceNow,
+                withSave.map { "session saved, \(Self.bytes($0)) with it" }
+                    ?? "session not saved, so the next launch boots afresh"))
+
+        return .compacted(
+            before: before, beforeOnDisk: allocated, after: after, withSave: withSave)
+    }
+
+    /// The running disk image's length, which is what the Files app shows and
+    /// what compacting shortens, and the space it takes on disk, which is what
+    /// iOS counts against the app.
+    var diskSizes: (length: Int64, onDisk: Int64)? {
+        let url = getDatastoreURL(disk, fileExtension: "qcow", create: false)
+        guard let length = Self.fileLength(url) else { return nil }
+        return (length, Self.allocatedSize(url) ?? length)
+    }
+
+    /// Removes copies a compaction left behind when the app went before it
+    /// finished. Call before QEMU opens `disk`.
+    ///
+    /// Any such copy predates the switch: the switch is followed at once by the
+    /// move over the disk, which takes the copy's name away. So the disk is the
+    /// one with the data, and the copy is only space.
+    static func removeAbandonedCompactions(of disk: URL) {
+        let folder = disk.deletingLastPathComponent()
+        let prefix = disk.lastPathComponent + compactionSuffix
+
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        for name in names where name.hasPrefix(prefix) {
+            Log.fs.note("compact: removing \(name), left by a compaction that didn't finish")
+            try? FileManager.default.removeItem(at: folder.appendingPathComponent(name))
+        }
+    }
+
+    /// Waits for QEMU to have no block job running, for up to `deadline`.
+    /// Returns whether it got there.
+    @discardableResult
+    private func waitForNoBlockJobs(within deadline: TimeInterval) -> Bool {
+        let end = Date().addingTimeInterval(deadline)
+        while Date() < end {
+            if let jobs = runMonitorCommand("info block-jobs", timeout: Self.monitorReplyDeadline),
+                jobs.contains("No active jobs")
+            {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        Log.fs.warn("compact: a block job was still running after \(Int(deadline))s")
+        return false
+    }
+
+    /// The bytes done and to do of the drive's mirror, or nil if there's no
+    /// job. "Type mirror, device drive1: Completed 123 of 456 bytes, ...".
+    private static func mirrorProgress(in reply: String) -> (Int64, Int64)? {
+        for line in lines(of: reply) where line.contains("device drive1:") {
+            let words = line.split(separator: " ")
+            guard let at = words.firstIndex(of: "Completed"), words.count > at + 3,
+                let done = Int64(words[at + 1]), let total = Int64(words[at + 3])
+            else { continue }
+            return (done, total)
+        }
+        return nil
+    }
+
+    /// A unique name beside `disk` for the copy. Unique, because QEMU keeps the
+    /// name a file was opened with, so after one compaction the drive's own
+    /// name in QEMU is the copy's, and a second must not reuse it.
+    private static func compactionTarget(for disk: URL) -> URL {
+        let tag = UUID().uuidString.prefix(8).lowercased()
+        return disk.deletingLastPathComponent()
+            .appendingPathComponent(disk.lastPathComponent + compactionSuffix + tag)
+    }
+
+    /// Not ".qcow": the copy is not a disk of its own, and the Saved Sessions
+    /// list takes every ".qcow" for one.
+    private static let compactionSuffix = ".compacting-"
+
+    /// Free space kept in hand beyond the copy itself.
+    private static let compactionHeadroom: Int64 = 256 << 20
+
+    /// How often to look at the copy's progress.
+    private static let compactionPollInterval: TimeInterval = 0.25
+
+    /// How long the job may take to go away once completed or cancelled.
+    private static let compactionSettleDeadline: TimeInterval = 30
+
+    /// Unanswered progress checks in a row before giving up on the copy.
+    private static let compactionUnansweredLimit = 5
+
+    /// An HMP string argument: double-quoted, with the escapes its parser
+    /// understands, so a disk name with a space in it survives.
+    private static func hmpQuoted(_ text: String) -> String {
+        let escaped =
+            text
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
+
+    /// Read with stat() each time. A URL's resource values are cached on the
+    /// URL, and the disk's URL outlives the file it named: after the copy is
+    /// moved over it, they would still describe the old file.
+    private static func fileLength(_ url: URL) -> Int64? {
+        var info = stat()
+        guard stat(url.path, &info) == 0 else { return nil }
+        return Int64(info.st_size)
+    }
+
+    /// The space the file takes, holes excluded. st_blocks is in 512-byte units
+    /// whatever the file system's block size.
+    private static func allocatedSize(_ url: URL) -> Int64? {
+        var info = stat()
+        guard stat(url.path, &info) == 0 else { return nil }
+        return Int64(info.st_blocks) * 512
+    }
+
+    private static func availableSpace(near url: URL) -> Int64? {
+        let folder = url.deletingLastPathComponent()
+        return
+            (try? folder.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            .volumeAvailableCapacityForImportantUsage).flatMap { $0 }
+    }
+
+    static func bytes(_ count: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: count, countStyle: .file)
     }
 }

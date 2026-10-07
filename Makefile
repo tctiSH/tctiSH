@@ -253,7 +253,7 @@ define require_xcode_tool
 }
 endef
 
-# Not ours to reformat, and excluded everywhere. See tmp/plans/autoformatting.md.
+# Not ours to reformat, and excluded everywhere.
 #
 #   third-party             submodules and vendored sources, including QEMU
 #   Pods                    vendored by CocoaPods, rewritten by `pod install`

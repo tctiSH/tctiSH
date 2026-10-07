@@ -85,6 +85,16 @@
 			<key>UIApplicationShortcutItemType</key>
 			<string>io.ara.tctish.shortcut.recovery</string>
 		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>gearshape.fill</string>
+			<key>UIApplicationShortcutItemSubtitle</key>
+			<string>Boot waits for close</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Open Settings</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>io.ara.tctish.shortcut.settings-first</string>
+		</dict>
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>

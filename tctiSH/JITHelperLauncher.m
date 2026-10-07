@@ -8,6 +8,7 @@
 #import "JITHelperLauncher.h"
 
 #import <os/log.h>
+#import <time.h>
 
 /// Matches `Log.jit` on the Swift side, so one filter catches both.
 static os_log_t JITHelperLog(void) {
@@ -68,6 +69,10 @@ typedef NS_ENUM(NSInteger, JITHelperLauncherError) {
     // happens: the timeout sees to that even if nothing else does.
     __block id<JITNSExtensionInstance> liveExtension = nil;
 
+    // The timeout's timer, canceled by whichever way the request ends. Set before the request
+    // begins, so nothing that can finish it runs before it exists.
+    __block dispatch_source_t timeoutTimer = nil;
+
     void (^finish)(pid_t, NSArray *, NSError *) = ^(pid_t pid, NSArray *items, NSError *error) {
         [lock lock];
         BOOL alreadyFinished = finished;
@@ -76,6 +81,14 @@ typedef NS_ENUM(NSInteger, JITHelperLauncherError) {
 
         if (!alreadyFinished) {
             liveExtension = nil;
+
+            // Cancelled and let go of here, which also breaks the cycle between the timer and its
+            // handler, which refers to it.
+            if (timeoutTimer != nil) {
+                dispatch_source_cancel(timeoutTimer);
+                timeoutTimer = nil;
+            }
+
             completion(pid, items, error);
         }
     };
@@ -133,6 +146,43 @@ typedef NS_ENUM(NSInteger, JITHelperLauncherError) {
         inputItems = @[item];
     }
 
+    // The timeout counts only time this process was running. It bounds a request that cannot finish
+    // until QEMU, in this process, traps, so time spent suspended is time in which the helper could
+    // not have finished either.
+    dispatch_queue_t timeoutQueue = dispatch_get_global_queue(QOS_CLASS_UTILITY, 0);
+    timeoutTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, timeoutQueue);
+
+    const uint64_t tick = NSEC_PER_SEC;
+    __block uint64_t lastTick = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+    __block uint64_t running = 0;
+    const uint64_t limit = (uint64_t)(timeout * NSEC_PER_SEC);
+
+    dispatch_source_set_timer(timeoutTimer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)tick), tick,
+                              tick / 10);
+    dispatch_source_set_event_handler(timeoutTimer, ^{
+        uint64_t now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+        uint64_t step = now - lastTick;
+        lastTick = now;
+
+        if (step > 2 * tick) {
+            os_log(JITHelperLog(), "host: suspended for %.1fs; not counting it against the helper",
+                   (double)step / NSEC_PER_SEC);
+            return;
+        }
+
+        running += step;
+        if (running < limit) {
+            return;
+        }
+
+        finish(helperPid, nil,
+               [NSError
+                   errorWithDomain:JITHelperLauncherErrorDomain
+                              code:JITHelperLauncherErrorTimedOut
+                          userInfo:@{ NSLocalizedDescriptionKey: @"the helper did not respond" }]);
+    });
+    dispatch_resume(timeoutTimer);
+
     [extension
         beginExtensionRequestWithInputItems:inputItems
                                  completion:^(NSUUID *requestIdentifier) {
@@ -142,17 +192,6 @@ typedef NS_ENUM(NSInteger, JITHelperLauncherError) {
                                             "host: request %{public}@ running as pid %{public}d",
                                             requestIdentifier.UUIDString, helperPid);
                                  }];
-
-    dispatch_after(
-        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * NSEC_PER_SEC)),
-        dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-            finish(
-                helperPid, nil,
-                [NSError
-                    errorWithDomain:JITHelperLauncherErrorDomain
-                               code:JITHelperLauncherErrorTimedOut
-                           userInfo:@{ NSLocalizedDescriptionKey: @"the helper did not respond" }]);
-        });
 }
 
 @end

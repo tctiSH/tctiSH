@@ -27,10 +27,10 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     /// Where a quick action lands when it launched the app.
     ///
-    /// The boot waits on this callback rather than going at the end of
-    /// `didFinishLaunchingWithOptions`, because under the scene life cycle this
-    /// is the first place the shortcut item is reliably to be found. It has to
-    /// be in hand before QEMU allocates its code buffer.
+    /// Under the scene lifecycle this is the first place the shortcut item is
+    /// reliably found, and it has to be in hand before QEMU allocates its code
+    /// buffer. The boot follows when the scene comes to the foreground, which
+    /// on a launch the user asked for is straight after this.
     func scene(
         _ scene: UIScene,
         willConnectTo session: UISceneSession,
@@ -39,13 +39,15 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         appDelegate?.handleSceneWillConnect(shortcutItem: connectionOptions.shortcutItem)
     }
 
-    /// Where a quick action lands when the app was already running.
+    /// Where a quick action lands when the scene was already connected: usually
+    /// onto a running machine, but possibly onto one whose boot is still
+    /// waiting for the scene to come to the front.
     func windowScene(
         _ windowScene: UIWindowScene,
         performActionFor shortcutItem: UIApplicationShortcutItem,
         completionHandler: @escaping (Bool) -> Void
     ) {
-        QuickActions.performWhileRunning(shortcutItem)
+        appDelegate?.handleQuickAction(shortcutItem)
         completionHandler(true)
     }
 
@@ -58,6 +60,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     func sceneDidBecomeActive(_ scene: UIScene) {
+        appDelegate?.handleSceneInForeground()
         ScreenAwake.apply()
     }
 

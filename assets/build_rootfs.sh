@@ -10,7 +10,7 @@
 # Why a container: the build runs x86_64 Alpine tooling -- apk and the install
 # scripts it fires -- so it needs a Linux kernel with an x86_64 binfmt handler.
 # On macOS this script re-execs itself inside `container` with --rosetta, which
-# supplies both. On Linux it just runs. See tmp/plans/kernel-upgrade.md.
+# supplies both. On Linux it just runs.
 #
 # CAP_SYS_ADMIN is required, and only for one thing: apk chroots into the target
 # to run install scripts, and Rosetta needs /proc/self/exe to identify what it

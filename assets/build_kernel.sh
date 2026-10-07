@@ -32,8 +32,6 @@
 # 6.18: binutils 2.45 refuses the cross-section symbol arithmetic the kernel's
 # ALTERNATIVE macros generate, and arch/x86/entry/entry.S dies on it.)
 #
-# See tmp/plans/kernel-upgrade.md.
-#
 set -euo pipefail
 
 ASSETS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

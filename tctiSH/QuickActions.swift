@@ -15,6 +15,7 @@ enum QuickActions {
         case withJit = "with_jit"
         case withoutJit = "without_jit"
         case recovery = "recovery"
+        case settingsFirst = "settings_first"
 
         /// Maps the `UIApplicationShortcutItemType` values written in
         /// Info.plist.
@@ -23,6 +24,7 @@ enum QuickActions {
             case "io.ara.tctish.shortcut.with-jit": self = .withJit
             case "io.ara.tctish.shortcut.without-jit": self = .withoutJit
             case "io.ara.tctish.shortcut.recovery": self = .recovery
+            case "io.ara.tctish.shortcut.settings-first": self = .settingsFirst
             default:
                 Log.ui.warn("no such quick action as '\(shortcutType)'")
                 return nil
@@ -35,7 +37,7 @@ enum QuickActions {
             switch self {
             case .withJit: return true
             case .withoutJit: return false
-            case .recovery: return nil
+            case .recovery, .settingsFirst: return nil
             }
         }
 
@@ -45,6 +47,7 @@ enum QuickActions {
             case .withJit: return "with JIT"
             case .withoutJit: return "without JIT"
             case .recovery: return "into recovery"
+            case .settingsFirst: return "once settings are closed"
             }
         }
     }
@@ -76,6 +79,11 @@ enum QuickActions {
         if value == .recovery {
             AppDelegate.forceRecoveryBoot = true
         }
+
+        // Settings first holds the boot itself; see `AppDelegate.bootHeldForSettings`.
+        if value == .settingsFirst {
+            AppDelegate.bootHeldForSettings = true
+        }
     }
 
     // MARK: - Arriving after the boot
@@ -92,6 +100,9 @@ enum QuickActions {
 
         /// Recovery, which is the one thing that can be done where it stands.
         case recoverInPlace
+
+        /// Settings first, which with the VM already up is just settings.
+        case openSettings
     }
 
     /// Posted on the main queue when a warm action needs the UI's help.
@@ -123,6 +134,7 @@ enum QuickActions {
         let arrival: Arrival
         switch request {
         case .recovery: arrival = .recoverInPlace
+        case .settingsFirst: arrival = .openSettings
         case .withJit, .withoutJit: arrival = jitArrival(for: request)
         }
 

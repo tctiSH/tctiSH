@@ -363,13 +363,15 @@ enum JitEnablement {
     /// attach from earlier in this process's life as though it were this one.
     ///
     /// Giving up early matters more than it looks. The first launch on any
-    /// device has no developer disk image, so `enable` declines almost at once
-    /// -- and without this the launch would sit here for the whole deadline
-    /// waiting for an attach that is never coming.
+    /// device has no developer disk image, so `enable` declines almost at once.
+    /// Without this the launch would sit here for the whole deadline waiting
+    /// for an attach that is never coming.
     private static func waitForDebugger(unless declined: Latch) -> Bool {
-        let deadline = Date().addingTimeInterval(attachDeadline)
+        let clock = ProcessInfo.processInfo
+        var deadline = clock.systemUptime + attachDeadline
+        var last = clock.systemUptime
 
-        while Date() < deadline {
+        while clock.systemUptime < deadline {
             if jit_debugger_tracing() {
                 return true
             }
@@ -380,10 +382,25 @@ enum JitEnablement {
             }
 
             Thread.sleep(forTimeInterval: attachPollInterval)
+
+            let now = clock.systemUptime
+            let stalled = now - last - attachPollInterval
+            last = now
+
+            if stalled > suspensionThreshold {
+                deadline += stalled
+                Log.jit.note(
+                    String(
+                        format: "attach wait: suspended for %.1fs; not counting it", stalled))
+            }
         }
 
         return jit_debugger_tracing()
     }
+
+    /// How far past its poll interval a wait has to wake before it counts as
+    /// having been suspended. `JITHelperLauncher`'s timeout uses the same rule.
+    private static let suspensionThreshold: TimeInterval = 1
 
     /// Downloads and mounts the developer disk image.
     ///

@@ -41,8 +41,10 @@ class ConfigServer {
     let clientLockQueue = DispatchQueue(label: "io.ara.tctiSH.configserver")
 
     /// Our interface to our QEMU kernel. Should only be accessed from our
-    /// command loop.
-    private var qemu: QEMUInterface
+    /// command loop, with one exception: Settings First replaces it from the
+    /// main thread before the boot (`AppDelegate.releaseBootHeldForSettings`),
+    /// when there is no guest yet to send the loop something.
+    var qemu: QEMUInterface
 
     /// The thread that's running our command-loop.
     private var thread: Thread?
