@@ -1,9 +1,10 @@
 """LLDB support for tctiSH's iOS 26+ JIT breakpoint protocol.
 
-On iOS 26 and later, TXM prevents a process from making its own JIT mappings
-executable. QEMU therefore hands each executable region to whatever debugger is
-attached, using StikJIT's universal protocol: `brk #0xf00d` with the operation
-in x16, its arguments in x0 and x1, and its answer back in x0.
+On iOS 26 and later, a process cannot make its JIT mappings executable,
+with TXM or without it, debugger attached or not. QEMU therefore hands each
+executable region to whatever debugger is attached, using StikJIT's universal
+protocol: `brk #0xf00d` with the operation in x16, its arguments in x0 and x1,
+and its answer back in x0.
 
     JIT26PrepareRegion(addr, len)   x16 = 1  ->  x0 = prepared address
     JIT26Detach()                   x16 = 0
@@ -78,7 +79,7 @@ BRK_OPCODE = 0xD4200000
 #: was written against, and would be two thousand for an 8 GiB one.
 PROGRESS_UPDATES = 12
 
-#: Xcode renders its own stop UI and swallows stop-hook output, so everything is
+#: Xcode renders its stop UI and swallows stop-hook output, so everything is
 #: also written here. The script runs on the host, so this is just a local file.
 LOG_PATH = os.environ.get("JIT_BLESS_LOG", "/tmp/jit-bless.log")
 

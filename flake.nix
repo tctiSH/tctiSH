@@ -42,7 +42,7 @@
       # explicit, and so the stable rustfmt is absent -- see nightlyRustfmt
       # below, which would otherwise collide with it over bin/rustfmt.
       #
-      # `rustc` brings its own rust-lld along, which is what links the musl
+      # `rustc` brings rust-lld along, which is what links the musl
       # target; llvm-tools is here for the rest of the LLVM binutils.
       #
       # Two targets, for the two things besides tctictl itself that want Rust:
@@ -75,7 +75,7 @@
       # iOS target.
       #
       # Exposing just the binaries keeps `cc` coming from Xcode. Nothing here needs the propagated
-      # one: tctictl is built for musl and linked with rustc's own lld, set below.
+      # one: tctictl is built for musl and linked with rustc's lld, set below.
       rustBinaries = pkgs.runCommand "tctish-rust-binaries" { } ''
         mkdir -p $out/bin
         for tool in ${rustToolchain}/bin/*; do
@@ -91,10 +91,11 @@
       #
       # The glib code generators are here for a different reason -- none of them
       # is invoked by the current build, and glib 2.83 overrides find_program for
-      # its own mkenums anyway. They are here to *shadow* Homebrew's, which is a
+      # its mkenums anyway. They are here to *shadow* Homebrew's, which is a
       # complete glib toolset sitting on $PATH ahead of nothing in particular.
       # That has bitten this repo before: a Homebrew gdbus-codegen generated
-      # sources against its own glib and emitted a symbol our build did not have.
+      # sources against Homebrew's glib and emitted a symbol our build did not
+      # have.
       # `--disable-dbus-display` is the fix for that specific case; this is what
       # stops the next one being decided by `brew upgrade`.
       #
@@ -105,7 +106,7 @@
       #
       # Only binaries are exposed, and that is deliberate. Pulling glib and
       # gettext into the shell whole would put their headers and .pc files in
-      # front of a build whose entire job is to cross-compile its own copies, and
+      # front of a build whose entire job is to cross-compile them itself, and
       # the failure from getting that wrong would arrive deep into a dependency
       # build.
       hostBuildTools = pkgs.runCommand "tctish-host-build-tools" { } ''
@@ -122,7 +123,7 @@
         with pkgs;
         [
           # gettext's configure probes for bison; the others are meson's and
-          # QEMU's. QEMU builds its own meson into a pyvenv, from a wheel in its
+          # QEMU's. QEMU builds a meson into a pyvenv, from a wheel in its
           # checkout, so the one here is for the glib build -- and for fetching
           # QEMU's meson subprojects, which build_dependencies.sh does up front.
           bison
@@ -171,7 +172,7 @@
       # rustfmt.toml asks for brace_style, comment normalisation, macro body
       # formatting and friends, every one of which is nightly-gated. A stable
       # rustfmt does not error on them -- it warns and carries on formatting to
-      # its own defaults, so the config would look applied and not be.
+      # its defaults, so the config would look applied and not be.
       nightlyRustfmt = pkgs.rust-bin.nightly.latest.rustfmt;
 
       # Everything a shell resolves by bare name comes from this flake or from
@@ -222,7 +223,7 @@
           # does; it just isn't on $PATH. Pointing cargo straight at it is what
           # makes utils/tctictl/build_and_copy.sh work from a Mac at all.
           #
-          # The directory is rustc's own triple, `aarch64-apple-darwin`, which is
+          # The directory is rustc's triple, `aarch64-apple-darwin`, which is
           # spelled differently to nix's `aarch64-darwin`.
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER = "${rustToolchain}/lib/rustlib/aarch64-apple-darwin/bin/rust-lld";
 
@@ -235,9 +236,9 @@
         #
         # Separate from the default shell, and with a compiler, as a build *for*
         # the host needs host glib, pixman and slirp headers and .pc files, but
-        # we cannot let those leak to iOS builds. QEMU's own nixpkgs derivation
-        # already knows how to build QEMU on Darwin, we steal its inputs; the
-        # configure flags in build_host_qemu.sh pick what is used from them.
+        # we cannot let those leak to iOS builds. The nixpkgs derivation for
+        # QEMU already knows how to build QEMU on Darwin, we steal its inputs;
+        # the configure flags in build_host_qemu.sh pick what is used from them.
         host-qemu = pkgs.mkShell {
           inputsFrom = [ pkgs.qemu ];
           packages = [ pkgs.git ];

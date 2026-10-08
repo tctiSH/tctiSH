@@ -26,13 +26,13 @@ enum JitEnablement {
     /// How this launch ended up running.
     enum Outcome {
 
-        /// TXM device with a debugger attached: QEMU JITs, hands each code
-        /// region over to be blessed as it allocates it, and lets the debugger
-        /// go once the last one is ready.
+        /// A debugger attached: QEMU JITs, hands each code region over to be
+        /// blessed as it allocates it, and lets the debugger go once the last
+        /// one is ready.
         case blessed
 
-        /// Pre-TXM device: convincing the process it is debugged is enough.
-        case ptrace
+        /// Catalyst, which may JIT by entitlement.
+        case entitled
 
         /// No JIT this launch.
         case interpreted(Reason)
@@ -46,14 +46,13 @@ enum JitEnablement {
             /// A quick action asked for this one launch to run without it.
             case declinedForThisLaunch
 
-            /// The IORegistry wouldn't say whether TXM is present.
-            case txmUnknown
-
-            /// A pre-TXM device where the ptrace hack didn't take.
-            case ptraceRefused
-
             /// No loopback VPN tunnel, so no way to reach a debugger.
             case noTunnel
+
+            /// The loopback VPN is up, but the device's end of the tunnel
+            /// refused it or never answered. Unlike `noTunnel`, something set
+            /// up is not working, so it is said out loud in both modes.
+            case tunnelNotAnswering
 
             /// Nothing at `JitPairingFile.url`.
             case noPairingFile
@@ -61,17 +60,18 @@ enum JitEnablement {
             /// The helper never attached within `attachDeadline`.
             case attachTimedOut
 
-            /// A Dynamic mode, under TXM: the VM starts under TCTI at once, and
-            /// JIT is arranged once it is running; see `Backend`.
+            /// A Dynamic mode: the VM starts under TCTI at once, and JIT is
+            /// arranged once it is running; see `Backend`.
             case deferred
 
             var logDescription: String {
                 switch self {
                 case .disabledInSettings: return "JIT is turned off in settings"
                 case .declinedForThisLaunch: return "a quick action asked for a JITless launch"
-                case .txmUnknown: return "could not tell whether TXM is present"
-                case .ptraceRefused: return "the ptrace hack was refused"
                 case .noTunnel: return "no loopback VPN tunnel"
+                case .tunnelNotAnswering:
+                    return "the loopback VPN is up, but nothing answered at "
+                        + "\(TunnelProbe.defaultAddress):\(TunnelProbe.defaultPort)"
                 case .noPairingFile: return "no pairing file at \(JitPairingFile.url.path)"
                 case .attachTimedOut:
                     return String(format: "no debugger attached within %.0fs", attachDeadline)
@@ -86,9 +86,8 @@ enum JitEnablement {
                 switch self {
                 case .disabledInSettings: return "JIT off in settings"
                 case .declinedForThisLaunch: return "JIT off for this launch"
-                case .txmUnknown: return "JIT support unclear"
-                case .ptraceRefused: return "JIT refused"
                 case .noTunnel: return "No debug tunnel"
+                case .tunnelNotAnswering: return "Debug tunnel not answering"
                 case .noPairingFile: return "No pairing file"
                 case .attachTimedOut: return "Debugger didn't attach"
                 case .deferred: return "Starting with TCTI"
@@ -98,10 +97,9 @@ enum JitEnablement {
             /// The symbol shown beside it.
             var statusSymbol: String {
                 switch self {
-                case .txmUnknown:
+                case .tunnelNotAnswering:
                     // Distinct from the rest on purpose. The others mean JIT isn't set up, which is
-                    // ordinary; this one means the device wouldn't answer a question it should
-                    // have, which isn't.
+                    // ordinary; this one means it is set up and something in the way is broken.
                     return "exclamationmark.triangle.fill"
                 default:
                     return "tortoise.fill"
@@ -112,7 +110,7 @@ enum JitEnablement {
         /// How this outcome reads in the status pill.
         var status: (message: String, symbol: String) {
             switch self {
-            case .blessed, .ptrace: return ("JIT enabled", "hare.fill")
+            case .blessed, .entitled: return ("JIT enabled", "hare.fill")
             case .interpreted(let reason): return (reason.statusMessage, reason.statusSymbol)
             }
         }
@@ -130,7 +128,7 @@ enum JitEnablement {
     /// A flattening of `outcome` for callers that only want the one bit of it.
     static var isJitting: Bool? {
         switch outcome {
-        case .blessed, .ptrace: return true
+        case .blessed, .entitled: return true
         case .interpreted: return false
         case nil: return nil
         }
@@ -153,7 +151,7 @@ enum JitEnablement {
         switch outcome {
         case nil: return preparingMessage
         case .blessed: return isEnabling ? preparingMessage : nil
-        case .ptrace, .interpreted: return nil
+        case .entitled, .interpreted: return nil
         }
     }
 
@@ -166,20 +164,20 @@ enum JitEnablement {
     /// Settles how QEMU will run and sets the gates it reads on startup.
     ///
     /// Must be called before `startQemuThread()`, and never on the main thread:
-    /// on the TXM path it blocks for as long as it takes the debugger to
-    /// attach, up to `attachDeadline`.
+    /// on iOS it blocks for as long as it takes the debugger to attach, up to
+    /// `attachDeadline`.
     @discardableResult
     static func prepareForBoot() -> Outcome {
         let outcome = decide()
         publish(outcome)
 
-        // Native code's buffer is handed to a debugger wherever TXM is present, whichever backend
-        // the VM starts on. QEMU reads this when it maps that buffer, which for a VM started under
-        // TCTI is at the switch.
+        // Native code's buffer is handed to a debugger on every iOS device, whichever backend the
+        // VM starts on. QEMU reads this when it maps that buffer, which for a VM started under TCTI
+        // is at the switch.
         #if targetEnvironment(macCatalyst)
             AppDelegate.blessJitRegions = false
         #else
-            AppDelegate.blessJitRegions = TxmPresence.current == .present
+            AppDelegate.blessJitRegions = true
         #endif
 
         switch outcome {
@@ -187,9 +185,9 @@ enum JitEnablement {
             AppDelegate.startsNative = true
             Log.jit.note("JIT enabled; QEMU will hand its code buffer to the debugger")
 
-        case .ptrace:
+        case .entitled:
             AppDelegate.startsNative = true
-            Log.jit.note("JIT enabled via the ptrace hack")
+            Log.jit.note("JIT enabled by entitlement")
 
         case .interpreted(let reason):
             AppDelegate.startsNative = false
@@ -235,44 +233,32 @@ enum JitEnablement {
         }
 
         // Always JIT holds the boot for a helper whatever it finds. The Dynamic modes do only when
-        // a helper looks reachable -- see `enableUnderTxm` -- and otherwise start under TCTI and
-        // leave JIT to `Backend`.
+        // a helper looks reachable -- see `enableWithDebugger` -- and otherwise start under TCTI
+        // and leave JIT to `Backend`.
         let waitsForHelper = ExecutionMode.current == .always
 
         #if targetEnvironment(macCatalyst)
             // Catalyst gets JIT from its entitlements. Nothing to arrange, and nothing to bless.
-            return .ptrace
+            return .entitled
         #else
-            let txm = TxmPresence.current
-            Log.jit.note("TXM \(txm.description)")
-
-            switch txm {
-            case .absent:
-                // The pre-TXM world, unchanged: a process that believes it is being debugged may
-                // map its own pages executable, and no second process need be involved at all.
-                return set_up_jit()
-                    ? .ptrace
-                    : .interpreted(.ptraceRefused)
-
-            case .unknown:
-                // StikJIT refuses to guess here, and guessing wrong is expensive in both directions
-                // -- a trap nobody answers, or a debugger waiting on a trap that never comes.
-                // Decline in step with it.
-                return .interpreted(.txmUnknown)
-
-            case .present:
-                return enableUnderTxm(waitsForHelper: waitsForHelper)
-            }
+            // Informational only. With or without TXM, iOS 26 will not execute a page this process
+            // wrote unless a debugger blessed it, so every device takes the same path. Earlier
+            // systems without TXM never needed the blessing, but the attach it comes with is what
+            // they did need, and the blessing itself does them no harm.
+            Log.jit.note("TXM \(TxmPresence.current.description)")
+            return enableWithDebugger(waitsForHelper: waitsForHelper)
         #endif
     }
 
-    /// The TXM path: JIT is only possible with help from another process.
+    /// JIT is only possible with help from another process.
     ///
-    /// Note what is *not* here -- `set_up_jit()` is never called. Under TXM the
-    /// ptrace hack cannot grant JIT anyway, and it actively gets in the way: a
-    /// self-traced process cannot be attached to, so calling it would lock out
-    /// the very debugger we are trying to invite in.
-    private static func enableUnderTxm(waitsForHelper: Bool) -> Outcome {
+    /// A debugger having attached is not enough by itself. Without TXM it sets
+    /// `CS_DEBUGGED`, which once let the process execute what it wrote, but iOS
+    /// 26 refuses that too: a code buffer that no debugger blessed faults on
+    /// the first instruction fetched from it, Xcode attached or not. So a
+    /// device without TXM goes through the same blessing protocol as one with
+    /// it.
+    private static func enableWithDebugger(waitsForHelper: Bool) -> Outcome {
         // Already traced, so probably Xcode.
         if jit_debugger_tracing() {
             Log.jit.note("a debugger is already attached; leaving the region to it")
@@ -284,19 +270,32 @@ enum JitEnablement {
             // boot under TCTI is slow enough that the seconds the helper takes are paid back many
             // times over. The probe answers within half a second, and at once where there is no
             // tunnel at all.
-            let tunnel = TunnelProbe.probeAndReport().isAvailable
+            let tunnel = TunnelProbe.probeAndReport()
 
-            guard tunnel, let pairingData = JitPairingFile.read() else {
-                // Asked for as at launch, so that a JIT that wants only a pairing file can be
-                // offered the moment the window exists rather than at the first switch.
-                needsPairingFile = tunnel && !JitPairingFile.exists
+            // Asked for as at launch, so that a JIT that wants only a pairing file can be offered
+            // the moment the window exists rather than at the first switch.
+            needsPairingFile = wantsPairingFile(tunnel)
+
+            if case .notAnswering = tunnel {
+                return .interpreted(.tunnelNotAnswering)
+            }
+
+            guard tunnel.isAvailable, let pairingData = JitPairingFile.read() else {
                 return .interpreted(.deferred)
             }
 
             return attach(pairingData: pairingData)
         }
 
-        guard TunnelProbe.probeAndReport().isAvailable else {
+        let tunnel = TunnelProbe.probeAndReport()
+
+        switch tunnel {
+        case .available:
+            break
+        case .notAnswering:
+            needsPairingFile = wantsPairingFile(tunnel)
+            return .interpreted(.tunnelNotAnswering)
+        case .unavailable:
             return .interpreted(.noTunnel)
         }
 
@@ -308,6 +307,16 @@ enum JitEnablement {
         }
 
         return attach(pairingData: pairingData)
+    }
+
+    /// Whether to offer a pairing file this launch.
+    ///
+    /// Whenever a loopback VPN is set up, answering or not: someone who has
+    /// gone that far wants JIT, and will need the file once the tunnel works
+    /// whatever is wrong with it now. Without one there is nothing to suggest
+    /// they want JIT at all, and the offer would just be noise.
+    private static func wantsPairingFile(_ tunnel: TunnelProbeResult) -> Bool {
+        tunnel.interfaceIsUp && !JitPairingFile.exists
     }
 
     /// Asks the helper to attach, and waits for it to land.

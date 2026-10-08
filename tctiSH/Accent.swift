@@ -48,8 +48,8 @@ enum Accent {
     }
 
     /// What to draw on a fill of the accent, such as a lit modifier key: white,
-    /// as on the system's own blue, unless the accent is light enough that
-    /// black reads better.
+    /// as on the system's blue, unless the accent is light enough that black
+    /// reads better.
     static var foreground: UIColor {
         luminance(of: color) > darkTextAbove ? .black : .white
     }

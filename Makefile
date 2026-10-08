@@ -78,7 +78,7 @@ endif
 # tracks nothing -- after bumping it, force the rebuild with `make clean-stikjit stikjit`.
 #
 # The submodule is checked out here, not left to build_dependencies.sh: in an empty directory,
-# `git -C` finds tctiSH's own repository instead, and a stamp of that would change as soon as the
+# `git -C` finds tctiSH's repository instead, and a stamp of that would change as soon as the
 # build checked QEMU out, costing a second full build.
 QEMU_STAMP := build-iOS-arm64/qemu-source.stamp
 
@@ -261,7 +261,7 @@ endef
 #
 #   third-party             submodules and vendored sources, including QEMU
 #   Pods                    vendored by CocoaPods, rewritten by `pod install`
-#   assets                  guest-side build scripts, their own world
+#   assets                  guest-side build scripts, a world apart
 #   patches                 context lines are literal, so reformatting silently breaks them
 #
 # Everything is found through `git ls-files`, which also keeps build output out by construction.
@@ -272,7 +272,7 @@ C_SOURCES      := $(shell git ls-files '*.c' '*.h' '*.m' '*.mm' | grep -Ev '$(NO
 SHELL_SOURCES  := $(shell git ls-files '*.sh' | grep -Ev '$(NOT_OURS)')
 PYTHON_SOURCES := $(shell git ls-files '*.py' | grep -Ev '$(NOT_OURS)')
 # Nix gets a narrower exclusion than the rest. The `assets/` entry in NOT_OURS is about guest-side
-# shell scripts having their own conventions; a Nix flake is ours wherever it happens to sit, and
+# shell scripts having separate conventions; a Nix flake is ours wherever it happens to sit, and
 # assets/kernel/flake.nix pins the kernel toolchain. The wildcard is there as well as `git ls-files`
 # so that a flake is formatted before its first commit rather than after it -- $(sort) dedupes the
 # two sources once it is tracked.
@@ -284,7 +284,7 @@ RUST_SOURCES   := $(shell git ls-files '*.rs' | grep -Ev '$(NOT_OURS)')
 
 # tctictl only ever runs inside the guest, so it is linted for the guest's target. Without this,
 # cargo builds it for the macOS host, where the Linux-only sys-mount crate does not compile at all
-# -- twenty errors in a dependency, before any of our own code is looked at. The devshell provides
+# -- twenty errors in a dependency, before any of our code is looked at. The devshell provides
 # the target; see utils/tctictl/build_and_copy.sh, which builds with the same one.
 CARGO_TARGET := x86_64-unknown-linux-musl
 
@@ -297,7 +297,7 @@ SHFMT_FLAGS := --indent 4 --case-indent
 # the limit nor joins short ones back up, so a paragraph wrapped at 60 columns and one wrapped at 99
 # both pass, for ever. SwiftFormat's `wrap` rule does the first but not the second, and cannot be
 # scoped to comments without also taking authority over code layout -- measured at 43 code lines
-# changed against 2 comment lines on this tree. Hence our own pass, which is the exact complement of
+# changed against 2 comment lines on this tree. Hence reflow_comments.py, the exact complement of
 # swift-format: it rewrites comments and never code, and runs first so neither can undo the other.
 # Doc comments get a narrower measure than the code they sit above: they are read as prose, in a
 # popover or on a docs page, and 100 columns of it is a wall.
@@ -451,7 +451,7 @@ clean-host-qemu: ## Remove the Mac builds of QEMU and their GC root (~5 minutes 
 
 # Keeps the builds and lets the libraries go: the next garbage collection takes them, and the next
 # `make boot-guest` or `make host-qemu` fetches them again and puts the root back, without
-# recompiling. The -N-link entries are the profile's generations, each a root of its own.
+# recompiling. The -N-link entries are the profile's generations, and each is a root.
 .PHONY: unroot-host-qemu
 unroot-host-qemu: ## Let nix garbage-collect the Mac QEMU builds' libraries (the next boot restores them)
 	rm -f $(HOST_QEMU_ROOT) $(HOST_QEMU_ROOT)-*-link

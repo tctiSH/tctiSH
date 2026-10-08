@@ -2,8 +2,8 @@
 #
 # Builds idevice's FFI library for iOS, from source.
 #
-# StikJIT vendors a prebuilt `libidevice_ffi.a` in its submodule. We build our
-# own and stage it over that copy as it is the last binary artifact in the
+# StikJIT vendors a prebuilt `libidevice_ffi.a` in its submodule. We build
+# one and stage it over that copy as it is the last binary artifact in the
 # build, and StikJIT's is old enough to be missing the pairing API the on-device
 # pairing flow needs (`pairable_host_*`, added upstream in v0.1.64 and given an
 # FFI wrapper in v0.1.68).
@@ -42,7 +42,7 @@ FEATURES="${IDEVICE_FEATURES:-full,rustcrypto,obfuscate}"
 
 # idevice's release profile sets `lto = true`, which makes rustc put LLVM
 # bitcode in the archive instead of native objects. Xcode's linker then has to
-# read bitcode its own LLVM does not understand.
+# read bitcode its LLVM does not understand.
 export CARGO_PROFILE_RELEASE_LTO="${CARGO_PROFILE_RELEASE_LTO:-false}"
 
 RED='\033[0;31m'
@@ -100,7 +100,7 @@ echo -e "${GREEN}Building idevice $IDEVICE_VERSION for $TARGET...${NC}"
 fetch_source
 echo "  $(git -C "$SOURCE_DIR" log -1 --format='%h %s')"
 
-# Built from ffi/, because build.rs writes idevice.h relative to its own
+# Built from ffi/, because build.rs writes idevice.h relative to its
 # manifest directory and appends ffi/plist.h to it.
 echo -e "${GREEN}Compiling (this takes a few minutes the first time)...${NC}"
 (
@@ -126,7 +126,7 @@ done
 # source, so a feature that compiled nothing still produces a full
 # header.
 #
-# Xcode's nm rather than the toolchain's own, deliberately: its linker is what
+# Xcode's nm rather than the toolchain's, deliberately: its linker is what
 # has to consume this, so its opinion is the one that matters.
 #
 # Two `set -o pipefail` traps here, both of which turned a successful search into

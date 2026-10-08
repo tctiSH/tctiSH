@@ -12,7 +12,7 @@
 # The app does not send it. A session there ends with iOS killing the process,
 # and what survives is the saved snapshot, not a shutdown; the app's only reset
 # is `system_reset`, for a recovery boot. This matters for the host-side loop
-# today, and for the app only if it ever grows a "shut down" of its own.
+# today, and for the app only if it ever grows a "shut down".
 #
 # Not acpid, though busybox has one. acpid's default event source is
 # /proc/acpi/event, an interface the kernel removed years ago, and its config

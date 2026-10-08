@@ -50,7 +50,7 @@ KERNEL_MIRROR="https://cdn.kernel.org/pub/linux/kernel/v6.x"
 # resolved to when this kernel was first built.
 #
 # Pinned for a reason that has nothing to do with the kernel's bytes, which the
-# flake decides: the image's own `sh` lives in /nix/store, and the toolchain
+# flake decides: the image's `sh` lives in /nix/store, and the toolchain
 # volume is mounted over /nix. A volume seeded from one image lacks the store
 # paths another image's `sh` points into, and the container then cannot start
 # at all ("failed to find target executable sh"). The digest is part of the
@@ -96,7 +96,7 @@ PREVIOUS="$BUILD/config-previous"
 # perl package ships `pod` and `Pod` in one directory, as does ncurses' terminfo
 # tree. Copying a store onto an APFS bind mount fails partway through with a
 # scatter of "File exists", leaving a store that is silently incomplete. A
-# managed volume lives inside the runtime's own case-sensitive storage.
+# managed volume lives inside the runtime's case-sensitive storage.
 #
 # It is persistent state, unlike everything else here, so it gets a name and
 # `--clean-all` removes it. It is a cache, in the same sense the object tree is;
@@ -179,7 +179,7 @@ do_clean() {
             "$CONTAINER" volume delete "$NIX_VOLUME" >/dev/null 2>&1 || true
         fi
     else
-        # The toolchain volume carries its own seed stamp, so the whole build
+        # The toolchain volume carries a separate seed stamp, so the whole build
         # tree can go without the next build re-seeding 3.6 GB.
         note "removing the build tree (keeping the toolchain volume)"
         rm -rf "$BUILD"
@@ -195,7 +195,7 @@ NIX_FLAGS="experimental-features = nix-command flakes"
 # every build.
 #
 # It has to be *seeded* rather than simply mounted, and the reason is worth
-# writing down because the failure is baffling otherwise: the image's own
+# writing down because the failure is baffling otherwise: the image's
 # userland lives in /nix/store, `sh` included. Mounting an empty volume over
 # /nix leaves a container with no executables at all, and the runtime reports
 # only "failed to find target executable sh".
@@ -221,7 +221,7 @@ seed_nix_store() {
     } | sha256_stdin)"
 
     # Mounted beside /nix rather than over it, so that an empty or half-seeded
-    # volume cannot take the image's own `cat` away. Only stdout is kept; the
+    # volume cannot take the image's `cat` away. Only stdout is kept; the
     # runtime reports progress on stderr.
     have="$("$CONTAINER" run --rm -v "$NIX_VOLUME:/seed" "$BUILDER_IMAGE" \
         cat "/seed/$NIX_STAMP_NAME" 2>/dev/null || true)"
@@ -408,7 +408,7 @@ configure() {
     note "configuring from $(basename "$CONFIG")"
 
     # defconfig semantics: symbols named here are set, everything else takes the
-    # kernel's own default. That is what makes a 270-line file sufficient.
+    # kernel's default. That is what makes a 270-line file sufficient.
     cp "$CONFIG" "$SRC/arch/x86/configs/tctish_defconfig"
     kmake tctish_defconfig >/dev/null
 

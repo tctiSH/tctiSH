@@ -35,7 +35,7 @@ enum Mebibytes {
 
     /// Parses a QEMU size argument back to MiB, or nil if it isn't one.
     ///
-    /// Only the two suffixes this app has ever written are accepted. QEMU's own
+    /// Only the two suffixes this app has ever written are accepted. QEMU's
     /// parser is far more generous, but anything else in our setting came from
     /// somewhere unexpected and is better rejected.
     static func parse(qemuArgument: String) -> Int? {
@@ -118,7 +118,7 @@ enum VmMemory {
     ///   was sold with rather than of what it reports as the reported figure is always a
     ///   little short.
     /// * **Remaining After System and Code Cache.** The code cache is the term
-    ///   that makes this worth computing rather than hard-coding: under TXM
+    ///   that makes this worth computing rather than hard-coding: on iOS
     ///   every page of it is written during blessing, so it is fully resident
     ///   from the moment the VM starts. Choosing a 2 GiB cache really does take
     ///   2 GiB away from what the guest can safely be given, and the point of
@@ -234,9 +234,8 @@ enum VmMemory {
 /// blessing applies, every page is written before the guest starts
 /// (`utils/jit-bless/jit_bless.py:160`), which is both a launch latency and a
 /// block of memory resident for the whole session. Where it does not (TCTI, or
-/// the pre-TXM ptrace path, neither of which reaches
-/// `alloc_code_gen_buffer_splitwx`) the mapping is ordinary lazy anonymous
-/// memory and costs only what the guest actually fills.
+/// Catalyst's entitled JIT) the mapping is ordinary lazy anonymous memory and
+/// costs only what the guest actually fills.
 enum CodeCache {
 
     /// When the cache is paid for.
@@ -284,7 +283,7 @@ enum CodeCache {
 
     // MARK: Auto
 
-    /// What QEMU's own heuristic comes to on this device.
+    /// What QEMU's heuristic comes to on this device.
     ///
     /// `size_code_gen_buffer()` with `tb_size == 0`
     /// (`accel/tcg/translate-all.c:964`): an eighth of host RAM, capped at 1
@@ -296,7 +295,7 @@ enum CodeCache {
     static var autoSize: Int {
         let physical = Mebibytes.hostPhysicalMemory / (1024 * 1024)
 
-        // DEFAULT_CODE_GEN_BUFFER_SIZE, after its own MIN against the aarch64 maximum.
+        // DEFAULT_CODE_GEN_BUFFER_SIZE, after its MIN against the aarch64 maximum.
         let uncapped = 1024
 
         let chosen = physical > 0 ? min(uncapped, physical / 8) : uncapped
@@ -307,10 +306,18 @@ enum CodeCache {
 
     // MARK: The setting
 
+    static var defaultMode: Mode {
+        #if targetEnvironment(macCatalyst)
+            return .fixed
+        #else
+            return .dynamic
+        #endif
+    }
+
     static var mode: Mode {
         get {
             let stored = UserDefaults.standard.string(forKey: "code_cache_mode") ?? ""
-            return Mode(rawValue: stored) ?? .fixed
+            return Mode(rawValue: stored) ?? defaultMode
         }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: "code_cache_mode")
@@ -337,7 +344,7 @@ enum CodeCache {
         chosenCeiling ?? autoSize
     }
 
-    /// Whether the ceiling is being left to QEMU's own heuristic.
+    /// Whether the ceiling is being left to QEMU's heuristic.
     static var ceilingIsAutomatic: Bool {
         chosenCeiling == nil
     }
@@ -362,12 +369,12 @@ enum CodeCache {
             return false
         }
 
-        return txmPresent
+        #if targetEnvironment(macCatalyst)
+            return false
+        #else
+            return true
+        #endif
     }
-
-    /// Cached, because the IORegistry's answer cannot change while the app is
-    /// running and this is read every time a settings list is rebuilt.
-    private static let txmPresent = TxmPresence.current.isPresent ?? true
 
     /// How much memory the cache costs up front, blessed or not.
     ///
@@ -471,7 +478,7 @@ enum VmSnapshots {
 
     /// The first eight bytes of a SHA-256, as hex.
     ///
-    /// Truncated as this is not a security boundary: the input is our own build
+    /// Truncated as this is not a security boundary: the input is our build
     /// rather than anything an attacker supplies, and 64 bits is far past where
     /// an accidental collision between two machine definitions is worth
     /// worrying about.
@@ -491,7 +498,7 @@ enum VmSnapshots {
     /// the app version and the two file sizes. A normal launch reads the cached
     /// value and touches neither file.
     ///
-    /// The path is what makes that true. iOS gives every install its own
+    /// The path is what makes that true. iOS gives every install a separate
     /// container, so a new build always misses the cache and is digested once.
     /// Version and sizes alone would not do it during development, where the
     /// version stays put between builds and a rebuilt image can compress to

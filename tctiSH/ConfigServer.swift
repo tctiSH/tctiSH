@@ -235,7 +235,7 @@ class ConfigServer {
                 command: "import_pairing_file", key: "path",
                 value: JitPairingFile.url.path, to: client)
 
-            // As for one imported through the app's own prompt: the device is got ready, and JIT is
+            // As for one imported through the app's prompt: the device is got ready, and JIT is
             // offered or switched to once it is.
             DispatchQueue.main.async { JitEnablement.pairingFileArrived() }
 
@@ -245,8 +245,8 @@ class ConfigServer {
                 value: "cancelled", to: client)
 
         case .failed(let reason):
-            // Previously reported as "cancelled", which told the user their own tap had failed
-            // rather than that the file couldn't be read.
+            // Previously reported as "cancelled", which told the user their tap had failed rather
+            // than that the file couldn't be read.
             sendErrorResponse("could not import pairing file: \(reason)", to: client)
         }
     }

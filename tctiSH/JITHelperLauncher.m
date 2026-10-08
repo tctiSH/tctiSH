@@ -20,7 +20,7 @@ static os_log_t JITHelperLog(void) {
     return log;
 }
 
-/// Error domain for launch failures that aren't NSExtension's own.
+/// Error domain for launch failures that aren't NSExtension's.
 static NSString *const JITHelperLauncherErrorDomain = @"io.ara.tctiSH.JITHelperLauncher";
 
 typedef NS_ENUM(NSInteger, JITHelperLauncherError) {

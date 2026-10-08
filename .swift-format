@@ -1,7 +1,7 @@
 {
   "version": 1,
 
-  // Xcode's own editor indents Swift with four spaces, and the existing code
+  // Xcode's editor indents Swift with four spaces, and the existing code
   // follows it. swift-format defaults to two, which would reindent every file
   // for no reason other than disagreeing with the IDE.
   "indentation": { "spaces": 4 },

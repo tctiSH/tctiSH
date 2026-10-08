@@ -77,7 +77,7 @@ enum BarKey: String, CaseIterable {
             }
         }
 
-        /// Whether More gives the group a submenu of its own.
+        /// Whether More gives the group a separate submenu.
         ///
         /// All but Esc and Tab, which are reached for often enough to be worth
         /// having to hand. Menu isn't a modifier, but is filed with them, as
@@ -358,10 +358,10 @@ extension BarKey {
     /// Meta goes into the modifier parameter there, as xterm's Meta bit, but a
     /// character has no legacy form for it and loses it. With the Kitty
     /// protocol, the cursor and function keys are always CSI, as SwiftTerm
-    /// sends them from a keyboard, and the keys it gives codes of their own
-    /// (Esc, Menu, F13 up, the keypad, and anything modified with no legacy
-    /// form) are sent as `CSI code;modifiers u`; when the guest asks for every
-    /// key to be reported, so are a plain Tab and the characters.
+    /// sends them from a keyboard, and the keys it gives dedicated codes (Esc,
+    /// Menu, F13 up, the keypad, and anything modified with no legacy form) are
+    /// sent as `CSI code;modifiers u`; when the guest asks for every key to be
+    /// reported, so are a plain Tab and the characters.
     ///
     /// Empty for the modifier keys and the arrow pad, which send nothing
     /// themselves.
@@ -434,9 +434,9 @@ extension BarKey {
     /// asked for it, unless Ctrl, Alt or Meta means it types none. That is how
     /// SwiftTerm encodes keys from the keyboard. Otherwise as `typed`.
     ///
-    /// `key`, where it's known, is the key's own character before Shift, for
-    /// the Kitty code; `character` is then what the key types, Shift and all,
-    /// as a hardware keyboard's layout makes it.
+    /// `key`, where it's known, is the key's character before Shift, for the
+    /// Kitty code; `character` is then what the key types, Shift and all, as a
+    /// hardware keyboard's layout makes it.
     ///
     /// Return and Tab are keys rather than characters, and are sent as those
     /// keys are: Return as a carriage return, never the newline the keyboard
@@ -499,9 +499,9 @@ extension BarKey {
 
     /// The control code Ctrl makes of a typed byte, or nil if it makes none.
     ///
-    /// SwiftTerm's own mapping, as its Kitty encoder has it for the legacy
-    /// form: the letters, the punctuation around them, and the digits 2 to 8 as
-    /// xterm sends them.
+    /// SwiftTerm's mapping, as its Kitty encoder has it for the legacy form:
+    /// the letters, the punctuation around them, and the digits 2 to 8 as xterm
+    /// sends them.
     static func controlCode(for byte: UInt8) -> UInt8? {
         switch byte {
         case UInt8(ascii: "A")...UInt8(ascii: "Z"): byte - 0x40

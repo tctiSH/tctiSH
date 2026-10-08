@@ -12,14 +12,14 @@ import Network
 ///
 /// This publishes and browses for a service type that means nothing to anybody,
 /// purely to ensure that the prompt appears and to find out what the user said.
-/// Seeing our own advertisement come back is the only positive signal
-/// available: there is no "authorized" state to read.
+/// Seeing our advertisement come back is the only positive signal available:
+/// there is no "authorized" state to read.
 enum LocalNetworkPermission {
 
     /// A type nothing else browses for.
     static let probeType = "_tctishprobe._tcp"
 
-    /// How long to wait for our own advertisement to come back.
+    /// How long to wait for our advertisement to come back.
     ///
     /// Long, because the clock includes the user reading a dialog and deciding.
     static let timeout: TimeInterval = 30
@@ -72,8 +72,8 @@ enum LocalNetworkPermission {
             }
         }
         discovery.browseResultsChangedHandler = { results, _ in
-            // Our own service coming back is the signal. Nothing else publishes this type, so
-            // anything at all here means multicast is working for us.
+            // Our service coming back is the signal. Nothing else publishes this type, so anything
+            // at all here means multicast is working for us.
             if !results.isEmpty { finish(true) }
         }
 

@@ -33,7 +33,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     ///
     /// The first few failures are ordinary as the guest isn't listening yet, so
     /// they're noted quietly. After that something is actually wrong, and
-    /// libssh2's own tracing gets turned on rather than waiting for someone to
+    /// libssh2's tracing gets turned on rather than waiting for someone to
     /// think of rebuilding with it enabled.
     private var failedAttempts: Int = 0
 
@@ -159,10 +159,10 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
             return barKey.sequence(with: modifiers, mode: keyEncodingMode)
         }
 
-        // What the key types, by the keyboard's own layout, Shift and caps lock included, where
-        // nothing else held changes it: Shift and 1 is "!". With Ctrl, Option or Command held, the
-        // key as it is, as those turn it into something else. The key itself either way, for the
-        // Kitty protocol's code.
+        // What the key types, by the keyboard's layout, Shift and caps lock included, where nothing
+        // else held changes it: Shift and 1 is "!". With Ctrl, Option or Command held, the key as
+        // it is, as those turn it into something else. The key itself either way, for the Kitty
+        // protocol's code.
         let base = key.charactersIgnoringModifiers
         let shiftOnly = key.modifierFlags.subtracting([.shift, .alphaShift, .numericPad]).isEmpty
         let characters = shiftOnly ? key.characters : base
@@ -376,11 +376,11 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     }
 
     /// Copy while there's a selection, Paste, and Select All, as the pointer's
-    /// own context menu rather than the bar of buttons a long press gives.
+    /// context menu rather than the bar of buttons a long press gives.
     ///
     /// Through `UIEditMenuInteraction`, which shows itself as a context menu
-    /// when a secondary click brings it up. SwiftTerm's own menu is still the
-    /// older `UIMenuController`, which only ever draws the touch bar.
+    /// when a secondary click brings it up. SwiftTerm's menu is still the older
+    /// `UIMenuController`, which only ever draws the touch bar.
     @objc private func secondaryClicked(_ click: UITapGestureRecognizer) {
         _ = becomeFirstResponder()
         editMenu?.presentEditMenu(
@@ -476,7 +476,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         // selection is next to invisible.
         self.selectedTextForegroundColor = makeUIColor(theme.selectedText)
 
-        // SwiftTerm's selection handles are its own blue, rather than the tint, so they're told.
+        // SwiftTerm's selection handles are a fixed blue, rather than the tint, so they're told.
         self.selectionHandleColor = Accent.color
         self.caretColor = makeUIColor(theme.cursor)
     }
@@ -677,9 +677,9 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
 ///
 /// A pointer drag is left to the program in the terminal when it has asked for
 /// the mouse, as htop and vim with `mouse=a` do, unless Shift is held: the
-/// usual way past a program's mouse handling, and SwiftTerm's own. Not even
-/// then, if the program has asked for Shift as well (XTSHIFTESCAPE), as
-/// SwiftTerm also honors.
+/// usual way past a program's mouse handling, and SwiftTerm's. Not even then,
+/// if the program has asked for Shift as well (XTSHIFTESCAPE), as SwiftTerm
+/// also honors.
 private final class PointerSupport: NSObject, UIGestureRecognizerDelegate,
     UIEditMenuInteractionDelegate
 {

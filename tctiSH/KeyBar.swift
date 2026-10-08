@@ -144,7 +144,7 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
 
     // MARK: Setup
 
-    /// Puts a bar on `terminal`, in place of SwiftTerm's own.
+    /// Puts a bar on `terminal`, in place of SwiftTerm's.
     ///
     /// Held by whoever calls this: while a hardware keyboard has it hidden, the
     /// terminal lets go of it.
@@ -391,8 +391,8 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
 
         if key.modifier != nil {
             // Lit while on, as the hardware modifier keys of the iPad's keyboards are: as tinted
-            // glass from iOS 26, as the system's own selected buttons are, and as a tinted fill
-            // before. Inset as the pointer's highlight is, so the two agree.
+            // glass from iOS 26, as the system's selected buttons are, and as a tinted fill before.
+            // Inset as the pointer's highlight is, so the two agree.
             let symbol = key.symbol.flatMap { UIImage(systemName: $0) }
             button.configurationUpdateHandler = { button in
                 var configuration: UIButton.Configuration
@@ -417,7 +417,7 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
             modifierButtons[key] = button
         }
 
-        // Modifiers on touching down, as the keyboard's own Shift does; keys that send something on
+        // Modifiers on touching down, as the keyboard's Shift does; keys that send something on
         // lifting, so a finger can slide off one to think better of it.
         button.addAction(
             UIAction { [weak self] _ in self?.press(key) },
@@ -505,9 +505,9 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
     /// first, sits beside the finger or pointer that opened it. Where all
     /// twelve won't fit in the room above the bar, as on a phone, the list
     /// would scroll, and start at its top, the far end. So there, only the
-    /// first eight are listed, and the rest of the twelve go into a submenu of
-    /// their own, between F8 and F13–F22: F9–F12. Should even that not fit, F1
-    /// to F4, with F5–F8 and F9–F12 as submenus.
+    /// first eight are listed, and the rest of the twelve go into a separate
+    /// submenu, between F8 and F13–F22: F9–F12. Should even that not fit, F1 to
+    /// F4, with F5–F8 and F9–F12 as submenus.
     private func functionKeyItems(_ keys: [BarKey]) -> [UIMenuElement] {
         let common = keys.filter { ($0.functionNumber ?? 0) <= 12 }
         let extended = keys.filter { ($0.functionNumber ?? 0) > 12 }
@@ -588,8 +588,8 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
         UIDevice.current.playInputClick()
 
         // The clipboard as the edit menu has it, through SwiftTerm, leaving any modifiers for the
-        // next key. Paste is SwiftTerm's own, bracketed when the guest has asked for that; it reads
-        // the pasteboard itself, so iOS asks first when what's there came from another app.
+        // next key. Paste is SwiftTerm's, bracketed when the guest has asked for that; it reads the
+        // pasteboard itself, so iOS asks first when what's there came from another app.
         if key.group == .clipboard {
             switch key {
             case .copy: terminal?.copy(nil)
@@ -778,9 +778,9 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
 
     /// Watches a hardware keyboard's modifiers, from GameController, as they
     /// happen rather than when the bar next happens to look: to light the bar's
-    /// own while they're held, and so that tapping one turns off the same
-    /// modifier where the bar has it armed. A modifier held while another key
-    /// is pressed is being used with it, not tapped, and leaves the bar alone.
+    /// while they're held, and so that tapping one turns off the same modifier
+    /// where the bar has it armed. A modifier held while another key is pressed
+    /// is being used with it, not tapped, and leaves the bar alone.
     private func watchHardwareModifiers() {
         GCKeyboard.coalesced?.keyboardInput?.keyChangedHandler = {
             [weak self] _, _, code, pressed in
@@ -1000,7 +1000,7 @@ private final class ArrowPad: UIButton {
         highlight()
 
         // Highlighted under a pointer, as the bar's buttons are. A button rather than a plain
-        // control for this alone: an interaction of its own on a control never showed one.
+        // control for this alone: an interaction added to a control never showed one.
         KeyBar.hover(self)
 
         isAccessibilityElement = true

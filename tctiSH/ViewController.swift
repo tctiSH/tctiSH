@@ -93,7 +93,7 @@ class ViewController: UIViewController {
         setupKeyboardMonitor()
 
         // Before `becomeFirstResponder`, because the accessory view is read as the terminal takes
-        // the keyboard. Installing it afterwards would briefly show SwiftTerm's own bar first.
+        // the keyboard. Installing it afterwards would briefly show SwiftTerm's bar first.
         keyBar = KeyBar.install(on: currentTerminal) { [weak self] in
             self?.openSettings(nil)
         }
@@ -329,11 +329,33 @@ class ViewController: UIViewController {
                 state: .indeterminate,
                 duration: nil))
 
+        bootStallCounted = 0
+        bootStallLastTick = ProcessInfo.processInfo.systemUptime
+        scheduleBootStallTick()
+    }
+
+    private func scheduleBootStallTick() {
         bootStallWatch?.cancel()
 
-        let watch = DispatchWorkItem { [weak self] in self?.bootLooksStalled() }
+        let watch = DispatchWorkItem { [weak self] in self?.bootStallTicked() }
         bootStallWatch = watch
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.bootStallDeadline, execute: watch)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.bootStallTick, execute: watch)
+    }
+
+    /// Counts the time since the last tick toward the deadline, all but any of
+    /// it spent frozen; see `bootStallDeadline`.
+    private func bootStallTicked() {
+        let now = ProcessInfo.processInfo.systemUptime
+        bootStallCounted += min(now - bootStallLastTick, Self.bootStallTick * 2)
+        bootStallLastTick = now
+
+        guard bootStallCounted >= Self.bootStallDeadline else {
+            scheduleBootStallTick()
+            return
+        }
+
+        bootStallWatch = nil
+        bootLooksStalled()
     }
 
     /// Turns the boot pill into something you can act on.
@@ -471,7 +493,7 @@ class ViewController: UIViewController {
 
             self?.stopWatchingForMissingSnapshot()
 
-            // Disowned as well as reported. The pointer is this app's own bookkeeping and it is now
+            // Disowned as well as reported. The pointer is this app's bookkeeping and it is now
             // known to be wrong, so leaving it in place would mean saying this again on every
             // launch until a save happens to succeed.
             (UIApplication.shared.delegate as? AppDelegate)?.qemu?.forgetMissingResumeImage()
@@ -535,15 +557,20 @@ class ViewController: UIViewController {
     ///
     /// A cold boot is advertised to the user as taking about twenty seconds, so
     /// this has to sit clear of that.
-    ///
-    /// Deliberately flat, blessing or not (Ara, 2026-09-14). Blessing finishes
-    /// before the guest starts, so once it has returned the boot has had its
-    /// thirty seconds like any other -- and stretching the deadline to cover
-    /// work that has already finished just delays the offer of a way out.
     private static let bootStallDeadline: TimeInterval = 30
 
-    /// Fires if the shell never arrives.
+    /// How often the watch counts. Any wait longer than this by more than
+    /// `bootStallTick` again was spent frozen or suspended, and the rest of it
+    /// isn't counted.
+    private static let bootStallTick: TimeInterval = 1
+
+    /// The watch's next count, so that it can be called off.
     private var bootStallWatch: DispatchWorkItem?
+
+    /// How much of the deadline the boot has used so far, and when the watch
+    /// last counted.
+    private var bootStallCounted: TimeInterval = 0
+    private var bootStallLastTick: TimeInterval = 0
 
     /// Follows JIT enablement, which now outlives this view being created.
     ///
@@ -575,7 +602,7 @@ class ViewController: UIViewController {
         hasReportedJitOutcome = true
 
         switch outcome {
-        case .blessed, .ptrace:
+        case .blessed, .entitled:
             Log.jit.note("running with JIT")
         case .interpreted(let reason):
             Log.jit.note("running without JIT: \(reason.logDescription)")
@@ -877,7 +904,7 @@ class ViewController: UIViewController {
                     DispatchQueue.main.async {
                         switch result {
                         case .imported:
-                            // Preparation starts and puts up its own pill within the second.
+                            // Preparation starts and puts up a pill within the second.
                             JitEnablement.pairingFileArrived()
 
                         case .cancelled:

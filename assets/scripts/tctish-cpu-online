@@ -10,7 +10,7 @@
 # neither udev nor mdev, so it is this.
 #
 # The kernel's uevent helper, not a daemon, so it costs nothing until an event
-# arrives. init installs it once the boot's own events are over, which is what
+# arrives. init installs it once the boot's events are over, which is what
 # keeps the Kconfig help's warning about a fork per event at boot from
 # applying. Usermode helpers share init's root, so this runs in the overlay that
 # init chroots into; its lower layer is the initramfs, where this script is, and

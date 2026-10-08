@@ -65,8 +65,8 @@ OUT="$ASSETS/initrd.img"
 ROOT_PASSWORD_HASH='$6$ayoNqDz/j3BYEDmV$nFPZdaROuZixFLSh0pG6jdYXxwooeRQ7.jJKuBOu35UQYZ6rGpXjfALby0/QHgAys0c7K1.JDS5yY4YeWLbIl/'
 ROOT_PASSWORD_LASTCHG="19236"
 
-# Timestamps for anything we create. cpio records mtimes and gzip records one of
-# its own, so both have to be pinned or the image differs run to run.
+# Timestamps for anything we create. cpio records mtimes and gzip records one in
+# its header, so both have to be pinned or the image differs run to run.
 export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-0}"
 
 RED=$'\033[0;31m'
@@ -313,7 +313,7 @@ apply_overlay() {
     # guest's cwd back to the host, and prints tcti_motd; mount_shared.sh mounts
     # the 9p tag qemu_launcher.c passes as `shared`.
     #
-    # overlay/etc/motd is empty on purpose: Alpine ships its own "Welcome to
+    # overlay/etc/motd is empty on purpose: Alpine ships a "Welcome to
     # Alpine!" text, and blanking it is what stops that printing over ours.
     cp -a "$ASSETS/overlay/." "$root/"
     chmod 0755 "$root/init"
@@ -436,7 +436,7 @@ do_build() {
     without_proc "$root"
 
     # Before the overlay, not in normalise() after it: the overlay ships the
-    # guest's own resolv.conf, and removing "whatever resolv.conf is there" once
+    # guest's resolv.conf, and removing "whatever resolv.conf is there" once
     # the overlay has landed deleted it. That is how the image went out with no
     # resolv.conf at all, and every lookup in the guest timed out against
     # 127.0.0.1. What this removes is only a stray from the build environment.

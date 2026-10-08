@@ -119,8 +119,8 @@ private struct SettingsOption<Value: Equatable> {
 /// A text field that asks to be a fixed width.
 ///
 /// A cell accessory sizes its custom view from that view's intrinsic content
-/// size, and a text field's own is whatever its text happens to measure -- so
-/// an empty one would collapse to nothing and a long value would crowd out the
+/// size, and a text field's is whatever its text happens to measure -- so an
+/// empty one would collapse to nothing and a long value would crowd out the
 /// title beside it. Overriding the width is how to say "this wide, whatever is
 /// in you", given that the constraint route is closed: accessories require
 /// `translatesAutoresizingMaskIntoConstraints` to remain enabled, and raise an
@@ -148,7 +148,7 @@ private final class FixedWidthTextField: UITextField {
 ///
 /// Here rather than on the root screen, because the sheet can be swiped away
 /// from a screen pushed over the root, and the root then has no
-/// `viewDidDisappear` of its own to notice it by: it disappeared at the push.
+/// `viewDidDisappear` to notice it by: it disappeared at the push.
 private final class SettingsNavigationController: UINavigationController {
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
@@ -311,7 +311,7 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
 
                     let accessory = self.slider(for: id, slider)
                     accessory.configure(slider)
-                    // Its own width, kept: left to the standard width an accessory is given, it was
+                    // Its width, kept: left to the standard width an accessory is given, it was
                     // centered in that and ran off the end of the row.
                     cell.accessories = [
                         .customView(
@@ -337,7 +337,7 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
 
             // A row that does something when tapped, with nothing else to say so -- no arrow, no
             // switch, no field -- reads as a label otherwise. Tinted like a button, as the system's
-            // own action rows are.
+            // action rows are.
             if row.select != nil, row.accessory == .none, row.toggle == nil, row.editable == nil {
                 content.textProperties.color = .tintColor
             }
@@ -379,7 +379,7 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
                 field.width =
                     isWide ? FixedWidthTextField.wideWidth : FixedWidthTextField.narrowWidth
 
-                // Its own width, kept: left to the standard width an accessory is given, it was
+                // Its width, kept: left to the standard width an accessory is given, it was
                 // centered in that and ran off the end of the row.
                 cell.accessories = [
                     .customView(
@@ -469,9 +469,8 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
     /// The switch for a row, made once and then kept.
     ///
     /// No sizing to arrange, unlike the text fields: a `UISwitch` has an
-    /// intrinsic size of its own and leaves
-    /// `translatesAutoresizingMaskIntoConstraints` alone, which is what cell
-    /// accessories insist on.
+    /// intrinsic size and leaves `translatesAutoresizingMaskIntoConstraints`
+    /// alone, which is what cell accessories insist on.
     private func control(for id: String, toggle: ToggleValue) -> UISwitch {
         if let existing = switches[id] { return existing }
 
@@ -503,9 +502,9 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
         return well
     }
 
-    /// The margins a list row's own content keeps: the cell's own at the sides,
-    /// which its icon starts from and its accessories end at, and the list's
-    /// usual above and below.
+    /// The margins a list row's content keeps: the cell's at the sides, which
+    /// its icon starts from and its accessories end at, and the list's usual
+    /// above and below.
     private static func listMargins(of cell: UICollectionViewListCell) -> NSDirectionalEdgeInsets {
         let vertical = cell.defaultContentConfiguration().directionalLayoutMargins
         return NSDirectionalEdgeInsets(
@@ -693,10 +692,10 @@ private final class DetentSlider: UISlider {
 }
 
 /// A slider with its value before it: a row's accessory, where there's room for
-/// the slider on the row's own line.
+/// the slider on the row's line.
 ///
-/// The value is shown here rather than as the row's own, so that reaching a
-/// step only changes this label. Changing the row's content to show it lays the
+/// The value is shown here rather than as the row's, so that reaching a step
+/// only changes this label. Changing the row's content to show it lays the
 /// whole row out again, slider and all, under the finger.
 private final class SliderAccessory: UIView {
 
@@ -719,7 +718,7 @@ private final class SliderAccessory: UIView {
         let body = UIFont.preferredFont(forTextStyle: .body)
         let font = UIFont.monospacedDigitSystemFont(ofSize: body.pointSize, weight: .regular)
 
-        // As wide as the widest value it's asked to show, by a label's own measure: the strings
+        // As wide as the widest value it's asked to show, by a label's measure: the strings
         // measured on their own came out narrower than a label draws them, and it cut the value
         // short.
         let measure = UILabel()
@@ -779,10 +778,10 @@ private struct SliderContentConfiguration: UIContentConfiguration {
     var symbol: String?
     var slider: SliderValue
 
-    /// The margins the list gives its own rows. A list sets them on the rows
-    /// whose content it knows how to lay out, which a heading nested in this
-    /// one isn't; without them, it sat to the left of the rows around it and
-    /// ran past them on the right.
+    /// The margins the list gives its rows. A list sets them on the rows whose
+    /// content it knows how to lay out, which a heading nested in this one
+    /// isn't; without them, it sat to the left of the rows around it and ran
+    /// past them on the right.
     var margins: NSDirectionalEdgeInsets
 
     func makeContentView() -> any UIView & UIContentView {
@@ -792,7 +791,7 @@ private struct SliderContentConfiguration: UIContentConfiguration {
     func updated(for state: any UIConfigurationState) -> SliderContentConfiguration { self }
 }
 
-/// The heading is the system's own value row, so its icon, title and value sit
+/// The heading is the system's value row, so its icon, title and value sit
 /// exactly where the rows above and below have theirs, and the slider beneath
 /// it runs from the title to the value's far edge.
 private final class SliderContentView: UIView, UIContentView {
@@ -1022,8 +1021,8 @@ final class SettingsViewController: SettingsListViewController,
             systemItem: .done,
             primaryAction: UIAction { [weak self] _ in self?.done() })
 
-        // On the bar rather than on a title view of our own, as the large title isn't a view we get
-        // to supply. The bar is shared with every screen pushed over this one, hence the check in
+        // On the bar rather than on a custom title view, as the large title isn't a view we get to
+        // supply. The bar is shared with every screen pushed over this one, hence the check in
         // `revealDebugTools`.
         let reveal = UITapGestureRecognizer(target: self, action: #selector(revealDebugTools))
         reveal.numberOfTapsRequired = 3
@@ -1226,7 +1225,7 @@ final class SettingsViewController: SettingsListViewController,
         return "\(share.title) (\(count))"
     }
 
-    /// Opens this app's own page in the Settings app.
+    /// Opens this app's page in the Settings app.
     private static func openSystemSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(url)
@@ -1821,8 +1820,7 @@ extension SettingsListViewController {
                 Backend.switchTo(target, asked: true)
 
                 // Out of the way, so that what the switch says -- the pills, the banner -- is seen.
-                // Through the root's own way out, which says if anything else changed needs a
-                // restart.
+                // Through the root's way out, which says if anything else changed needs a restart.
                 let root =
                     self?.navigationController?.viewControllers.first as? SettingsViewController
                 root?.done()
@@ -1961,7 +1959,7 @@ private final class DebugToolsViewController: SettingsListViewController {
                 footer: "A simulated warning is the one UIKit posts under real pressure, so tctiSH "
                     + "responds as it would to that: any pending code cache expansion is called "
                     + "off, and a Dynamic cache above what a warning allows is shrunk. The "
-                    + "system's own pressure level is untouched.",
+                    + "system's pressure level is untouched.",
                 rows: [
                     SettingsRow(
                         id: "saved-sessions",
@@ -2165,6 +2163,8 @@ private final class JitStatusViewController: SettingsListViewController {
             switch probe {
             case .available(let elapsed):
                 tunnel = String(format: "Connected (%.0f ms)", elapsed * 1000)
+            case .notAnswering:
+                tunnel = "Not answering"
             case .unavailable:
                 tunnel = "Not connected"
             }
@@ -2244,9 +2244,8 @@ private final class JitStatusViewController: SettingsListViewController {
 
             SettingsSection(
                 header: "Requirements",
-                footer: "Under TXM, JIT needs all of these: the loopback VPN for a tunnel to the "
-                    + "device, the pairing file to authenticate it, and a mounted DDI for the "
-                    + "debugger. Without TXM, it needs none of them.",
+                footer: "JIT needs the loopback VPN for a tunnel to the device, the pairing file "
+                    + "to authenticate it, and a mounted DDI for the debugger.",
                 rows: [
                     SettingsRow(
                         id: "txm", title: "TXM", detail: TxmPresence.current.description.capitalized
@@ -2546,7 +2545,7 @@ private final class LogsViewController: SettingsListViewController {
         [
             SettingsSection(
                 header: nil,
-                footer: "The last few launches. Each has tctiSH's own log, and whatever was "
+                footer: "The last few launches. Each has tctiSH's log, and whatever was "
                     + "written to stderr, which is where QEMU says why it stopped. Stderr isn't "
                     + "captured when Xcode launched tctiSH, as its console is reading it.",
                 rows: LogFile.launches().map { launch in

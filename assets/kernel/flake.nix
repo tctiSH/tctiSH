@@ -63,7 +63,7 @@
             openssl
 
             # resolve_btfids vendors libbpf and compiles it against system
-            # headers, so it wants these even though the kernel brings its own.
+            # headers, so it wants these even though the kernel brings a copy.
             linuxHeaders
             glibc.dev
 

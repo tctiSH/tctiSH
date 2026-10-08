@@ -21,13 +21,13 @@
 # What this build shares with the app's is the source: the third-party/qemu
 # checkout, with its TCG, TCTI, 9p and device work. What it does not have is
 # anything behind TARGET_OS_IPHONE -- handing the code buffer to a debugger,
-# the purgeable code cache, TXM -- and it is an ordinary executable rather than
+# the purgeable code cache -- and it is an ordinary executable rather than
 # the dylib the app dlopens. Those still need a device.
 #
 # It builds in the flake's `host-qemu` shell, not the default one. That shell
 # exists because the default one is careful to expose no libraries, as the iOS
-# build cross-compiles its own and must not find the host's; a build *for* the
-# host needs exactly the libraries that one keeps out. The script enters the
+# build cross-compiles them itself and must not find the host's; a build *for*
+# the host needs exactly the libraries that one keeps out. The script enters the
 # shell itself, so it runs the same from a bare shell, the default devshell or
 # make.
 set -euo pipefail

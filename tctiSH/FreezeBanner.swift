@@ -86,8 +86,8 @@ final class FreezeBanner: UIView {
             //
             // The heart of the thing: UIKit commits once per run loop turn, and the caller traps
             // the moment this returns which is well inside the same turn. Ending an explicit
-            // transaction group is not enough, because that group nests inside the run loop's own
-            // and it is the outer one that reaches the render server.
+            // transaction group is not enough, because that group nests inside the run loop's and
+            // it is the outer one that reaches the render server.
             CATransaction.flush()
             drawn.signal()
         }

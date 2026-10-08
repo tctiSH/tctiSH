@@ -140,7 +140,11 @@ class JITHelperService: NSObject, NSExtensionRequestHandling {
                     targetPID: targetPID,
                     pairingFile: pairingFile,
                     script: .universal,
-                    forceScript: false,
+                    // Left to itself StikJIT only runs the script under TXM, and without TXM it
+                    // attaches and detaches at once. On iOS 26 that is not enough: QEMU's code
+                    // buffer still has to be blessed, and it traps to ask, so the script has to be
+                    // there to answer regardless.
+                    forceScript: true,
                     progress: { note("  \($0)") })
 
                 reply.outcome = .succeeded

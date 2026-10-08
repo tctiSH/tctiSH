@@ -31,7 +31,7 @@ final class PinnedKeysViewController: UIViewController, UICollectionViewDelegate
         collectionView.translatesAutoresizingMaskIntoConstraints = false
 
         // Editing throughout, so the handles and the add and remove buttons are always there, as
-        // they are on the system's own screens for arranging things.
+        // they are on the system's screens for arranging things.
         collectionView.isEditing = true
         collectionView.allowsSelectionDuringEditing = true
 
@@ -49,7 +49,7 @@ final class PinnedKeysViewController: UIViewController, UICollectionViewDelegate
 
     /// How many fit on the bar at the app's current width.
     ///
-    /// The app's window rather than this screen's own, which on iPad is a sheet
+    /// The app's window rather than this screen's, which on iPad is a sheet
     /// narrower than the keyboard the bar sits on.
     private var capacity: Int {
         guard let window = view.window else { return KeyBar.capacity(forWidth: view.bounds.width) }

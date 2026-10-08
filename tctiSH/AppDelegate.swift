@@ -30,7 +30,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     /// Whether the app is in the background.
     ///
-    /// Atomic because the save reads it from its own thread at the moment it
+    /// Atomic because the save reads it from its thread at the moment it
     /// decides whether to park: someone who came back while the snapshot was
     /// being written doesn't want the machine parked under them.
     private let away = ManagedAtomic<Bool>(false)
@@ -55,8 +55,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     /// Whether QEMU should hand native code's buffer to an attached debugger.
     ///
-    /// True only when TXM is present, matching StikJIT's own gate as the two
-    /// must never disagree, and whichever backend the VM starts on.
+    /// True on every iOS device, TXM or not, and whichever backend the VM
+    /// starts on. The helper forces StikJIT's script on to match, as the two
+    /// must never disagree.
     static var blessJitRegions = false
     static var isFirstBoot = false
     static var memoryValueChanged = false
@@ -117,7 +118,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             "flush_jit_buffers": false,
             "images": default_images,
             "memory": "1G",
-            "code_cache_mode": CodeCache.Mode.fixed.rawValue,
+            "code_cache_mode": CodeCache.defaultMode.rawValue,
             "code_cache_ceiling": CodeCache.autoCeiling,
             "code_cache_notifications": true,
             "park_in_background": false,
@@ -216,8 +217,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             input: ",",
             modifierFlags: .command)
 
-        // Where the system keeps its own Settings item, if it offers one there; otherwise at the
-        // top of the app menu, which is where that item goes on the Mac.
+        // Where the system keeps its Settings item, if it offers one there; otherwise at the top of
+        // the app menu, which is where that item goes on the Mac.
         if builder.menu(for: .preferences) != nil {
             builder.replaceChildren(ofMenu: .preferences) { _ in [settings] }
         } else {
@@ -288,8 +289,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             let outcome = JitEnablement.prepareForBoot()
             Log.ui.note("launch: jit settled at \(AppDelegate.sinceLaunch())")
 
-            // QEMU's first act under TXM is to trap for its code buffer, and that trap stops every
-            // thread here until the last page is blessed.
+            // QEMU's first act with a debugger attached is to trap for its code buffer, and that
+            // trap stops every thread here until the last page is blessed.
             if case .blessed = outcome, JitEnablement.expectsFreeze {
                 FreezeBanner.raiseAndWait(JitEnablement.preparingMessage)
             }
@@ -349,7 +350,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         // Giving the assertion back and finishing the save are separate events, and conflating them
         // lets a second save start on top of the first. Expiry means "hand this back now or be
-        // killed" but it does not stop the work, which carries on until its own deadlines run out.
+        // killed" but it does not stop the work, which carries on until its deadlines run out.
         // `saving` therefore stays true until the work actually ends.
         let releaseAssertion = {
             guard task != .invalid else { return }
@@ -425,7 +426,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     ///
     /// Held back while a save is running. `savevm` stops the guest for as long
     /// as the snapshot takes, so reconnecting into one means SSH against a
-    /// machine that is not executing: the attempt fails, and the terminal's own
+    /// machine that is not executing: the attempt fails, and the terminal's
     /// 1.5s poll retries until the VM comes back.
     func handleWillEnterForeground() {
         // The first time, this is the launch: what follows then finds no machine and nothing to do.
@@ -495,7 +496,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         reconnectWhenSaved = false
 
         // Checked again rather than assumed: a session that dropped while we were away needs no
-        // forcing, because the terminal's own poll is already on it.
+        // forcing, because the terminal's poll is already on it.
         guard let terminal = ViewController.getCurrentTerminal(), terminal.connected else {
             return
         }
@@ -516,7 +517,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         Log.ui.note("returned to the foreground parked; unparking '\(tag)'")
 
         // The code cache first, if it went while parked: the machine must not run a single
-        // instruction before it is prepared, and under TXM this is the freeze.
+        // instruction before it is prepared, and where blessing applies this is the freeze.
         prepareCodeCacheIfNeeded { [weak self] prepared in
             guard prepared else {
                 self?.unparkDidFinish(unparked: false)
@@ -645,8 +646,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         Vcpus.machineMayHaveChanged()
 
-        // A dropped session needs no forcing, as elsewhere: the terminal's own poll is already on
-        // it, and brings the pill down when it connects.
+        // A dropped session needs no forcing, as elsewhere: the terminal's poll is already on it,
+        // and brings the pill down when it connects.
         guard let terminal = ViewController.getCurrentTerminal(), terminal.connected else {
             return
         }

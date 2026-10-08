@@ -11,10 +11,10 @@ import Foundation
 /// log.
 ///
 /// The unified log is the better place to read it, but only from a Mac. On the
-/// device an app can read back entries from its own process and no other, as
-/// that is the only scope `OSLogStore` has on iOS, so the launch that went
-/// wrong is exactly the one it can't see. These files are what Debug Tools
-/// shows and shares instead.
+/// device an app can read back entries from its process and no other, as that
+/// is the only scope `OSLogStore` has on iOS, so the launch that went wrong is
+/// exactly the one it can't see. These files are what Debug Tools shows and
+/// shares instead.
 ///
 /// Two files per launch: what `Log` said, and whatever the process wrote to
 /// stderr. QEMU runs in this process and reports why it is giving up on stderr,
@@ -217,15 +217,15 @@ enum LogFile {
         dup2(captured, STDERR_FILENO)
         close(captured)
 
-        // A descriptor of its own, for events only: watching fd 2 itself would lose the watch at
-        // the `dup2` that rotates it.
+        // A separate descriptor, for events only: watching fd 2 itself would lose the watch at the
+        // `dup2` that rotates it.
         let watched = open(file.path, O_EVTONLY)
         guard watched >= 0 else { return }
 
         let watch = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: watched, eventMask: .extend, queue: queue)
 
-        // Above the queue's own utility QoS. How far a flood overshoots the cap is however much it
+        // Above the queue's utility QoS. How far a flood overshoots the cap is however much it
         // writes before this runs, and a busy guest is exactly what would keep a utility handler
         // waiting.
         watch.setEventHandler(qos: .userInitiated, flags: .enforceQoS) {

@@ -16,13 +16,13 @@
 #               Apple Silicon, so --backend tcti is the app's interpreter, gadgets
 #               and all.
 #   it does not anything behind TARGET_OS_IPHONE in that fork: handing the code
-#               buffer to a debugger, the purgeable code cache, TXM. Nor the app's
+#               buffer to a debugger, the purgeable code cache. Nor the app's
 #               side -- the launcher, the dylib it dlopens, snapshots on
 #               backgrounding. Testing those needs a device.
 #
 # The machine is spelled to match qemu_launcher.c as closely as a host boot can,
 # including the machine *type*, which matters more than it looks: the app passes
-# no -M and so gets whatever its own QEMU defaults to. Our build defaults to the
+# no -M and so gets whatever its QEMU defaults to. Our build defaults to the
 # same, but pinning it here means a QEMU bump that moves the default shows up as
 # an edit to this file rather than silently -- and it is exactly the axis that
 # bit this project before: pc-i440fx-6.2 silently changed what a bare `-smp 4`
@@ -280,7 +280,7 @@ main() {
 
     prepare_key
 
-    # Backgrounded here rather than with QEMU's own -daemonize, so that the
+    # Backgrounded here rather than with QEMU's -daemonize, so that the
     # script keeps a pid it can wait on and signal. A daemonized QEMU is an
     # orphan: the only handle on it is a pattern match against its command line,
     # which is both fragile and unnecessary.

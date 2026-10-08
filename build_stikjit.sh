@@ -19,7 +19,7 @@ BASEDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_DIR="${STIKJIT_SOURCE:-$BASEDIR/third-party/StikJIT}"
 BUILD_DIR="$BASEDIR/build-StikJIT"
 
-# Our own idevice build, staged over the one StikJIT vendors. See build_idevice.sh.
+# Our idevice build, staged over the one StikJIT vendors. See build_idevice.sh.
 IDEVICE_DIR="$BASEDIR/build-idevice/out"
 
 # Patched and built here, never in SOURCE_DIR.
@@ -37,7 +37,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 NC='\033[0m'
 
-# Read tctiSH's own deployment target rather than keeping a second copy of it.
+# Read tctiSH's deployment target rather than keeping a second copy of it.
 # Getting this wrong doesn't fail the build -- it fails the *launch*, and only on
 # the older devices we're least likely to be holding. Takes the lowest target in
 # the project, since the framework has to be loadable by the oldest thing that
@@ -162,10 +162,10 @@ apply_patches
 echo -e "${GREEN}Generating the Xcode project...${NC}"
 (cd "$WORK_DIR" && xcodegen generate --quiet)
 
-# IPHONEOS_DEPLOYMENT_TARGET because StikJIT's project.yml picks its own, and
+# IPHONEOS_DEPLOYMENT_TARGET because StikJIT's project.yml picks another, and
 # tctiSH embeds this framework in the *app*. dyld refuses to load an embedded
 # framework whose minimum exceeds the running system, so a framework built for
-# anything newer than tctiSH's own target would stop the app launching at all --
+# anything newer than tctiSH's target would stop the app launching at all --
 # not just stop JIT working, which would have been fine. Keep the two in step.
 #
 # GENERATE_INFOPLIST_FILE because StikJIT's project.yml specifies no `info:`, so

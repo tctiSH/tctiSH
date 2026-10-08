@@ -230,13 +230,13 @@ image.
 
 Everything tctiSH adds _on top_ of the stock Alpine root filesystem lives in `assets/overlay/`:
 
-| File                                 | Description                                                                       |
-| ------------------------------------ | --------------------------------------------------------------------------------- |
-| `init`                               | Unpacks into RAM, builds the overlayfs root, hands off to busybox init.           |
-| `etc/inittab`                        | Respawns the getty, syslogd and dropbear.                                         |
-| `etc/profile.d/shell_integration.sh` | The PS1 that reports the guest's cwd, `COLORTERM`, and prints `tcti_motd`.        |
-| `etc/profile.d/mount_shared.sh`      | Mounts the 9p tag `qemu_launcher.c` passes as `shared`.                           |
-| `etc/motd`                           | **Deliberately empty**, so Alpine's own greeting does not print over `tcti_motd`. |
+| File                                 | Description                                                                   |
+| ------------------------------------ | ----------------------------------------------------------------------------- |
+| `init`                               | Unpacks into RAM, builds the overlayfs root, hands off to busybox init.       |
+| `etc/inittab`                        | Respawns the getty, syslogd and dropbear.                                     |
+| `etc/profile.d/shell_integration.sh` | The PS1 that reports the guest's cwd, `COLORTERM`, and prints `tcti_motd`.    |
+| `etc/profile.d/mount_shared.sh`      | Mounts the 9p tag `qemu_launcher.c` passes as `shared`.                       |
+| `etc/motd`                           | **Deliberately empty**, so Alpine's greeting does not print over `tcti_motd`. |
 
 `assets/scripts/` is installed alongside it into `/usr/bin`. `tctictl` is an _input_ rather than
 something copied in afterwards, so `make guest` ensures that it is built first.
@@ -294,15 +294,15 @@ default) or TCTI, which runs natively on Apple Silicon. The first boot with each
 into `build-macOS-arm64/` if needed, and later boots rebuild only when the `third-party/qemu`
 checkout or the flake changes. `make host-qemu BACKEND=...` builds one without booting it.
 
-The build has its own devshell, `nix develop .#host-qemu`, as building for the mac needs host
-libraries that the default devshell deliberately keeps away from the iOS build. The build script
-enters it by itself, and keeps those libraries from nix's garbage collector with a GC root in
+The build has its devshell, `nix develop .#host-qemu`, as building for the mac needs host libraries
+that the default devshell deliberately keeps away from the iOS build. The build script enters it by
+itself, and keeps those libraries from nix's garbage collector with a GC root in
 `build-macOS-arm64/`. `make unroot-host-qemu` removes the root if you want the space back, and the
 next boot fetches whatever was collected without recompiling.
 
 Running the guest on our QEMU cannot exercise the iOS-specific code paths, including the debugger
-blessing of the code buffer, the purgeable code cache, and TXM enforcement, as well as the app's own
-launcher. Testing those still needs to be done on a real device.
+blessing of the code buffer, the purgeable code cache, and iOS's refusal to run unblessed code, as
+well as the app's launcher. Testing those still needs to be done on a real device.
 
 ### Formatting
 

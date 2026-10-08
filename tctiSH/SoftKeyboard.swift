@@ -9,8 +9,8 @@ import UIKit
 
 /// The software keyboard's Shift key.
 ///
-/// It is read from `UIKeyboardImpl`, UIKit's own keyboard controller, which is
-/// a private API. tctiSH is only ever sideloaded, as `JITHelperLauncher.h`
+/// It is read from `UIKeyboardImpl`, UIKit's keyboard controller, which is a
+/// private API. tctiSH is only ever sideloaded, as `JITHelperLauncher.h`
 /// explains, so that is a cost it can bear.
 enum SoftKeyboard {
 

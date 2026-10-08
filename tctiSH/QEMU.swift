@@ -217,8 +217,8 @@ public class QEMUInterface {
         Self.snapshotWorkLock.lock()
         defer { Self.snapshotWorkLock.unlock() }
 
-        // `savevm` stops the machine for its own duration and starts it again, so a machine that is
-        // to stay stopped has to be stopped beforehand.
+        // `savevm` stops the machine for its duration and starts it again, so a machine that is to
+        // stay stopped has to be stopped beforehand.
         let stopped = leavingStopped && runMonitorCommandCleanly("stop", purpose: "park: stop")
 
         // A `stop` that answered late still stopped the machine, and the save that follows would
@@ -644,11 +644,11 @@ public class QEMUInterface {
     ///
     /// Not `reportSaveFailure`, because an assertion expiring is a different
     /// fact from a save that failed. iOS is saying "hand this back now"; it is
-    /// not stopping the work, which carries on under its own deadlines and
-    /// quite often succeeds.
+    /// not stopping the work, which carries on under its deadlines and quite
+    /// often succeeds.
     ///
-    /// The delay is the save's own deadline, so it fires at the moment the save
-    /// has definitively run out of road rather than at some guess.
+    /// The delay is the save's deadline, so it fires at the moment the save has
+    /// definitively run out of road rather than at some guess.
     func reportSaveRanOutOfTime() {
         Log.qemu.warn("session save: ran out of time in the background")
         Self.lastSaveFailed = true
@@ -723,8 +723,8 @@ public class QEMUInterface {
     /// Every HMP command ends by printing a fresh prompt, so a command written
     /// without its reply being read leaves one sitting in the socket, and the
     /// next command to read finds it there and stops on it, returning before
-    /// its own output has arrived. Draining first only helps if the stray
-    /// prompt has already landed, which is a race rather than a guarantee.
+    /// its output has arrived. Draining first only helps if the stray prompt
+    /// has already landed, which is a race rather than a guarantee.
     ///
     /// Counting them means a reader can settle the debt by waiting rather than
     /// by hoping. Written and read only with `monitorLock` held.
@@ -732,7 +732,8 @@ public class QEMUInterface {
 
     /// Reads off the replies to commands nobody waited for.
     ///
-    /// Call with `monitorLock` held, before reading for a command of your own.
+    /// Call with `monitorLock` held, before sending a command and reading its
+    /// reply.
     private func settleOutstandingPrompts() {
         while promptsOwed > 0 {
             guard readUntilPrompt(timeout: Self.monitorReplyDeadline) != nil else {
@@ -812,7 +813,7 @@ public class QEMUInterface {
 
     /// Waits up to `milliseconds` for the monitor to have something to say.
     ///
-    /// `Socket.wait` rather than the socket's own `isReadableOrWritable`, which
+    /// `Socket.wait` rather than the socket's `isReadableOrWritable`, which
     /// looks like the obvious call but isn't: it selects on the write set as
     /// well as the read set, and a connected socket with an empty send buffer
     /// is always writable.
@@ -1590,11 +1591,11 @@ public class QEMUInterface {
     /// with, and otherwise the setting.
     ///
     /// Not a requirement but a head start. Our QEMU brings the machine to the
-    /// snapshot's own count as the snapshot loads, plugging vCPUs in or taking
-    /// them away before any device state is restored, so a snapshot with no
-    /// record (one named under Boot From Snapshot, or taken from inside Linux)
-    /// still comes back exactly as it was. Launching with the right count just
-    /// means there is nothing to change.
+    /// snapshot's count as the snapshot loads, plugging vCPUs in or taking them
+    /// away before any device state is restored, so a snapshot with no record
+    /// (one named under Boot From Snapshot, or taken from inside Linux) still
+    /// comes back exactly as it was. Launching with the right count just means
+    /// there is nothing to change.
     private func launchVcpus(bootImageName: String?) -> Int {
         let setting = Vcpus.foreground
 
@@ -2067,15 +2068,15 @@ extension QEMUInterface {
     }
 
     /// A unique name beside `disk` for the copy. Unique, because QEMU keeps the
-    /// name a file was opened with, so after one compaction the drive's own
-    /// name in QEMU is the copy's, and a second must not reuse it.
+    /// name a file was opened with, so after one compaction the drive's name in
+    /// QEMU is the copy's, and a second must not reuse it.
     private static func compactionTarget(for disk: URL) -> URL {
         let tag = UUID().uuidString.prefix(8).lowercased()
         return disk.deletingLastPathComponent()
             .appendingPathComponent(disk.lastPathComponent + compactionSuffix + tag)
     }
 
-    /// Not ".qcow": the copy is not a disk of its own, and the Saved Sessions
+    /// Not ".qcow": the copy is not a separate disk, and the Saved Sessions
     /// list takes every ".qcow" for one.
     private static let compactionSuffix = ".compacting-"
 

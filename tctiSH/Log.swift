@@ -10,7 +10,7 @@ import os
 
 /// One area of the app's logging.
 ///
-/// Each area gets its own subsystem, so Console can be pointed at a single
+/// Each area gets a separate subsystem, so Console can be pointed at a single
 /// concern, while filtering on the root still catches the lot.
 ///
 /// Every line also goes to `LogFile`, so it can be read back on the device.

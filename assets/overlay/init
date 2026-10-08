@@ -123,7 +123,7 @@ if grep "tcti_disk=file" /proc/cmdline; then
 	# /sbin/fstrim by path because nice does the lookup, not the shell: the
 	# kernel starts init with no PATH, and nice's execvp then falls back to
 	# libc's default of /bin:/usr/bin, which misses /sbin. The shell has a
-	# default of its own that includes it, which is why nothing else here
+	# default that includes it, which is why nothing else here
 	# needs a path.
 	if mountpoint -q /var/tcti-rootfs/rw-ios; then
 		nice -n 19 /sbin/fstrim -v /var/tcti-rootfs/rw-ios >/dev/kmsg 2>&1 &
@@ -223,7 +223,7 @@ make_misc_dev /var/tcti-rootfs/rw-union/dev/urandom hw_random
 #mount -t 9p -o trans=virtio shared /var/tcti-rootfs/rw-union/ios_host -oversion=9p2000.L
 
 # Bring CPUs the host plugs in online; see tctish-cpu-online. Last before init
-# proper, so that the boot's own events are over and none of them forks it.
+# proper, so that the boot's events are over and none of them forks it.
 echo /usr/bin/tctish-cpu-online >/proc/sys/kernel/hotplug
 
 # Finally, pass control to real init.

@@ -13,22 +13,12 @@
 #include <stddef.h>
 #include <sys/qos.h>
 
-/// Sets up an environment where we can JIT.
-bool set_up_jit(void);
-
 /// Returns true iff a debugger is attached to this process right now.
 ///
 /// The same `P_TRACED` test QEMU makes before raising its blessing trap, so the
 /// app can wait for StikJIT's attach to land before starting QEMU. Booting too
 /// early doesn't fail loudly; it produces an unblessed JIT region.
 bool jit_debugger_tracing(void);
-
-/// Returns true iff this process may make its own mappings executable.
-///
-/// `CS_DEBUGGED`, which is sticky and survives a detach -- so this answers "is
-/// JIT permitted", not "is a debugger here now". Use `jit_debugger_tracing()`
-/// for the latter.
-bool jit_may_map_executable(void);
 
 /// A stable description of the machine QEMU is told to build.
 ///
@@ -50,7 +40,7 @@ unsigned int qemu_max_vcpus(void);
 /// Runs QEMU in a background thread, providing our shell.
 ///
 /// `tb_size_mib` is the TCG code cache size in MiB, or 0 to let QEMU size the
-/// buffer itself with its own heuristic. tctiSH always names a size, because it
+/// buffer itself with its heuristic. tctiSH always names a size, because it
 /// maps the largest cache it offers however small a one was chosen and enforces
 /// the choice itself; see `CodeCache.allocationSize`.
 ///
@@ -66,7 +56,7 @@ unsigned int qemu_max_vcpus(void);
 ///
 /// `vcpus` is how many vCPUs are plugged in at launch, from 1 to
 /// `qemu_max_vcpus()`. A snapshot loaded at launch brings the machine to the
-/// vCPUs it was taken with, so its own count only saves that work.
+/// vCPUs it was taken with, so its count only saves that work.
 void run_background_qemu(const char *qemu_path, const char *kernel_path, const char *initrd_path,
                          const char *bios_path, const char *disk_path,
                          const char *shared_folder_path, const char *boot_image_name,
@@ -111,9 +101,10 @@ size_t qemu_code_cache_shrink(size_t target);
 /// and returns whether that was arranged.
 ///
 /// Only for a parked VM: it can't run until `qemu_code_cache_grow` has
-/// prepared the cache again, and under TXM it would crash if it did, so QEMU
-/// refuses to start it meanwhile. The flush runs even though the VM is stopped;
-/// `qemu_code_cache_release_all_outstanding` goes false once it has.
+/// prepared the cache again, and where blessing applies it would crash if it
+/// did, so QEMU refuses to start it meanwhile. The flush runs even though the
+/// VM is stopped; `qemu_code_cache_release_all_outstanding` goes false once it
+/// has.
 bool qemu_code_cache_release_all(void);
 
 /// Whether a `qemu_code_cache_release_all` is still waiting for its flush.
@@ -149,7 +140,7 @@ int qemu_backend_current(void);
 /// Maps native code's buffer while the VM runs on TCTI, ahead of a switch to
 /// it: 1 if it did, 2 if there was nothing to do, 0 if it could not.
 ///
-/// **Under TXM a debugger must already be attached** and armed, exactly as for
+/// **When blessing, a debugger must already be attached** and armed, as for
 /// `qemu_code_cache_grow`: this traps into it to prepare the buffer, and every
 /// thread in the process stops while it does.
 int qemu_backend_prepare_native(void);
@@ -159,18 +150,19 @@ int qemu_backend_prepare_native(void);
 bool qemu_backend_native_ready(void);
 
 /// Gives native code's buffer back while the VM runs on TCTI. The next switch
-/// to native code then maps and prepares it again, which under TXM needs the
-/// debugger. Returns whether it was given back, or there was nothing to give.
+/// to native code then maps and prepares it again, which when blessing needs
+/// the debugger. Returns whether it was given back, or there was nothing to
+/// give.
 bool qemu_backend_release_native(void);
 
 /// Asks for a switch to TCTI (`tcti`) or to native code, and returns whether
-/// the request was taken. The switch happens in QEMU's own time, normally
-/// milliseconds; it is over once `qemu_backend_switches` has moved, and
+/// the request was taken. The switch happens when QEMU gets to it, normally
+/// within milliseconds; it is over once `qemu_backend_switches` has moved, and
 /// `qemu_backend_current` then says where the VM is.
 ///
 /// A switch to native code needs native code's buffer prepared, and prepares it
-/// itself if `qemu_backend_prepare_native` has not -- under TXM, by trapping
-/// into the debugger with every vCPU stopped. Prepare first.
+/// itself if `qemu_backend_prepare_native` has not -- when blessing, by
+/// trapping into the debugger with every vCPU stopped. Prepare first.
 bool qemu_backend_switch(bool tcti);
 
 /// How many switches have settled, whether or not they succeeded.
@@ -183,7 +175,7 @@ char *qemu_backend_last_error(void);
 /// whether that was taken. `QOS_CLASS_UNSPECIFIED` puts each back in the class
 /// it started in. Under `QOS_CLASS_BACKGROUND` Darwin keeps them to the
 /// efficiency cores; no other placement can be insisted on. Each thread applies
-/// it to itself in QEMU's own time, normally milliseconds.
+/// it to itself when QEMU gets to it, normally within milliseconds.
 bool qemu_vcpu_set_qos(qos_class_t qos_class);
 
 #endif /* qemu_launcher_h */

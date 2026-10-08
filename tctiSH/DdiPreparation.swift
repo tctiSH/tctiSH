@@ -11,11 +11,11 @@ import StikJIT
 /// Gets the developer disk image onto the device.
 ///
 /// This runs in the app so the download can report bytes as they arrive and the
-/// mount reports its own fraction. The helper only handles the debugger attach.
+/// mount reports a fraction too. The helper only handles the debugger attach.
 enum DdiPreparation {
 
-    /// Where the image is cached: the app's own container, now that the app is
-    /// what fetches and mounts it.
+    /// Where the image is cached: the app's container, now that the app is what
+    /// fetches and mounts it.
     static var paths: DDIPaths {
         let library = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
         return DDIPaths.default(in: library.appendingPathComponent("StikJIT"))
@@ -133,8 +133,8 @@ enum DdiPreparation {
     ///
     /// Blocking, like `run`. The message is written to be shown as it stands.
     static func removeAll(pairingData: Data) -> Removal {
-        // Checked up front because StikJIT's own failure without it is an RSD tunnel error that
-        // doesn't say what's missing.
+        // Checked up front because StikJIT's failure without it is an RSD tunnel error that doesn't
+        // say what's missing.
         guard TunnelProbe.probeAndReport().isAvailable else {
             return .failed("The loopback VPN isn't connected. Turn it on and try again.")
         }
@@ -237,7 +237,7 @@ enum DdiPreparation {
     /// Writes the pairing data out as a file, which is what StikJIT reads.
     ///
     /// Removing it is the caller's business, once StikJIT is done with it.
-    /// Every call gets a file of its own: preparing, removing and the status
+    /// Every call gets a separate file: preparing, removing and the status
     /// check can all overlap, as can two of any one of them, and none should
     /// delete another's out from under it.
     private static func stage(_ pairingData: Data, as name: String) throws -> URL {

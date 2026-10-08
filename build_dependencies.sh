@@ -235,7 +235,7 @@ generate_meson_cross() {
     echo "strip = [$(meson_quote $STRIP), '-x']" >>$cross
     echo "python = ['$(which python3)']" >>$cross
     # No glib-mkenums or glib-compile-resources here, though UTM's cross file
-    # names both. glib overrides find_program for its own mkenums unconditionally
+    # names both. glib overrides find_program for its mkenums unconditionally
     # -- it is a Python script, so cross-compiling does not stop it running -- and
     # nothing in this tree invokes glib-compile-resources. Tested: glib 2.83
     # builds with both entries absent *and* both tools removed from $PATH, and the
@@ -270,7 +270,7 @@ generate_meson_cross() {
     echo "endian = 'little'" >>$cross
 }
 
-# Prevent contamination from host pkg-config files by building our own
+# Prevent contamination from host pkg-config files by building ours
 build_pkg_config() {
     FILE="$(basename $PKG_CONFIG_SRC)"
     NAME="${FILE%.tar.*}"
@@ -421,10 +421,10 @@ build_qemu_dependencies() {
 
     # strchrnul (iOS 18.4) and pipe2 (iOS 27) are both past our 18.0 deployment
     # target, so the linker weak-links them and the call lands on NULL. gnulib
-    # probes by writing its own `char pipe2 ();` rather than including the
+    # probes by declaring `char pipe2 ();` itself rather than including the
     # header, so the availability attribute never reaches the compiler and
     # -Werror=unguarded-availability-new cannot correct the answer -- it only
-    # fires later, on gnulib's own use of the function it was told exists.
+    # fires later, on gnulib's use of the function it was told exists.
     # `future` is how gnulib spells "the OS will have it one day, use your
     # replacement"; it is what these two variables exist for.
     #
@@ -583,7 +583,7 @@ CFLAGS_MINVER="-miphoneos-version-min=$SDKMINVER"
 # "no" and take the portable fallback. That is what keeps pipe2 (iOS 27) and strchrnul (iOS
 # 18.4) out of the QEMU build.
 #
-# It does not reach meson, whose has_function writes its own declaration rather than using the
+# It does not reach meson, whose has_function writes a declaration itself rather than using the
 # header, so the availability attribute never gets near the compiler. glib is the one thing
 # here built that way, and its pipe2 is dropped in third-party/dependencies/glib-2.83.0.patch.
 CFLAGS_AVAILABILITY="-Werror=unguarded-availability-new"
@@ -603,7 +603,7 @@ QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-nettle --disable
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-libssh --disable-zstd --enable-slirp"
 # Link libslirp into QEMU rather than beside it. QEMU 6.0 built the subproject
 # static; 10.x leaves it to meson's default, which here means a libslirp.0.dylib
-# that would need its own framework embedded in the app and signed with it.
+# that would need a separate framework embedded in the app and signed with it.
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS -Dslirp:default_library=static"
 QEMU_PLATFORM_BUILD_FLAGS="$QEMU_PLATFORM_BUILD_FLAGS --disable-sdl --disable-snappy --with-coroutine=libucontext"
 # Without --enable-ucontext the libucontext backend is only offered if a system

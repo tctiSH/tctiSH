@@ -14,7 +14,7 @@ import UIKit
 ///
 /// Items are addressed by key. Presenting the same key again updates that pill
 /// in place, so a source that reports repeatedly, like a download, edits its
-/// own pill instead of adding more.
+/// pill instead of adding more.
 ///
 /// Main thread only. Everything here is UI.
 final class StatusPresenter {

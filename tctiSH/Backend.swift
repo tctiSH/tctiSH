@@ -53,8 +53,8 @@ enum ExecutionMode: String, CaseIterable {
 /// The VM's backend: TCTI, which needs no JIT, or native code, which does.
 ///
 /// QEMU holds both and can move a running VM between them. Moving to native
-/// code needs its code buffer prepared first, which under TXM means a debugger
-/// and a freeze, exactly as growing the code cache does; moving to TCTI needs
+/// code needs its code buffer prepared first, which on iOS means a debugger and
+/// a freeze, exactly as growing the code cache does; moving to TCTI needs
 /// nothing.
 ///
 /// Main-thread state throughout; the work runs on `queue`.
@@ -321,28 +321,15 @@ enum Backend {
             // Catalyst may map JIT memory by entitlement: nothing to arrange.
             return finishPreparing(debugger: false)
         #else
-            switch TxmPresence.current {
-            case .absent:
-                // Pre-TXM: a process that believes it is being debugged may map executable memory,
-                // which is what the ptrace hack arranges, now rather than at launch.
-                guard jit_may_map_executable() || set_up_jit() else {
-                    return "JIT was refused"
-                }
-                return finishPreparing(debugger: false)
-
-            case .unknown:
-                return "couldn't tell whether this device needs a debugger"
-
-            case .present:
-                return prepareUnderTxm()
-            }
+            // With or without TXM; see `JitEnablement.enableWithDebugger()`.
+            return prepareWithDebugger()
         #endif
     }
 
-    /// Under TXM: a debugger, armed, then the trap that prepares the buffer.
-    private static func prepareUnderTxm() -> String? {
+    /// A debugger, armed, then the trap that prepares the buffer.
+    private static func prepareWithDebugger() -> String? {
         // Xcode, most likely, whose hook owns the trap and is long since armed; see
-        // `JitEnablement.enableUnderTxm()`.
+        // `JitEnablement.enableWithDebugger()`.
         if jit_debugger_tracing() {
             return finishPreparing(debugger: true)
         }
@@ -388,7 +375,8 @@ enum Backend {
         return finishPreparing(debugger: true)
     }
 
-    /// The preparation itself: under TXM, the freeze. Returns why it failed.
+    /// The preparation itself: with a debugger, the freeze. Returns why it
+    /// failed.
     private static func finishPreparing(debugger: Bool) -> String? {
         if debugger {
             FreezeBanner.raiseAndWait(JitEnablement.preparingMessage)
@@ -547,6 +535,10 @@ enum Backend {
         }
         guard !waitingForChange, mayActNow else { return }
 
+        // Not while the device is being prepared: the helper would only decline for want of the
+        // very DDI being fetched, and say so. Preparation looks again itself once it is done.
+        if case .running = JitEnablement.preparation { return }
+
         // An offer already up is the answer to this check.
         if offer == .toNative { return }
         if mode == .dynamicAsk && offerDeclined { return }
@@ -576,13 +568,8 @@ enum Backend {
         #if targetEnvironment(macCatalyst)
             return true
         #else
-            switch TxmPresence.current {
-            case .absent: return true
-            case .unknown: return false
-            case .present:
-                if jit_debugger_tracing() { return true }
-                return JitPairingFile.exists && TunnelProbe.probeAndReport().isAvailable
-            }
+            if jit_debugger_tracing() { return true }
+            return JitPairingFile.exists && TunnelProbe.probeAndReport().isAvailable
         #endif
     }
 

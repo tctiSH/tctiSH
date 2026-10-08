@@ -441,7 +441,7 @@ enum CodeCacheMonitor {
     /// has succeeded; QEMU refuses to start it meanwhile.
     ///
     /// Waits for the flush that pays it out, so call it off the main thread.
-    /// Only reads and asks QEMU; nothing here touches the monitor's own state.
+    /// Only reads and asks QEMU; nothing here touches the monitor's state.
     static func releaseWhileParked() -> Bool {
         // Before the release, so that the poll never sees it unannounced, and so that it can't
         // start a countdown from here on.
@@ -510,9 +510,9 @@ enum CodeCacheMonitor {
         publish(.quiet)
     }
 
-    /// Prepares the cache again after `releaseWhileParked`, as at launch. Under
-    /// TXM that's a blessing with its freeze. Everywhere else it's the whole
-    /// buffer.
+    /// Prepares the cache again after `releaseWhileParked`, as at launch. Where
+    /// blessing applies that's a blessing with its freeze. Everywhere else it's
+    /// the whole buffer.
     ///
     /// Calls `completion` on the main queue with whether it worked. Until it
     /// has, the machine must stay parked. Main thread.
@@ -531,7 +531,7 @@ enum CodeCacheMonitor {
 
         // The release has to have happened first. Still pending, the grow would be refused as
         // pointless, and the flush that finally paid it out would do so under a running machine,
-        // taking pages under TXM that it was about to execute.
+        // taking pages that it was about to execute.
         DispatchQueue.global(qos: .userInitiated).async {
             guard waitForReleaseAll() else {
                 Log.jit.fail("code cache: the release while parked never happened")
@@ -852,8 +852,8 @@ enum CodeCacheMonitor {
         // Something already attached owns the trap. Asking a helper to attach as well is two
         // debuggers fighting over one process, and the loser reports it as nonsense: "Failed to
         // extract registers", signal numbers in the hundreds of thousands. Mirrors what
-        // `JitEnablement.enableUnderTxm()` does at launch, and needs no settle either, since a hook
-        // that has been there since launch is long since armed.
+        // `JitEnablement.enableWithDebugger()` does at launch, and needs no settle either, since a
+        // hook that has been there since launch is long since armed.
         if jit_debugger_tracing() {
             Log.jit.note("code cache: a debugger is already attached; trapping into it")
             return finishGrowth(to: next, started: started)

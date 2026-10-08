@@ -141,7 +141,7 @@ openssl_src="$(unpack "$DOWNLOAD_DIR/openssl-$OPENSSL_VERSION.tar.gz")"
 (
     cd "$openssl_src"
 
-    # ios64-xcrun is OpenSSL's own iOS arm64 target. It expects to find the
+    # ios64-xcrun is OpenSSL's iOS arm64 target. It expects to find the
     # SDK by running the compiler through `xcrun -sdk iphoneos`, which setting
     # CC to Xcode's clang directly bypasses -- hence the explicit -isysroot,
     # without which the first #include <stdio.h> fails.
@@ -181,7 +181,7 @@ libssh2_src="$(unpack "$DOWNLOAD_DIR/libssh2-$LIBSSH2_VERSION.tar.gz")"
         --disable-docker-tests \
         --disable-sshd-tests
 
-    # Only src/: the headers are plain files with no install rule of their own,
+    # Only src/: the headers are plain files with no install rule,
     # and are taken from the source tree below.
     make -j"$NCPU" -C src
     make -C src install

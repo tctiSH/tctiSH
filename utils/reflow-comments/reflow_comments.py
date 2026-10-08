@@ -29,8 +29,8 @@ Usage:
 
     python3 reflow_comments.py [--width N] [--doc-width N] [--lines A:B]... [--check] FILE...
 
-Doc comments get their own width because they are read as prose, in a popover or
-on a docs page, rather than scanned alongside the code they sit above.
+Doc comments get a separate width because they are read as prose, in a popover
+or on a docs page, rather than scanned alongside the code they sit above.
 
 `--lines A:B` confines the reflow to lines A to B, 1-based and inclusive, and may
 be repeated; it is how Dialect formats the comments it adds to files it does not
@@ -102,7 +102,7 @@ class Language:
     The differences that matter are small but not optional. Rust's ordinary
     string literals may contain a newline, so an unterminated `"` carries into
     the next line; Swift's may not, and treating one as if it did would swallow
-    the rest of the file. Each spells raw strings its own way, and Swift has a
+    the rest of the file. Each spells raw strings differently, and Swift has a
     multi-line form that Rust does not.
     """
 
@@ -126,7 +126,7 @@ class Language:
         self.rust_raw_strings = rust_raw_strings
         self.swift_raw_strings = swift_raw_strings
         #: YAML carries arbitrary text in `|` and `>` blocks, where `#` is not a
-        #: comment. Set for YAML, which uses its own scanner entirely.
+        #: comment. Set for YAML, which uses a separate scanner entirely.
         self.block_scalars = block_scalars
         self.comment = re.compile(
             r"^(?P<indent>[ \t]*)(?P<marker>" + "|".join(self.markers) + r")(?P<rest>.*)$"
@@ -171,11 +171,11 @@ BLOCK_SCALAR = re.compile(r"[|>](?:[0-9]|[+-]){0,2}[ \t]*(?:#.*)?$")
 def scan_yaml_comment_starts(lines):
     """Returns, per line, whether it begins a full-line YAML comment.
 
-    YAML needs its own scanner rather than the character walk below, because the
-    hazard is different in kind. There are no string-delimiter rules to carry
-    across lines; there are block scalars, whose contents are arbitrary text.
-    A `run: |` step holding a shell script would otherwise have its `#` lines
-    read as YAML comments and rewrapped, silently corrupting the script.
+    YAML needs a separate scanner rather than the character walk below, because
+    the hazard is different in kind. There are no string-delimiter rules to
+    carry across lines; there are block scalars, whose contents are arbitrary
+    text. A `run: |` step holding a shell script would otherwise have its `#`
+    lines read as YAML comments and rewrapped, silently corrupting the script.
 
     Known limitation: a `#` at the start of a continuation line of a multi-line
     *quoted* scalar is treated as a comment. That construction is vanishingly

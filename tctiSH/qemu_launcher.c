@@ -2,8 +2,6 @@
 // Low-level QEMU launcher.
 // Creates a thread that implements lightweight virtualization atop TCTI.
 //
-// Thanks to UTM for the jailbreak/ptrace code.
-//
 //  Created by Kate Temkin on 9/1/22.
 //  Copyright (c) 2022 Kate Temkin.
 //  Copyright (c) 2020 osy.
@@ -25,7 +23,6 @@
 #include <mach-o/getsect.h>
 #include <sys/fcntl.h>
 #include <sys/sysctl.h>
-#include <sys/_types/_caddr_t.h>
 
 #include "qemu_launcher.h"
 
@@ -34,18 +31,6 @@
 
 // Helpers.
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof(array[0]))
-
-// External functionality for JIT hacks.
-extern int csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersize);
-extern boolean_t exc_server(mach_msg_header_t *, mach_msg_header_t *);
-extern int ptrace(int request, pid_t pid, caddr_t addr, int data);
-
-#define CS_OPS_STATUS 0          /* return status */
-#define CS_KILL       0x00000200 /* kill process if it becomes invalid */
-/* process is currently or has previously been debugged and allowed to run with invalid pages */
-#define CS_DEBUGGED 0x10000000
-#define PT_TRACE_ME 0  /* child declares it's being traced */
-#define PT_SIGEXC   12 /* signals as exceptions for current_proc */
 
 //
 // QEMU internals that we'll use.
@@ -482,7 +467,7 @@ static void *qemu_thread(void *raw_args) {
         "-L", args->bios_dir,
 
         // Guest memory. Not part of TCTISH_MACHINE_ARGS even though it is
-        // migrated, because it is a user setting with its own staleness check:
+        // migrated, because it is a user setting with a separate staleness check:
         // see VmMemory.changedSinceLastBoot.
         "-m", args->memory_value,
 
@@ -658,66 +643,6 @@ void run_background_qemu(const char *qemu_path, const char *kernel_path, const c
     pthread_detach(thread);
 }
 
-/// Returns true iff the process has a debugger attached.
-/// (Method from UTM.)
-static bool has_debugger_attached(void) {
-    int flags;
-    if (csops(getpid(), CS_OPS_STATUS, &flags, sizeof(flags)) != 0) {
-        return false;
-    }
-
-    return flags & CS_DEBUGGED;
-}
-
-/// Exception passthrough for our debug hack.
-/// (Method from UTM.)
-static void *exception_handler(void *argument) {
-    mach_port_t port = *(mach_port_t *)argument;
-    mach_msg_server(exc_server, 2048, port, 0);
-    return NULL;
-}
-
-/// Attempts to enable JIT via a ptrace-based debugger.
-/// (Method from UTM.)
-static bool enable_ptrace_hack(void) {
-    if (has_debugger_attached()) {
-        return true;
-    } else {
-        // Thanks to this comment: https://news.ycombinator.com/item?id=18431524
-        // We use this hack to allow mmap with PROT_EXEC (which usually requires the
-        // dynamic-codesigning entitlement) by tricking the process into thinking
-        // that Xcode is debugging it. We abuse the fact that JIT is needed to
-        // debug the process.
-        if (ptrace(PT_TRACE_ME, 0, NULL, 0) < 0) {
-            return false;
-        }
-
-        // ptracing ourselves confuses the kernel and will cause bad things to
-        // happen to the system (hangs…) if an exception or signal occurs. Setup
-        // some "safety nets" so we can cause the process to exit in a somewhat sane
-        // state. We only need to do this if the debugger isn't attached. (It'll do
-        // this itself, and if we do it we'll interfere with its normal operation
-        // anyways.)
-        // First, ensure that signals are delivered as Mach software exceptions…
-        ptrace(PT_SIGEXC, 0, NULL, 0);
-
-        // …then ensure that this exception goes through our exception handler.
-        // I think it's OK to just watch for EXC_SOFTWARE because the other
-        // exceptions (e.g. EXC_BAD_ACCESS, EXC_BAD_INSTRUCTION, and friends)
-        // will end up being delivered as signals anyways, and we can get them
-        // once they're resent as a software exception.
-        mach_port_t port = MACH_PORT_NULL;
-        mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &port);
-        mach_port_insert_right(mach_task_self(), port, port, MACH_MSG_TYPE_MAKE_SEND);
-        task_set_exception_ports(mach_task_self(), EXC_MASK_SOFTWARE, port, EXCEPTION_DEFAULT,
-                                 THREAD_STATE_NONE);
-        pthread_t thread;
-        pthread_create(&thread, NULL, exception_handler, (void *)&port);
-
-        return true;
-    }
-}
-
 /// Returns true iff a debugger is attached to this process right now.
 ///
 /// This is deliberately the same `P_TRACED` test QEMU makes before raising its
@@ -736,21 +661,4 @@ bool jit_debugger_tracing(void) {
     }
 
     return (info.kp_proc.p_flag & P_TRACED) != 0;
-}
-
-/// Returns true iff this process may make its own mappings executable.
-///
-/// Not interchangeable with `jit_debugger_tracing()`. `CS_DEBUGGED` is sticky:
-/// once any debugger has attached it stays set for the life of the process, so
-/// it survives the detach at the end of enablement. This is exactly what makes
-/// the ptrace hack useful, and exactly what makes it useless for detecting that
-/// a debugger has arrived.
-bool jit_may_map_executable(void) {
-    return has_debugger_attached();
-}
-
-bool set_up_jit(void) {
-    // For now, we only have one JIT method, but later we should support
-    // some e.g. jailbreak based methods.
-    return enable_ptrace_hack();
 }

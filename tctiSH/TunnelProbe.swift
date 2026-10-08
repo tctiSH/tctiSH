@@ -15,11 +15,24 @@ import Network
 /// much slower "available" is a signal that the probe's assumptions are wrong.
 enum TunnelProbeResult {
     case available(elapsed: TimeInterval)
+
+    /// A loopback VPN interface is up, but nothing at the device's end of the
+    /// tunnel accepted a connection. If it is up and not working we say so.
+    case notAnswering(reason: String, elapsed: TimeInterval)
+
     case unavailable(reason: String, elapsed: TimeInterval)
 
     var isAvailable: Bool {
         if case .available = self { return true }
         return false
+    }
+
+    /// Whether a loopback VPN interface is up, answering or not.
+    var interfaceIsUp: Bool {
+        switch self {
+        case .available, .notAnswering: return true
+        case .unavailable: return false
+        }
     }
 }
 
@@ -37,7 +50,7 @@ enum TunnelProbe {
 
     /// The network the loopback VPN works on, as a dotted prefix.
     ///
-    /// The /16 rather than the endpoint's own /24, as the two don't match.
+    /// The /16 rather than the endpoint's /24, as the two don't match.
     static let tunnelNetworkPrefix = "10.7."
 
     /// Human-readable form of the above, for the log.
@@ -179,23 +192,23 @@ enum TunnelProbe {
             return .unavailable(reason: "no tunnel interface on \(tunnelNetwork)", elapsed: 0)
         }
 
-        let result = probe()
-
-        switch result {
+        switch probe() {
         case .available(let elapsed):
             Log.network.note(
                 String(
                     format: "tunnel: %@:%u reachable in %.1fms",
                     defaultAddress, UInt32(defaultPort), elapsed * 1000))
+            return .available(elapsed: elapsed)
 
-        case .unavailable(let reason, let elapsed):
+        case .notAnswering(let reason, let elapsed), .unavailable(let reason, let elapsed):
             Log.network.note(
                 String(
                     format: "tunnel: %@:%u unreachable after %.1fms (%@)",
                     defaultAddress, UInt32(defaultPort), elapsed * 1000, reason))
-        }
 
-        return result
+            // The interface is there, so this is the tunnel failing, not the VPN being off.
+            return .notAnswering(reason: reason, elapsed: elapsed)
+        }
     }
 }
 

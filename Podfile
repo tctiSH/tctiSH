@@ -33,7 +33,7 @@ target "tctiSH" do
 end
 
 # BlueSocket declares a deployment target far below ours -- 10.0 -- and CocoaPods
-# now keeps each podspec's own value rather than raising it to the platform, as
+# now keeps each podspec's value rather than raising it to the platform, as
 # it did when these were last generated. Xcode 27 refuses anything that old, so
 # pin every pod to ours. SwiftSH's vendored podspec already says 18.0; pinning it
 # too keeps the two from drifting apart.

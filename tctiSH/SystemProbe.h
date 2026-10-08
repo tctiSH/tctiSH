@@ -13,7 +13,7 @@
 /// Calls `found` with the name and value of every integer sysctl under `node`
 /// (such as "hw.optional"), in the kernel's order.
 ///
-/// Walks the MIB with the kernel's own "next" and "name" queries, so it finds
+/// Walks the MIB with the kernel's "next" and "name" queries, so it finds
 /// feature flags this code has never heard of. Returns how many it found, or
 /// -1 if there is no such node.
 int system_probe_sysctls(const char *node,

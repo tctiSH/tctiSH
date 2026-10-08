@@ -35,8 +35,9 @@ enum JITHelper {
     struct Request {
         var operation: Operation
 
-        /// Contents of the pairing file, not its path: the helper has its own
-        /// container, so nothing the host can name is reachable from there.
+        /// Contents of the pairing file, not its path: the helper runs in a
+        /// separate container, so nothing the host can name is reachable from
+        /// there.
         var pairingData: Data?
 
         /// The process the debugger should attach to: the host, always.
@@ -87,7 +88,7 @@ enum JITHelper {
         /// The helper's full transcript.
         var report: [String] = []
 
-        /// The helper's own reading of TXM presence.
+        /// The helper's reading of TXM presence.
         var txmPresent: Bool?
 
         /// Whether the developer disk image was already mounted. `status` only.
