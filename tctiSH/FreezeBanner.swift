@@ -41,8 +41,8 @@ final class FreezeBanner: UIView {
     ///
     /// The bar lives in the keyboard's window rather than the app's, so the
     /// banner can't cover it however it is placed. Without this, the bar's keys
-    /// and settings button stay bright and tappable under a banner saying the
-    /// app can't respond, and whatever they do happens once it can.
+    /// stay bright and tappable under a banner saying the app can't respond,
+    /// and whatever they do happens once it can.
     private static var accessoryShade: UIView?
 
     private let label = UILabel()
@@ -173,11 +173,11 @@ final class FreezeBanner: UIView {
             return nil
         }
 
-        let shade = UIView(frame: bar.bounds)
+        let shade = AccessoryShade(frame: bar.bounds)
         shade.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        shade.backgroundColor = banner.backgroundColor
         shade.alpha = banner.alpha
         shade.isUserInteractionEnabled = true
+        shade.color = banner.backgroundColor
 
         bar.addSubview(shade)
         bar.accessibilityElementsHidden = true
@@ -241,5 +241,30 @@ final class FreezeBanner: UIView {
 
     required init?(coder: NSCoder) {
         fatalError("FreezeBanner is not loaded from a nib")
+    }
+}
+
+/// The banner's shade over the keyboard's accessory bar: dark only where the
+/// bar is drawn, which for the key bar is its capsules, and laid out again
+/// whenever the bar is, so that it follows them through a rotation.
+private final class AccessoryShade: UIView {
+
+    var color: UIColor?
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        subviews.forEach { $0.removeFromSuperview() }
+
+        let bar = superview
+        let drawn = (bar as? KeyBar)?.capsuleFrames ?? [bounds]
+        for frame in drawn {
+            let piece = UIView(frame: frame)
+            piece.backgroundColor = color
+            if bar is KeyBar {
+                piece.layer.cornerRadius = frame.height / 2
+                piece.layer.cornerCurve = .continuous
+            }
+            addSubview(piece)
+        }
     }
 }

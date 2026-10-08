@@ -37,6 +37,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         options connectionOptions: UIScene.ConnectionOptions
     ) {
         appDelegate?.handleSceneWillConnect(shortcutItem: connectionOptions.shortcutItem)
+        Accent.apply()
     }
 
     /// Where a quick action lands when the scene was already connected: usually
@@ -56,6 +57,8 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     func sceneWillEnterForeground(_ scene: UIScene) {
+        // Again here, in case the storyboard's window wasn't in place yet when the scene connected.
+        Accent.apply()
         appDelegate?.handleWillEnterForeground()
     }
 

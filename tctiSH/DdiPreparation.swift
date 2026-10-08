@@ -30,7 +30,7 @@ enum DdiPreparation {
     /// The cryptex image since StikJIT 1.6.0, which mounts through cryptexd;
     /// the old image mounter can't mount DDIs on the iPhone 18 series of
     /// devices.
-    private static let catalogue = URL(
+    private static let catalog = URL(
         string: "https://github.com/doronz88/DeveloperDiskImage/raw/refs/heads/main"
             + "/PersonalizedImages/Xcode_iOS_DDI_Cryptex")!
 
@@ -288,7 +288,7 @@ enum DdiPreparation {
             Log.network.note("ddi: fetching \(name)")
 
             try downloader.download(
-                catalogue.appendingPathComponent(name),
+                catalog.appendingPathComponent(name),
                 to: URL(fileURLWithPath: file.destination)
             ) { written, expected in
                 if !announced {

@@ -32,6 +32,9 @@
 		<!-- Exists only to raise the Local Network prompt deliberately. See LocalNetworkPermission.swift. -->
 		<string>_tctishprobe._tcp</string>
 	</array>
+	<!-- tctiSH's UIApplication, which sees every key whatever has the keyboard. See TctiApplication.swift. -->
+	<key>NSPrincipalClass</key>
+	<string>TctiApplication</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>tctiSH advertises itself on your local network so this device can pair with it, which is what lets the VM run with JIT.</string>
 	<key>UIApplicationSceneManifest</key>

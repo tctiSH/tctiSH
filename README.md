@@ -67,10 +67,12 @@ To build the app onto your device, you can follow these steps:
    before changing the team to your team and setting a bundle identifier you can build with. Then
    select the JITHelper target and do the same.
 4. In Xcode's build menu select tctiSH as the scheme and your device as the build target (we do not
-   currently support simulator devices). Then run the build. This should launch the app on your
-   device, though do note that the first launch under Xcode will hang forever, so feel free to kill
-   it and relaunch by hand. You can fix this by installing
-   [`jit-bless.py`](./utils/jit-bless/jit_bless.py) as an LLDB script as described in that file.
+   currently support simulator devices). Then run the build. The first build in Xcode asks you to
+   trust SwiftTerm's `SwiftTermBuildInfoPlugin`, which records SwiftTerm's version; choose Trust &
+   Enable (`make build` skips this check by itself). This should launch the app on your device,
+   though do note that the first launch under Xcode will hang forever, so feel free to kill it and
+   relaunch by hand. You can fix this by installing [`jit-bless.py`](./utils/jit-bless/jit_bless.py)
+   as an LLDB script as described in that file.
 
 ### Basic Usage
 
@@ -232,7 +234,7 @@ Everything tctiSH adds _on top_ of the stock Alpine root filesystem lives in `as
 | ------------------------------------ | --------------------------------------------------------------------------------- |
 | `init`                               | Unpacks into RAM, builds the overlayfs root, hands off to busybox init.           |
 | `etc/inittab`                        | Respawns the getty, syslogd and dropbear.                                         |
-| `etc/profile.d/shell_integration.sh` | The PS1 that reports the guest's cwd to the host, and prints `tcti_motd`.         |
+| `etc/profile.d/shell_integration.sh` | The PS1 that reports the guest's cwd, `COLORTERM`, and prints `tcti_motd`.        |
 | `etc/profile.d/mount_shared.sh`      | Mounts the 9p tag `qemu_launcher.c` passes as `shared`.                           |
 | `etc/motd`                           | **Deliberately empty**, so Alpine's own greeting does not print over `tcti_motd`. |
 

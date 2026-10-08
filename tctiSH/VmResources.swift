@@ -129,7 +129,7 @@ enum VmMemory {
 
     /// The same, for a stated JIT arrangement rather than the expected one.
     ///
-    /// Parameterised so the screen can show both. They differ by the whole of
+    /// Parameterized so the screen can show both. They differ by the whole of
     /// the code cache.
     static func recommendedCeiling(blessed: Bool) -> Int {
         let physical = Mebibytes.hostPhysicalMemory / (1024 * 1024)
@@ -611,6 +611,11 @@ enum AppSetting: String {
     case parkInBackground = "park_in_background"
     case releaseCodeCacheInBackground = "release_code_cache_in_background"
     case keepScreenAwake = "keep_screen_awake"
+    case pinnedKeys = "pinned_keys"
+    case hideKeyBarWithHardwareKeyboard = "hide_key_bar_with_hardware_keyboard"
+    case arrowRepeatDelay = "arrow_repeat_delay"
+    case accentColor = "accent_color"
+    case allowClipboardRead = "allow_clipboard_read"
 
     var string: String {
         UserDefaults.standard.string(forKey: rawValue) ?? ""
@@ -624,6 +629,14 @@ enum AppSetting: String {
         UserDefaults.standard.bool(forKey: rawValue)
     }
 
+    var strings: [String] {
+        UserDefaults.standard.stringArray(forKey: rawValue) ?? []
+    }
+
+    var doubles: [Double] {
+        UserDefaults.standard.array(forKey: rawValue) as? [Double] ?? []
+    }
+
     func set(_ value: String) {
         UserDefaults.standard.set(value, forKey: rawValue)
     }
@@ -634,5 +647,18 @@ enum AppSetting: String {
 
     func set(_ value: Bool) {
         UserDefaults.standard.set(value, forKey: rawValue)
+    }
+
+    func set(_ value: [String]) {
+        UserDefaults.standard.set(value, forKey: rawValue)
+    }
+
+    func set(_ value: [Double]) {
+        UserDefaults.standard.set(value, forKey: rawValue)
+    }
+
+    /// Back to the registered default, or to nothing if there isn't one.
+    func clear() {
+        UserDefaults.standard.removeObject(forKey: rawValue)
     }
 }

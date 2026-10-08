@@ -31,7 +31,7 @@ enum QuickActions {
             }
         }
 
-        /// Whether a boot honouring this should try to JIT, or nil where the
+        /// Whether a boot honoring this should try to JIT, or nil where the
         /// request says nothing about JIT and the setting still stands.
         var wantsJit: Bool? {
             switch self {

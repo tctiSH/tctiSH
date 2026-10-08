@@ -230,9 +230,13 @@ else
     GUEST_IMAGES := $(GUEST_INITRD) $(GUEST_DISK)
 endif
 
+# SwiftTerm generates its version information with a build-tool plugin, which Xcode will only run
+# once someone has trusted it in the IDE. A command-line build has nobody to ask, so skips the check
+# instead.
 .PHONY: build
 build: $(QEMU_LIBRARY) $(STIKJIT_FRAMEWORK) $(LIBSSH2_LIBRARY) $(PODS_MANIFEST) $(GUEST_IMAGES) ## Build the app for a generic iOS device (GUEST=prebuilt to skip rebuilding the guest images)
-	xcodebuild -workspace tctiSH.xcworkspace -scheme tctiSH -destination 'generic/platform=iOS' build
+	xcodebuild -workspace tctiSH.xcworkspace -scheme tctiSH -destination 'generic/platform=iOS' \
+		-skipPackagePluginValidation build
 
 .PHONY: tctictl
 tctictl: $(TCTICTL_BINARY) ## Build the guest-side tctictl, which `make guest` consumes

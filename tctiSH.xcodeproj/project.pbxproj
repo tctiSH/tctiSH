@@ -107,7 +107,6 @@
 		8DE8208F28C180770035686B /* initrd.img */ = {isa = PBXFileReference; lastKnownFileType = file; name = initrd.img; path = assets/initrd.img; sourceTree = "<group>"; };
 		8DE8209128C1808F0035686B /* bzImage */ = {isa = PBXFileReference; lastKnownFileType = file; name = bzImage; path = assets/bzImage; sourceTree = "<group>"; };
 		8DEC8CE828C139B60017AC30 /* third-party */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "third-party"; sourceTree = "<group>"; };
-		8DEC8CE928C139C10017AC30 /* SwiftTerm */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = SwiftTerm; path = "third-party/SwiftTerm"; sourceTree = "<group>"; };
 		8DF5F02828C1BCC800FB1F1C /* qemu-x86_64-softmmu.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "qemu-x86_64-softmmu.framework"; path = "sysroot-iOS-arm64/Frameworks/qemu-x86_64-softmmu.framework"; sourceTree = "<group>"; };
 		8DF5F02D28C1BCEA00FB1F1C /* gmodule-2.0.0.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "gmodule-2.0.0.framework"; path = "sysroot-iOS-arm64/Frameworks/gmodule-2.0.0.framework"; sourceTree = "<group>"; };
 		8DF5F02E28C1BCEA00FB1F1C /* glib-2.0.0.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "glib-2.0.0.framework"; path = "sysroot-iOS-arm64/Frameworks/glib-2.0.0.framework"; sourceTree = "<group>"; };
@@ -243,7 +242,6 @@
 			isa = PBXGroup;
 			children = (
 				8DEC8CE828C139B60017AC30 /* third-party */,
-				8DEC8CE928C139C10017AC30 /* SwiftTerm */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -343,6 +341,7 @@
 			packageReferences = (
 				498667032575F1FD006BFFA0 /* XCRemoteSwiftPackageReference "SwiftSH" */,
 				8D2AC18C28C7EF2D005DB7D4 /* XCRemoteSwiftPackageReference "swift-atomics" */,
+				16263731CAA602FE586240C9 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
 			);
 			productRefGroup = 49BD1A5B224207B5005A2252 /* Products */;
 			projectDirPath = "";
@@ -776,11 +775,20 @@
 				minimumVersion = 1.0.0;
 			};
 		};
+		16263731CAA602FE586240C9 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm";
+			requirement = {
+				kind = exactVersion;
+				version = 1.20.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		4959FFDA2447F971001F42C0 /* SwiftTerm */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = 16263731CAA602FE586240C9 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
 			productName = SwiftTerm;
 		};
 		8D2AC18D28C7EF2D005DB7D4 /* Atomics */ = {

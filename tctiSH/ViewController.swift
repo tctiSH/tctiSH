@@ -22,8 +22,15 @@ class ViewController: UIViewController {
     /// keyboard's presence.
     var keyboardDelta: CGFloat = 0
 
+    /// Where the keyboard last said it was, in screen coordinates.
+    private var keyboardScreenFrame: CGRect = .zero
+
     /// Shows system status: how we're running and what's happening alongside.
     private var status: StatusPresenter?
+
+    /// The keys above the keyboard. Held here because the terminal lets go of
+    /// it while a hardware keyboard has it hidden.
+    private(set) var keyBar: KeyBar?
 
     /// The pairing session in progress, if any. Strong: nothing else holds it.
     private var pairingSession: PairableHostPairing?
@@ -86,12 +93,11 @@ class ViewController: UIViewController {
         setupKeyboardMonitor()
 
         // Before `becomeFirstResponder`, because the accessory view is read as the terminal takes
-        // the keyboard. Installing it afterwards would need an explicit `reloadInputViews()` and
-        // would briefly show the bar without it.
-        SettingsAccessory.install(on: currentTerminal) { [weak self] in
-            guard let self else { return }
-            SettingsViewController.present(from: self)
+        // the keyboard. Installing it afterwards would briefly show SwiftTerm's own bar first.
+        keyBar = KeyBar.install(on: currentTerminal) { [weak self] in
+            self?.openSettings(nil)
         }
+        keyBar?.didMove = { [weak self] in self?.updateKeyboardDelta() }
 
         currentTerminal.becomeFirstResponder()
 
@@ -1069,16 +1075,46 @@ class ViewController: UIViewController {
     @objc private func keyboardFrameChanged(_ notification: NSNotification) {
         guard
             let keyboardValue = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey]
-                as? NSValue,
-            let screen = view.window?.screen
+                as? NSValue
         else { return }
 
-        // How much of the view the keyboard covers, measured from its top edge down, rather than
-        // its height: a bar that floats clear of the bottom of the screen covers the gap beneath it
-        // too. A keyboard that is going away, or is undocked somewhere off the view, covers none.
-        let keyboardFrame = view.convert(keyboardValue.cgRectValue, from: screen.coordinateSpace)
-        let covered = view.bounds.intersection(keyboardFrame)
-        keyboardDelta = covered.isEmpty ? 0 : view.bounds.maxY - covered.minY
+        keyboardScreenFrame = keyboardValue.cgRectValue
+        updateKeyboardDelta()
+    }
+
+    /// Sizes the terminal to stop above the keyboard, or above the key bar if
+    /// that reaches higher.
+    ///
+    /// The bar is asked where it is, rather than trusted to be inside what the
+    /// keyboard reports. When it's put back after a hardware keyboard had it
+    /// hidden, iOS announces the keyboard at zero height and then nothing more,
+    /// though the bar is up along the bottom of the screen.
+    func updateKeyboardDelta() {
+        guard let screen = view.window?.screen else { return }
+
+        // Only what's docked: the keyboard along the bottom of the screen, and the bar along it or
+        // riding a docked keyboard. A floating keyboard, iPad's small one, is reported where it
+        // floats, over the middle of the terminal, which then stopped short above it; floating, it
+        // covers the terminal rather than pushing it up.
+        let bottom = screen.bounds.maxY
+        let keyboard = keyboardScreenFrame
+        let keyboardDocked = keyboard.height > 0 && keyboard.maxY >= bottom - 1
+        let bar = keyBar?.screenFrame.flatMap { bar in
+            bar.maxY >= bottom - 1 || (keyboardDocked && abs(bar.maxY - keyboard.minY) <= 1)
+                ? bar : nil
+        }
+
+        // How much of the view each covers, measured from its top edge down, rather than its
+        // height: a bar that floats clear of the bottom of the screen covers the gap beneath it
+        // too. One that is going away covers none.
+        let covering = [keyboardDocked ? keyboard : nil, bar].compactMap { $0 }
+        keyboardDelta =
+            covering.map { frame in
+                let covered = view.bounds.intersection(
+                    view.convert(frame, from: screen.coordinateSpace))
+                return covered.isEmpty ? 0 : view.bounds.maxY - covered.minY
+            }.max() ?? 0
+
         tv.frame = makeFrame(keyboardDelta: keyboardDelta)
     }
 
@@ -1101,6 +1137,29 @@ extension ViewController {
     @objc func openSettings(_ sender: Any?) {
         guard presentedViewController == nil else { return }
         SettingsViewController.present(from: self)
+    }
+
+    /// View > Show Key Bar With Hardware Keyboard, from the menu bar; the same
+    /// setting as Settings > Keyboard has, the other way up.
+    @objc func toggleKeyBarWithHardwareKeyboard(_ sender: Any?) {
+        AppSetting.hideKeyBarWithHardwareKeyboard.set(
+            !AppSetting.hideKeyBarWithHardwareKeyboard.bool)
+    }
+
+    /// View > Customize Toolbar…, from the menu bar: straight to the key bar's
+    /// pinned keys in Settings.
+    @objc func customizeKeyBar(_ sender: Any?) {
+        guard presentedViewController == nil else { return }
+        SettingsViewController.present(from: self, showing: .pinnedKeys)
+    }
+
+    /// Ticks Show Key Bar With Hardware Keyboard while it's on.
+    override func validate(_ command: UICommand) {
+        super.validate(command)
+
+        if command.action == #selector(toggleKeyBarWithHardwareKeyboard(_:)) {
+            command.state = AppSetting.hideKeyBarWithHardwareKeyboard.bool ? .off : .on
+        }
     }
 
     /// The same ⌘, on iPhone, which has no menu bar for the app menu's command
@@ -1131,26 +1190,24 @@ extension ViewController {
         if QuickActions.request == .recovery
             || UserDefaults.standard.string(forKey: "resume_behavior") == "recovery_boot"
         {
-            tv.feed(text: "(Recovery booting; startup will take a bit.)\r\n\r\n")
+            say("(Recovery booting; startup will take a bit.)")
         }
 
         // If this is our first boot, create the image we'll use for resuming.
         else if AppDelegate.isFirstBoot {
-            tv.feed(text: "Welcome to tctiSH! This first boot will take\r\n")
-            tv.feed(text: "just a bit longer, as we set up this environment\r\n")
-            tv.feed(text: "for later use. Future boots will be way faster!\r\n\r\n")
-
-            tv.feed(text: "This will take ~20 seconds or so.\r\n\r\n")
+            say(
+                "Welcome to tctiSH! This first boot will take just a bit longer, as we set up this "
+                    + "environment for later use. Future boots will be way faster!",
+                "This will take ~20 seconds or so.")
         }
 
         // If we're forcing a recovery boot by something other than user choice, provide a message
         // letting the user know
         else if AppDelegate.forceRecoveryBoot {
-            tv.feed(text: "It seems like our last attempt at resuming\r\n")
-            tv.feed(text: "might not have gone so well. We'll recover\r\n")
-            tv.feed(text: "by restarting things the slow way.\r\n\r\n")
-
-            tv.feed(text: "This will take ~20 seconds or so.\r\n\r\n")
+            say(
+                "It seems like our last attempt at resuming might not have gone so well. We'll "
+                    + "recover by restarting things the slow way.",
+                "This will take ~20 seconds or so.")
         }
 
         // An updated app can mean an updated guest kernel, an updated QEMU, or a different machine
@@ -1158,47 +1215,48 @@ extension ViewController {
         // None of those can be resumed into. Says "updated" rather than naming which, because the
         // distinction is ours and not the user's.
         else if AppDelegate.snapshotEpochChanged {
-            tv.feed(text: "tctiSH has been updated, so we'll need to\r\n")
-            tv.feed(text: "re-create our 'instant boot' environment,\r\n")
-            tv.feed(text: "just this once after the update.\r\n\r\n")
-
-            tv.feed(text: "This will take ~20 seconds or so.\r\n\r\n")
+            say(
+                "tctiSH has been updated, so we'll need to re-create our 'instant boot' "
+                    + "environment, just this once after the update.",
+                "This will take ~20 seconds or so.")
         }
 
         // If the user has just changed the amount of memory in the VM, they'll need a full boot to
         // re-populate the environment. Let them know.
         else if AppDelegate.memoryValueChanged {
-            tv.feed(text: "The memory limit placed on tctiSH has changed.\r\n")
-            tv.feed(text: "We'll need to re-create our 'instant boot'\r\n")
-            tv.feed(text: "environment, just this once after the change.\r\n\r\n")
-
-            tv.feed(text: "This will take ~20 seconds or so.\r\n\r\n")
-
+            say(
+                "The memory limit placed on tctiSH has changed. We'll need to re-create our "
+                    + "'instant boot' environment, just this once after the change.",
+                "This will take ~20 seconds or so.")
         }
 
         // A code cache change costs nothing at the guest's end so this says what changed without
         // promising a slow boot the way the branches above have to.
         else if AppDelegate.codeCacheChanged {
-            tv.feed(text: "The code cache size has changed.\r\n")
-            tv.feed(text: "tctiSH is now using \(CodeCache.summary).\r\n\r\n")
+            say("The code cache size has changed. tctiSH is now using \(CodeCache.summary).")
+        }
+    }
 
-            for _ in 0...20 {
-                tv.feed(text: "\n")
+    /// Prints paragraphs, each followed by a blank line, wrapped at word
+    /// boundaries to the terminal's width.
+    ///
+    /// Written as whole paragraphs rather than broken by hand at some fixed
+    /// width, which left a short line on an iPad's wide terminal running over
+    /// three. Wrapped here rather than by the terminal, which would break the
+    /// line in the middle of a word.
+    private func say(_ paragraphs: String...) {
+        let width = max(20, tv.getTerminal().cols)
+
+        for paragraph in paragraphs {
+            var line = ""
+            for word in paragraph.split(separator: " ") {
+                if !line.isEmpty, line.count + 1 + word.count > width {
+                    tv.feed(text: line + "\r\n")
+                    line = ""
+                }
+                line += line.isEmpty ? String(word) : " " + word
             }
-
-        } else {
-            // Provide some filler content, to ensure the ScrollView starts with something in it;
-            // and then issue a "clear", so it's off the backlog. This is a cheap, hackish way of
-            // getting there to be something in the UIScrollView buffer; which means that we avoid
-            // the nasty "transparent" boxes it tries to squish at either end if there's not enough
-            // content.
-            //
-            // We could squish in spacer controls; but these do the same thing and don't muck up the
-            // position math SwiftTerm does later.
-            for _ in 0...25 {
-                tv.feed(text: "\n")
-            }
-
+            tv.feed(text: line + "\r\n\r\n")
         }
     }
 }

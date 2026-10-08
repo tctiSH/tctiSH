@@ -697,7 +697,7 @@ public class QEMUInterface {
     /// The HMP prompt, and so the only reliable "that command has finished".
     private static let monitorPrompt = "(qemu)"
 
-    /// Serialises everything that talks to the monitor.
+    /// Serializes everything that talks to the monitor.
     ///
     /// One socket, one command at a time, one reader. `savevm` holds it for as
     /// long as the snapshot takes. The collision this prevents is not

@@ -31,7 +31,7 @@ final class StatusPresenter {
         /// How long to keep it, or nil to keep it until it's dismissed.
         var duration: TimeInterval?
 
-        /// Colour of the message and the dial. Nil leaves it as it comes.
+        /// Color of the message and the dial. Nil leaves it as it comes.
         var tint: UIColor?
 
         /// Whether a change to an existing pill's indicator is animated.

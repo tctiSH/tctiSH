@@ -90,9 +90,9 @@ enum LocalAlert {
     /// doesn't control. A notice that has become untrue is worth withdrawing
     /// from the shade as well as from the queue.
     static func withdraw(id: String) {
-        let centre = UNUserNotificationCenter.current()
+        let center = UNUserNotificationCenter.current()
 
-        centre.removePendingNotificationRequests(withIdentifiers: [id])
-        centre.removeDeliveredNotifications(withIdentifiers: [id])
+        center.removePendingNotificationRequests(withIdentifiers: [id])
+        center.removeDeliveredNotifications(withIdentifiers: [id])
     }
 }

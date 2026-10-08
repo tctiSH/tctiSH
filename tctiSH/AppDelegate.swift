@@ -122,6 +122,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             "code_cache_notifications": true,
             "park_in_background": false,
             "release_code_cache_in_background": false,
+            "pinned_keys": BarKey.defaultPinned.map(\.rawValue),
+            "hide_key_bar_with_hardware_keyboard": false,
+            "arrow_repeat_delay": ArrowRepeat.defaultDelay,
+            "allow_clipboard_read": false,
         ])
 
         // Before anything reads it.
@@ -220,6 +224,22 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             builder.insertChild(
                 UIMenu(options: .displayInline, children: [settings]),
                 atStartOfMenu: .application)
+        }
+
+        // The key bar is tctiSH's toolbar.
+        let keyBar: [UIMenuElement] = [
+            UICommand(
+                title: "Show Key Bar With Hardware Keyboard",
+                action: #selector(ViewController.toggleKeyBarWithHardwareKeyboard(_:))),
+            UICommand(
+                title: "Customize Toolbar…",
+                action: #selector(ViewController.customizeKeyBar(_:))),
+        ]
+        if builder.menu(for: .toolbar) != nil {
+            builder.replaceChildren(ofMenu: .toolbar) { _ in keyBar }
+        } else {
+            builder.insertChild(
+                UIMenu(options: .displayInline, children: keyBar), atStartOfMenu: .view)
         }
     }
 

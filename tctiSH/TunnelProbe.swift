@@ -122,7 +122,7 @@ enum TunnelProbe {
             case .failed(let error):
                 if outcome.finish(reason: error.localizedDescription) { semaphore.signal() }
 
-            // Reported when the path itself is unusable. Measured behaviour with the tunnel down is
+            // Reported when the path itself is unusable. Measured behavior with the tunnel down is
             // a timeout rather than this -- 10.7.0.1 routes out the default interface and the SYNs
             // are simply dropped -- but handle it anyway for the cases where the network does say
             // no.

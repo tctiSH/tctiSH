@@ -59,6 +59,12 @@ private struct SettingsRow {
     /// Set when the row carries a switch.
     var toggle: ToggleValue?
 
+    /// Set when the row is a slider, which then fills it.
+    var slider: SliderValue?
+
+    /// Set when the row carries a color well.
+    var color: ColorValue?
+
     /// What tapping does, or nil if the row does nothing.
     var select: (() -> Void)?
 }
@@ -67,11 +73,34 @@ private struct SettingsRow {
 private struct ToggleValue {
     var isOn: Bool
 
-    /// Greyed out when false, for a switch that only means something while
+    /// Grayed out when false, for a switch that only means something while
     /// another one is on.
     var isEnabled = true
 
     var commit: (Bool) -> Void
+}
+
+/// A color, picked from a well that opens the system's color picker.
+private struct ColorValue {
+    var color: UIColor
+
+    /// Called as the color changes in the picker, so it can be shown as it's
+    /// chosen.
+    var commit: (UIColor) -> Void
+}
+
+/// A slider, which stops only at the steps between its ends.
+private struct SliderValue {
+    var value: Float
+    var range: ClosedRange<Float>
+    var step: Float
+
+    /// How a value is shown beside the title.
+    var label: (Float) -> String
+
+    /// Called as the slider reaches each step, so the setting is never left
+    /// unsaved.
+    var commit: (Float) -> Void
 }
 
 /// A group of rows, with the prose that explains them.
@@ -98,10 +127,19 @@ private struct SettingsOption<Value: Equatable> {
 /// `NSInternalInconsistencyException` if it doesn't.
 private final class FixedWidthTextField: UITextField {
 
-    static let width: CGFloat = 150
+    /// The widths it's given: wider where the list has the room, as on an iPad.
+    static let narrowWidth: CGFloat = 150
+    static let wideWidth: CGFloat = 240
+
+    var width: CGFloat = narrowWidth {
+        didSet {
+            frame.size.width = width
+            invalidateIntrinsicContentSize()
+        }
+    }
 
     override var intrinsicContentSize: CGSize {
-        CGSize(width: Self.width, height: super.intrinsicContentSize.height)
+        CGSize(width: width, height: super.intrinsicContentSize.height)
     }
 }
 
@@ -119,6 +157,34 @@ private final class SettingsNavigationController: UINavigationController {
             NotificationCenter.default.post(name: SettingsViewController.didClose, object: nil)
         }
     }
+}
+
+/// A row's icon.
+///
+/// The system symbol, but for the few whose drawing sits off the middle of its
+/// box, which a list centers by the box: those are drawn into one with room
+/// added beneath, so that the part the eye goes to lands on the row's middle
+/// instead. Each is given as where, down its box, that part's middle is.
+private func settingsIcon(_ name: String) -> UIImage? {
+    // The rectangle, whose middle is lower than the box's: the pencil rises out of its corner.
+    let opticalMiddles: [String: CGFloat] = ["rectangle.and.pencil.and.ellipsis": 0.631]
+
+    guard let middle = opticalMiddles[name] else {
+        return UIImage(systemName: name)
+    }
+
+    let configuration = UIImage.SymbolConfiguration(textStyle: .body)
+    guard let symbol = UIImage(systemName: name, withConfiguration: configuration) else {
+        return nil
+    }
+
+    let box = symbol.size
+    let size = CGSize(width: box.width, height: box.height * 2 * middle)
+    return UIGraphicsImageRenderer(size: size)
+        .image { _ in
+            symbol.withTintColor(.black).draw(in: CGRect(origin: .zero, size: box))
+        }
+        .withRenderingMode(.alwaysTemplate)
 }
 
 /// The list plumbing, so each screen below is content only.
@@ -147,11 +213,40 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
     private var rowsById: [String: SettingsRow] = [:]
 
     /// The text fields, kept across rebuilds so editing survives a reload.
-    private var fields: [String: UITextField] = [:]
+    private var fields: [String: FixedWidthTextField] = [:]
 
     /// The switches, kept for the same reason: a fresh one mid-gesture would
     /// snap back under the finger moving it.
     private var switches: [String: UISwitch] = [:]
+
+    /// The color wells, kept for the same reason: a fresh one would close the
+    /// picker it had open.
+    private var wells: [String: UIColorWell] = [:]
+
+    /// The sliders, kept for the same reason.
+    private var sliders: [String: SliderAccessory] = [:]
+
+    /// From this width, a slider goes on the same line as its title, at the
+    /// width given; below it, beneath. Stretched across a wide iPad sheet, a
+    /// slider would be a long way from its title and far longer than it needs.
+    private static let sliderInlineWidth: CGFloat = 520
+
+    /// Whether the list was last built wide enough for sliders on one line.
+    private var builtWide: Bool?
+
+    /// What this screen is following, to stop following when it goes: block
+    /// observers stay registered until they're removed, whatever happens to
+    /// whoever added them, and a screen opened again and again would leave one
+    /// of each behind every time.
+    fileprivate var observers: [NSObjectProtocol] = []
+
+    deinit {
+        observers.forEach(NotificationCenter.default.removeObserver)
+    }
+
+    private var isWide: Bool {
+        collectionView.bounds.width >= Self.sliderInlineWidth
+    }
 
     /// Fills in `sections`. Overridden by every subclass.
     fileprivate func buildSections() -> [SettingsSection] { [] }
@@ -204,10 +299,40 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
             [weak self] cell, _, id in
             guard let self, let row = rowsById[id] else { return }
 
+            // With room, a row like the rest, the slider and its value on the end as switches are;
+            // without, the slider beneath.
+            if let slider = row.slider {
+                if isWide {
+                    var content = UIListContentConfiguration.valueCell()
+                    content.text = row.title
+                    content.image = row.symbol.flatMap(settingsIcon)
+                    content.imageProperties.tintColor = .tintColor
+                    cell.contentConfiguration = content
+
+                    let accessory = self.slider(for: id, slider)
+                    accessory.configure(slider)
+                    // Its own width, kept: left to the standard width an accessory is given, it was
+                    // centered in that and ran off the end of the row.
+                    cell.accessories = [
+                        .customView(
+                            configuration: .init(
+                                customView: accessory, placement: .trailing(),
+                                reservedLayoutWidth: .custom(accessory.intrinsicContentSize.width),
+                                maintainsFixedSize: true))
+                    ]
+                } else {
+                    cell.contentConfiguration = SliderContentConfiguration(
+                        title: row.title, symbol: row.symbol, slider: slider,
+                        margins: Self.listMargins(of: cell))
+                    cell.accessories = []
+                }
+                return
+            }
+
             var content = UIListContentConfiguration.valueCell()
             content.text = row.title
             content.secondaryText = row.detail
-            content.image = row.symbol.flatMap { UIImage(systemName: $0) }
+            content.image = row.symbol.flatMap(settingsIcon)
             content.imageProperties.tintColor = .tintColor
 
             // A row that does something when tapped, with nothing else to say so -- no arrow, no
@@ -230,13 +355,37 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
                 return
             }
 
+            if let color = row.color {
+                let well = well(for: id, title: row.title)
+                // By their Display P3 components: the same color in two color spaces compares as
+                // different, and resetting it would jump the picker under the finger.
+                if !Accent.same(well.selectedColor, color.color) {
+                    well.selectedColor = color.color
+                }
+                cell.accessories = [
+                    .customView(
+                        configuration: .init(
+                            customView: well, placement: .trailing(),
+                            reservedLayoutWidth: .custom(well.frame.width), maintainsFixedSize: true
+                        ))
+                ]
+                return
+            }
+
             if let editable = row.editable {
                 let field = field(for: id, editable: editable)
                 field.text = editable.text
                 field.placeholder = editable.placeholder
+                field.width =
+                    isWide ? FixedWidthTextField.wideWidth : FixedWidthTextField.narrowWidth
 
+                // Its own width, kept: left to the standard width an accessory is given, it was
+                // centered in that and ran off the end of the row.
                 cell.accessories = [
-                    .customView(configuration: .init(customView: field, placement: .trailing()))
+                    .customView(
+                        configuration: .init(
+                            customView: field, placement: .trailing(),
+                            reservedLayoutWidth: .custom(field.width), maintainsFixedSize: true))
                 ]
                 return
             }
@@ -280,7 +429,7 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
     }
 
     /// The text field for a row, made once and then kept.
-    private func field(for id: String, editable: EditableValue) -> UITextField {
+    private func field(for id: String, editable: EditableValue) -> FixedWidthTextField {
         if let existing = fields[id] { return existing }
 
         let field = FixedWidthTextField()
@@ -299,7 +448,7 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
         // Sized by its frame and its intrinsic width, *not* by a constraint. Cell accessories
         // require `translatesAutoresizingMaskIntoConstraints` to stay on -- they throw outright if
         // it doesn't -- so the constraint route is closed off here.
-        field.frame = CGRect(x: 0, y: 0, width: FixedWidthTextField.width, height: 32)
+        field.frame = CGRect(x: 0, y: 0, width: field.width, height: 32)
 
         // On every keystroke rather than when editing ends: there is no Save button here, and a
         // sheet dismissed mid-edit would otherwise quietly discard what had been typed.
@@ -337,9 +486,66 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
         return control
     }
 
+    /// The color well for a row, made once and then kept.
+    private func well(for id: String, title: String) -> UIColorWell {
+        if let existing = wells[id] { return existing }
+
+        let well = UIColorWell(frame: CGRect(x: 0, y: 0, width: 32, height: 32))
+        well.title = title
+        well.supportsAlpha = false
+        well.addAction(
+            UIAction { [weak self, weak well] _ in
+                guard let color = well?.selectedColor else { return }
+                self?.rowsById[id]?.color?.commit(color)
+            }, for: .valueChanged)
+
+        wells[id] = well
+        return well
+    }
+
+    /// The margins a list row's own content keeps: the cell's own at the sides,
+    /// which its icon starts from and its accessories end at, and the list's
+    /// usual above and below.
+    private static func listMargins(of cell: UICollectionViewListCell) -> NSDirectionalEdgeInsets {
+        let vertical = cell.defaultContentConfiguration().directionalLayoutMargins
+        return NSDirectionalEdgeInsets(
+            top: vertical.top, leading: cell.directionalLayoutMargins.leading,
+            bottom: vertical.bottom, trailing: cell.directionalLayoutMargins.trailing)
+    }
+
+    /// The slider for a row on one line, made once and then kept.
+    private func slider(for id: String, _ slider: SliderValue) -> SliderAccessory {
+        if let existing = sliders[id] { return existing }
+
+        let accessory = SliderAccessory(slider: slider)
+        accessory.onStep = { [weak self] value in self?.slid(id, to: value) }
+
+        sliders[id] = accessory
+        return accessory
+    }
+
+    /// Saves a slider's new step.
+    private func slid(_ id: String, to value: Float) {
+        guard var slider = rowsById[id]?.slider else { return }
+        slider.value = value
+        slider.commit(value)
+        rowsById[id]?.slider = slider
+    }
+
+    /// Rebuilds the rows when the list crosses the width at which sliders
+    /// change layout, as rotating or resizing the sheet can.
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+
+        if builtWide != nil, builtWide != isWide {
+            reload()
+        }
+    }
+
     // MARK: Content
 
     fileprivate func reload() {
+        builtWide = isWide
         sections = buildSections()
 
         rowsById = [:]
@@ -392,19 +598,26 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
         navigationController?.pushViewController(controller, animated: true)
     }
 
-    /// Returns to the first screen of the sheet.
+    /// Whether this is one of the sheet's pages, rather than a screen for
+    /// choosing a single setting's value.
+    fileprivate var isPage: Bool { false }
+
+    /// Returns to the page the setting being chosen lives on.
     ///
     /// Used once a value has actually been chosen. Popping a single level would
     /// land someone back on the list they just came through, which invites them
-    /// to make the same choice again; the root is where they can see what it
+    /// to make the same choice again; the page is where they can see what it
     /// came to.
-    fileprivate func popToRoot() {
-        guard let navigation = navigationController, let root = navigation.viewControllers.first
+    fileprivate func popToPage() {
+        guard let navigation = navigationController,
+            let page = navigation.viewControllers.last(where: {
+                $0 !== self && ($0 as? SettingsListViewController)?.isPage == true
+            })
         else {
             return
         }
 
-        navigation.popToViewController(root, animated: true)
+        navigation.popToViewController(page, animated: true)
     }
 }
 
@@ -416,6 +629,245 @@ extension Array {
     /// and the apply landing.
     fileprivate subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
+    }
+}
+
+// MARK: - A slider row
+
+/// A slider that stops only on its steps: on the tick marks iOS 26 draws for
+/// them, or before iOS 26, snapped there by hand, with a click as it reaches
+/// each.
+private final class DetentSlider: UISlider {
+
+    /// Called once each time a new step is reached.
+    var onStep: (Float) -> Void = { _ in }
+
+    private var step: Float = 1
+    private var lastStep: Float?
+    private let detents = UISelectionFeedbackGenerator()
+
+    init() {
+        super.init(frame: .zero)
+        addAction(UIAction { [weak self] _ in self?.slid() }, for: .valueChanged)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used; these sliders are built in code")
+    }
+
+    func configure(_ slider: SliderValue) {
+        minimumValue = slider.range.lowerBound
+        maximumValue = slider.range.upperBound
+        step = slider.step
+
+        if #available(iOS 26.0, *) {
+            let steps = Int(((maximumValue - minimumValue) / step).rounded())
+            trackConfiguration = .init(numberOfTicks: steps + 1)
+        }
+
+        // Not while it's being dragged, which a reload mid-drag would otherwise snatch back.
+        if !isTracking {
+            value = slider.value
+        }
+        lastStep = snapped(slider.value)
+    }
+
+    private func snapped(_ raw: Float) -> Float {
+        minimumValue + ((raw - minimumValue) / step).rounded() * step
+    }
+
+    private func slid() {
+        let reached = snapped(value)
+        if value != reached {
+            value = reached
+        }
+
+        guard reached != lastStep else { return }
+        lastStep = reached
+
+        if #unavailable(iOS 26.0) {
+            detents.selectionChanged()
+        }
+        onStep(reached)
+    }
+}
+
+/// A slider with its value before it: a row's accessory, where there's room for
+/// the slider on the row's own line.
+///
+/// The value is shown here rather than as the row's own, so that reaching a
+/// step only changes this label. Changing the row's content to show it lays the
+/// whole row out again, slider and all, under the finger.
+private final class SliderAccessory: UIView {
+
+    static let sliderWidth: CGFloat = 240
+    private static let spacing: CGFloat = 12
+    private static let height: CGFloat = 31
+
+    let control = DetentSlider()
+    private let value = UILabel()
+    private let valueWidth: CGFloat
+    private var label: (Float) -> String
+
+    /// Called once each time a new step is reached.
+    var onStep: (Float) -> Void = { _ in }
+
+    init(slider: SliderValue) {
+        label = slider.label
+
+        // Figures all the same width, so the value doesn't shuffle as it changes.
+        let body = UIFont.preferredFont(forTextStyle: .body)
+        let font = UIFont.monospacedDigitSystemFont(ofSize: body.pointSize, weight: .regular)
+
+        // As wide as the widest value it's asked to show, by a label's own measure: the strings
+        // measured on their own came out narrower than a label draws them, and it cut the value
+        // short.
+        let measure = UILabel()
+        measure.font = font
+        let steps = Int(
+            ((slider.range.upperBound - slider.range.lowerBound) / slider.step).rounded())
+        valueWidth =
+            (0...steps)
+            .map { step -> CGFloat in
+                measure.text = slider.label(slider.range.lowerBound + Float(step) * slider.step)
+                return ceil(measure.intrinsicContentSize.width)
+            }
+            .max() ?? 0
+
+        value.font = font
+        value.textColor = .secondaryLabel
+        value.textAlignment = .right
+
+        super.init(frame: .zero)
+        frame.size = intrinsicContentSize
+
+        addSubview(control)
+        addSubview(value)
+        control.onStep = { [weak self] reached in
+            guard let self else { return }
+            value.text = label(reached)
+            onStep(reached)
+        }
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used; these sliders are built in code")
+    }
+
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: Self.sliderWidth + Self.spacing + valueWidth, height: Self.height)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        value.frame = CGRect(x: 0, y: 0, width: valueWidth, height: bounds.height)
+        control.frame = CGRect(
+            x: valueWidth + Self.spacing, y: 0, width: Self.sliderWidth, height: bounds.height)
+    }
+
+    func configure(_ slider: SliderValue) {
+        label = slider.label
+        control.configure(slider)
+        value.text = slider.label(slider.value)
+    }
+}
+
+/// A slider row where there isn't room for the slider on the same line: the
+/// title and value as any value row has them, with the slider beneath.
+private struct SliderContentConfiguration: UIContentConfiguration {
+    var title: String
+    var symbol: String?
+    var slider: SliderValue
+
+    /// The margins the list gives its own rows. A list sets them on the rows
+    /// whose content it knows how to lay out, which a heading nested in this
+    /// one isn't; without them, it sat to the left of the rows around it and
+    /// ran past them on the right.
+    var margins: NSDirectionalEdgeInsets
+
+    func makeContentView() -> any UIView & UIContentView {
+        SliderContentView(configuration: self)
+    }
+
+    func updated(for state: any UIConfigurationState) -> SliderContentConfiguration { self }
+}
+
+/// The heading is the system's own value row, so its icon, title and value sit
+/// exactly where the rows above and below have theirs, and the slider beneath
+/// it runs from the title to the value's far edge.
+private final class SliderContentView: UIView, UIContentView {
+
+    private let heading = UIListContentView(configuration: .valueCell())
+    private let control = DetentSlider()
+
+    private var current: SliderContentConfiguration
+
+    var configuration: any UIContentConfiguration {
+        get { current }
+        set {
+            guard let new = newValue as? SliderContentConfiguration else { return }
+            current = new
+            apply()
+        }
+    }
+
+    init(configuration: SliderContentConfiguration) {
+        current = configuration
+        super.init(frame: .zero)
+
+        heading.translatesAutoresizingMaskIntoConstraints = false
+        control.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(heading)
+        addSubview(control)
+
+        control.onStep = { [weak self] value in
+            guard let self else { return }
+            current.slider.value = value
+            current.slider.commit(value)
+            showValue()
+        }
+
+        // The heading's text and value have to be there for their layout guides to be.
+        apply()
+
+        var constraints = [
+            heading.topAnchor.constraint(equalTo: topAnchor),
+            heading.leadingAnchor.constraint(equalTo: leadingAnchor),
+            heading.trailingAnchor.constraint(equalTo: trailingAnchor),
+            control.topAnchor.constraint(equalTo: heading.bottomAnchor, constant: -6),
+            control.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
+        ]
+        if let text = heading.textLayoutGuide, let value = heading.secondaryTextLayoutGuide {
+            constraints += [
+                control.leadingAnchor.constraint(equalTo: text.leadingAnchor),
+                control.trailingAnchor.constraint(equalTo: value.trailingAnchor),
+            ]
+        } else {
+            constraints += [
+                control.leadingAnchor.constraint(equalTo: layoutMarginsGuide.leadingAnchor),
+                control.trailingAnchor.constraint(equalTo: layoutMarginsGuide.trailingAnchor),
+            ]
+        }
+        NSLayoutConstraint.activate(constraints)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used; these rows are built in code")
+    }
+
+    private func apply() {
+        showValue()
+        control.configure(current.slider)
+    }
+
+    private func showValue() {
+        var content = UIListContentConfiguration.valueCell()
+        content.text = current.title
+        content.secondaryText = current.slider.label(current.slider.value)
+        content.image = current.symbol.flatMap(settingsIcon)
+        content.imageProperties.tintColor = .tintColor
+        content.directionalLayoutMargins = current.margins
+        heading.configuration = content
     }
 }
 
@@ -471,7 +923,7 @@ private final class OptionListViewController<Value: Equatable>: SettingsListView
                         accessory: option.value == current ? .checkmark : .none,
                         select: { [weak self] in
                             self?.choose(option.value)
-                            self?.popToRoot()
+                            self?.popToPage()
                         })
                 })
         ]
@@ -509,10 +961,27 @@ final class SettingsViewController: SettingsListViewController,
     /// Settings for the usual reasons.
     private static var debugToolsRevealed = false
 
-    /// Puts the settings sheet up over whatever is on screen.
-    static func present(from presenter: UIViewController) {
+    fileprivate override var isPage: Bool { true }
+
+    /// A screen within the sheet to open straight onto.
+    enum Destination {
+        case pinnedKeys
+    }
+
+    /// Puts the settings sheet up over whatever is on screen, open at
+    /// `destination` if there is one. The pages on the way to it are put
+    /// beneath it, so that Back goes where it would have.
+    static func present(from presenter: UIViewController, showing destination: Destination? = nil) {
         let navigation = SettingsNavigationController(rootViewController: SettingsViewController())
         navigation.navigationBar.prefersLargeTitles = true
+
+        switch destination {
+        case .pinnedKeys:
+            navigation.pushViewController(KeyboardSettingsViewController(), animated: false)
+            navigation.pushViewController(PinnedKeysViewController(), animated: false)
+        case nil:
+            break
+        }
 
         // A sheet rather than a full-screen presentation: the terminal stays visible behind it,
         // which matters because the numbers being chosen here are about the thing running in it.
@@ -561,10 +1030,20 @@ final class SettingsViewController: SettingsListViewController,
         reveal.cancelsTouchesInView = false
         reveal.delegate = self
         navigationController?.navigationBar.addGestureRecognizer(reveal)
+    }
 
-        followBackend()
-        followVcpus()
-        followCompaction()
+    /// Closes the sheet as Done does, when it's open with nothing over it, for
+    /// Esc; see `TctiApplication`. Whether it did.
+    static func closeForEscape() -> Bool {
+        guard
+            let navigation = ViewController.getCurrent()?.presentedViewController
+                as? SettingsNavigationController,
+            navigation.presentedViewController == nil,
+            let root = navigation.viewControllers.first as? SettingsViewController
+        else { return false }
+
+        root.done()
+        return true
     }
 
     /// Posted on the main queue when the settings sheet has gone, however it
@@ -596,75 +1075,49 @@ final class SettingsViewController: SettingsListViewController,
     fileprivate override func buildSections() -> [SettingsSection] {
         var sections = [
             SettingsSection(
-                header: "Virtual Machine",
-                footer:
-                    "Properties of the virtual machine. VM Memory sets how much RAM is given to Linux. vCPUs sets how many processors it has, and changes them straight away, while it runs. Code Cache determines how much memory is used to hold translated x86_64 code.",
+                header: nil,
+                footer: nil,
                 rows: [
                     SettingsRow(
-                        id: "memory",
-                        title: "VM Memory",
-                        detail: Mebibytes.describe(VmMemory.selected),
-                        symbol: "memorychip",
+                        id: "virtual-machine",
+                        title: "Virtual Machine",
+                        symbol: "server.rack",
                         accessory: .disclosure,
-                        select: { [weak self] in self?.push(VmMemoryViewController()) }),
+                        select: { [weak self] in
+                            self?.push(VirtualMachineSettingsViewController())
+                        }),
                     SettingsRow(
-                        id: "vcpus",
-                        title: "vCPUs",
-                        detail: Self.vcpuDetail,
-                        symbol: "cpu.fill",
+                        id: "storage",
+                        title: "Storage",
+                        symbol: "internaldrive",
                         accessory: .disclosure,
-                        select: { [weak self] in self?.push(VcpuCountViewController()) }),
+                        select: { [weak self] in self?.push(StorageSettingsViewController()) }),
                     SettingsRow(
-                        id: "code-cache",
-                        title: "Code Cache",
-                        detail: CodeCache.summary,
-                        symbol: "cpu",
+                        id: "keyboard",
+                        title: "Keyboard",
+                        symbol: "keyboard",
                         accessory: .disclosure,
-                        select: { [weak self] in self?.push(CodeCacheViewController()) }),
-                ]),
-
-            SettingsSection(
-                header: "Startup",
-                footer: "What your terminal environment does when you close the app.",
-                rows: [
+                        select: { [weak self] in self?.push(KeyboardSettingsViewController()) }),
                     SettingsRow(
-                        id: "resume",
-                        title: "On App Close",
-                        detail: Self.label(Self.resumeOptions, for: .resumeBehavior),
-                        symbol: "arrow.clockwise",
+                        id: "appearance",
+                        title: "Appearance",
+                        symbol: "paintbrush",
                         accessory: .disclosure,
-                        select: { [weak self] in self?.pushResumeBehavior() })
-                ]),
-
-            SettingsSection(
-                header: "JIT",
-                footer:
-                    "Execution Mode decides when tctiSH runs Linux with JIT, which is much faster, and when with TCTI, which always works. Running with JIT shows which one is in use now, and switches between them. Flush JIT Buffers gives JIT's memory back while running with TCTI, so switching back to JIT needs the loopback VPN again.",
-                rows: [
+                        select: { [weak self] in
+                            self?.push(AppearanceSettingsViewController())
+                        }),
                     SettingsRow(
-                        id: "jit",
-                        title: "Execution Mode",
-                        detail: Self.label(Self.jitOptions, for: .jitMode),
-                        symbol: "bolt",
+                        id: "security",
+                        title: "Security",
+                        symbol: "lock.shield",
                         accessory: .disclosure,
-                        select: { [weak self] in self?.pushJitMode() })
-                ] + Self.backendRows(on: self) + [
-                    SettingsRow(
-                        id: "flush-jit-buffers",
-                        title: "Flush JIT Buffers",
-                        symbol: "arrow.3.trianglepath",
-                        toggle: ToggleValue(
-                            isOn: AppSetting.flushJitBuffers.bool,
-                            commit: {
-                                AppSetting.flushJitBuffers.set($0)
-                                Backend.flushSettingChanged()
-                            }))
+                        select: { [weak self] in self?.push(SecuritySettingsViewController()) }),
                 ]),
 
             SettingsSection(
                 header: "In the Foreground",
                 footer:
-                    "Keep Screen Awake stops the screen locking while tctiSH is open, so that a long-running command isn't interrupted by the app going to the background. The screen uses more battery while it stays on.",
+                    "Keep Screen Awake stops the screen locking while tctiSH is open. The screen uses more battery while it stays on.",
                 rows: [
                     SettingsRow(
                         id: "keep-screen-awake",
@@ -679,85 +1132,9 @@ final class SettingsViewController: SettingsListViewController,
                 ]),
 
             SettingsSection(
-                header: "In the Background",
-                footer:
-                    "Release Memory gives Linux's memory back to iOS once your session is saved, so other apps are less likely to be closed to make room. Coming back takes a moment longer, while the session is read back in. Release Code Cache, with it, gives back all of the translated code as well. It's prepared again on return as it is at launch, which under JIT on newer devices means a pause, and translated again as it's needed.\n\nvCPUs and vCPU Cores here apply once your session is saved, for as long as Linux keeps running in the background. With Release Memory on, Linux stops there instead, so they don't apply.",
-                rows: [
-                    SettingsRow(
-                        id: "background-vcpus",
-                        title: "vCPUs",
-                        detail: Self.shareTitle(Vcpus.backgroundShare),
-                        symbol: "cpu.fill",
-                        accessory: .disclosure,
-                        select: { [weak self] in self?.pushBackgroundShare() }),
-                    SettingsRow(
-                        id: "background-vcpu-cores",
-                        title: "vCPU Cores",
-                        detail: Vcpus.backgroundCores.title,
-                        symbol: "square.grid.2x2",
-                        accessory: .disclosure,
-                        select: { [weak self] in self?.pushBackgroundVcpuCores() }),
-                    SettingsRow(
-                        id: "park",
-                        title: "Release Memory",
-                        symbol: "memorychip.fill",
-                        toggle: ToggleValue(
-                            isOn: AppSetting.parkInBackground.bool,
-                            commit: { [weak self] in
-                                AppSetting.parkInBackground.set($0)
-                                self?.reload()
-                            })),
-                    SettingsRow(
-                        id: "release-code-cache",
-                        title: "Release Code Cache",
-                        symbol: "cpu",
-                        toggle: ToggleValue(
-                            isOn: AppSetting.releaseCodeCacheInBackground.bool,
-                            isEnabled: AppSetting.parkInBackground.bool,
-                            commit: { AppSetting.releaseCodeCacheInBackground.set($0) })),
-                ]),
-
-            SettingsSection(
-                header: "Storage",
-                footer:
-                    "Where your session is stored, including the disk image and boot snapshot (used for resume) file names. A disk name that doesn't yet exist creates a fresh machine.\n\nThe disk image grows as Linux writes, and space Linux frees goes back to iOS, but the file itself never gets shorter. Compact Disk copies what Linux is using into a fresh image, which takes the old one's place, while Linux keeps running. Your session is saved again afterwards, and older saves are discarded.",
-                rows: [
-                    SettingsRow(
-                        id: "disk-name",
-                        title: "Disk Name",
-                        symbol: "internaldrive",
-                        editable: EditableValue(
-                            text: AppSetting.diskName.string,
-                            placeholder: "disk",
-                            commit: { AppSetting.diskName.set($0) })),
-                    SettingsRow(
-                        id: "boot-snapshot",
-                        title: "Boot Snapshot",
-                        symbol: "camera",
-                        editable: EditableValue(
-                            text: AppSetting.bootSnapshot.string,
-                            placeholder: "none",
-                            commit: { AppSetting.bootSnapshot.set($0) })),
-                    Self.compactionRow(on: self),
-                ]),
-
-            SettingsSection(
-                header: "Appearance",
-                footer: nil,
-                rows: [
-                    SettingsRow(
-                        id: "font-size",
-                        title: "Font Size",
-                        detail: "\(AppSetting.fontSize.integer)",
-                        symbol: "textformat.size",
-                        accessory: .disclosure,
-                        select: { [weak self] in self?.pushFontSize() })
-                ]),
-
-            SettingsSection(
                 header: nil,
                 footer:
-                    "Permissions are under the control of the operating system, so they live in the Settings app.",
+                    "Permissions are under the control of the operating system.",
                 rows: [
                     SettingsRow(
                         id: "ios-settings",
@@ -788,7 +1165,7 @@ final class SettingsViewController: SettingsListViewController,
 
     // MARK: The fixed choices
 
-    private static let resumeOptions = [
+    fileprivate static let resumeOptions = [
         SettingsOption(title: "Save Linux State", value: "persistent_boot"),
         SettingsOption(title: "Recovery Boot", value: "recovery_boot"),
         SettingsOption(title: "Boot From Snapshot", value: "snapshot_boot"),
@@ -803,7 +1180,7 @@ final class SettingsViewController: SettingsListViewController,
     ]
 
     /// Which backend the VM is on, as a switch that moves it to the other.
-    /// Greyed out before QEMU is up and while a switch is under way.
+    /// Grayed out before QEMU is up and while a switch is under way.
     fileprivate static func backendRows(on screen: SettingsListViewController) -> [SettingsRow] {
         let running = Backend.current
         let busy = Backend.isBusy
@@ -822,8 +1199,6 @@ final class SettingsViewController: SettingsListViewController,
         ]
     }
 
-    private static let fontSizes = [8, 10, 12, 14, 16, 18, 20, 22, 24, 28, 30]
-
     /// The label for whatever `setting` currently holds.
     ///
     /// Falls back to the stored value itself, so a setting left holding
@@ -836,34 +1211,8 @@ final class SettingsViewController: SettingsListViewController,
         return options.first { $0.value == value }?.title ?? value
     }
 
-    private func pushResumeBehavior() {
-        push(
-            OptionListViewController(
-                title: "On Close",
-                footer: "Persist Linux State picks the session up where you left it. Recovery "
-                    + "Boot and Clean Reboot both start Linux again from nothing. Boot From Snapshot loads the snapshot named under "
-                    + "Storage.",
-                options: Self.resumeOptions,
-                selected: { AppSetting.resumeBehavior.string },
-                choose: { AppSetting.resumeBehavior.set($0) }))
-    }
-
-    private func pushJitMode() {
-        push(
-            OptionListViewController(
-                title: "Execution Mode",
-                footer:
-                    "JIT is much faster, but needs external support from a loopback VPN and may not always be available. TCTI is slower, but always works.\n\nAlways JIT waits for JIT when tctiSH opens, and switches to it by itself if it arrives later. The Dynamic modes start with JIT when it can be had at once, and otherwise with TCTI straight away, offering JIT once it can be had (Ask) or switching to it by themselves (Auto); they also offer TCTI, or switch to it, when the code cache needs to grow and JIT can't. Never JIT always runs with TCTI. A change applies straight away.",
-                options: Self.jitOptions,
-                selected: { AppSetting.jitMode.string },
-                choose: {
-                    AppSetting.jitMode.set($0)
-                    Backend.modeChanged()
-                }))
-    }
-
     /// The foreground's count, and what Linux has instead, while that differs.
-    private static var vcpuDetail: String {
+    fileprivate static var vcpuDetail: String {
         let wanted = Vcpus.foreground
         guard let present = Vcpus.present, present != wanted, Vcpus.wanted == wanted else {
             return "\(wanted)"
@@ -875,51 +1224,6 @@ final class SettingsViewController: SettingsListViewController,
     fileprivate static func shareTitle(_ share: BackgroundShare) -> String {
         let count = share.count(of: Vcpus.foreground)
         return "\(share.title) (\(count))"
-    }
-
-    private func pushBackgroundShare() {
-        push(
-            OptionListViewController(
-                title: "Background vCPUs",
-                footer: "How many of the foreground's \(Vcpus.foreground) vCPUs Linux keeps "
-                    + "while tctiSH is in the background, rounded up. The rest are taken away "
-                    + "once your session is saved, and given back when you return.",
-                options: BackgroundShare.allCases.map {
-                    SettingsOption(title: Self.shareTitle($0), value: $0)
-                },
-                selected: { Vcpus.backgroundShare },
-                choose: { Vcpus.backgroundShare = $0 }))
-    }
-
-    private func pushBackgroundVcpuCores() {
-        let footer =
-            "Where Linux's vCPUs run while tctiSH is in the background. iOS doesn't let an app "
-            + "choose particular cores, but it does let an app keep its threads to the "
-            + "efficiency cores, which use much less power. Linux runs significantly slower "
-            + "there. Any Core leaves the choice to iOS. In the foreground, Linux always runs "
-            + "on any core."
-            + (Vcpus.coreClusters.map {
-                " This device has \($0.performance) performance and \($0.efficiency) "
-                    + "efficiency cores."
-            } ?? "")
-
-        push(
-            OptionListViewController(
-                title: "Background vCPU Cores",
-                footer: footer,
-                options: CoreClass.allCases.map { SettingsOption(title: $0.title, value: $0) },
-                selected: { Vcpus.backgroundCores },
-                choose: { Vcpus.backgroundCores = $0 }))
-    }
-
-    private func pushFontSize() {
-        push(
-            OptionListViewController(
-                title: "Font Size",
-                footer: "Applies straight away.",
-                options: Self.fontSizes.map { SettingsOption(title: "\($0)", value: $0) },
-                selected: { AppSetting.fontSize.integer },
-                choose: { AppSetting.fontSize.set($0) }))
     }
 
     /// Opens this app's own page in the Settings app.
@@ -972,7 +1276,7 @@ final class SettingsViewController: SettingsListViewController,
         var waiting: [String] = []
         if CodeCache.bootSignature != onEntry.codeCache { waiting.append("code cache size") }
         if AppSetting.resumeBehavior.string != onEntry.resumeBehavior {
-            waiting.append("close behaviour")
+            waiting.append("close behavior")
         }
         if AppSetting.bootSnapshot.string != onEntry.bootSnapshot {
             waiting.append("boot snapshot")
@@ -988,6 +1292,402 @@ final class SettingsViewController: SettingsListViewController,
     private static func list(_ items: [String]) -> String {
         guard items.count > 1 else { return items.first ?? "" }
         return items.dropLast().joined(separator: ", ") + " and " + (items.last ?? "")
+    }
+}
+
+// MARK: - Virtual Machine
+
+/// The virtual machine: its size, how it starts and stops, JIT, and what it
+/// does in the background. Where it's stored is Storage's.
+private final class VirtualMachineSettingsViewController: SettingsListViewController {
+
+    fileprivate override var isPage: Bool { true }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        title = "Virtual Machine"
+        navigationItem.largeTitleDisplayMode = .never
+
+        followBackend()
+        followVcpus()
+    }
+
+    fileprivate override func buildSections() -> [SettingsSection] {
+        [
+            SettingsSection(
+                header: "Virtual Machine",
+                footer:
+                    "VM Memory sets how much RAM is given to Linux. vCPUs sets how many processors it has, updated live. Code Cache determines how much memory is used to hold translated x86_64 code.",
+                rows: [
+                    SettingsRow(
+                        id: "memory",
+                        title: "VM Memory",
+                        detail: Mebibytes.describe(VmMemory.selected),
+                        symbol: "memorychip",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.push(VmMemoryViewController()) }),
+                    SettingsRow(
+                        id: "vcpus",
+                        title: "vCPUs",
+                        detail: SettingsViewController.vcpuDetail,
+                        symbol: "cpu.fill",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.push(VcpuCountViewController()) }),
+                    SettingsRow(
+                        id: "code-cache",
+                        title: "Code Cache",
+                        detail: CodeCache.summary,
+                        symbol: "cpu",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.push(CodeCacheViewController()) }),
+                ]),
+
+            SettingsSection(
+                header: "Startup",
+                footer: "What your terminal environment does when you close the app.",
+                rows: [
+                    SettingsRow(
+                        id: "resume",
+                        title: "On App Close",
+                        detail: SettingsViewController.label(
+                            SettingsViewController.resumeOptions, for: .resumeBehavior),
+                        symbol: "arrow.clockwise",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.pushResumeBehavior() })
+                ]),
+
+            SettingsSection(
+                header: "JIT",
+                footer:
+                    "Execution Mode decides when tctiSH runs Linux with JIT, which is much faster, and when with TCTI, which always works. Flush JIT Buffers gives JIT's memory back while running with TCTI, requiring the loopback when returning to JIT but saving memory.",
+                rows: [
+                    SettingsRow(
+                        id: "jit",
+                        title: "Execution Mode",
+                        detail: SettingsViewController.label(
+                            SettingsViewController.jitOptions, for: .jitMode),
+                        symbol: "bolt",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.pushJitMode() })
+                ] + SettingsViewController.backendRows(on: self) + [
+                    SettingsRow(
+                        id: "flush-jit-buffers",
+                        title: "Flush JIT Buffers",
+                        symbol: "arrow.3.trianglepath",
+                        toggle: ToggleValue(
+                            isOn: AppSetting.flushJitBuffers.bool,
+                            commit: {
+                                AppSetting.flushJitBuffers.set($0)
+                                Backend.flushSettingChanged()
+                            }))
+                ]),
+
+            SettingsSection(
+                header: "In the Background",
+                footer:
+                    "Release Memory gives Linux's memory back to iOS once your session is saved, so other apps are less likely to be closed to make room. Coming back takes a moment longer. Release Code Cache gives back all of the translated code as well. It's prepared again on return, which means a pause under JIT.\n\nvCPUs and vCPU Cores here apply once your session is saved, while the app runs in the background. With Release Memory on, Linux stops instead, so they don't apply.",
+                rows: [
+                    SettingsRow(
+                        id: "background-vcpus",
+                        title: "vCPUs",
+                        detail: SettingsViewController.shareTitle(Vcpus.backgroundShare),
+                        symbol: "cpu.fill",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.pushBackgroundShare() }),
+                    SettingsRow(
+                        id: "background-vcpu-cores",
+                        title: "vCPU Cores",
+                        detail: Vcpus.backgroundCores.title,
+                        symbol: "square.grid.2x2",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.pushBackgroundVcpuCores() }),
+                    SettingsRow(
+                        id: "park",
+                        title: "Release Memory",
+                        symbol: "memorychip.fill",
+                        toggle: ToggleValue(
+                            isOn: AppSetting.parkInBackground.bool,
+                            commit: { [weak self] in
+                                AppSetting.parkInBackground.set($0)
+                                self?.reload()
+                            })),
+                    SettingsRow(
+                        id: "release-code-cache",
+                        title: "Release Code Cache",
+                        symbol: "cpu",
+                        toggle: ToggleValue(
+                            isOn: AppSetting.releaseCodeCacheInBackground.bool,
+                            isEnabled: AppSetting.parkInBackground.bool,
+                            commit: { AppSetting.releaseCodeCacheInBackground.set($0) })),
+                ]),
+        ]
+    }
+
+    private func pushResumeBehavior() {
+        push(
+            OptionListViewController(
+                title: "On Close",
+                footer: "Persist Linux State picks the session up where you left it. Recovery "
+                    + "Boot and Clean Reboot both start Linux again from nothing. Boot From Snapshot loads the snapshot named under "
+                    + "Storage.",
+                options: SettingsViewController.resumeOptions,
+                selected: { AppSetting.resumeBehavior.string },
+                choose: { AppSetting.resumeBehavior.set($0) }))
+    }
+
+    private func pushJitMode() {
+        push(
+            OptionListViewController(
+                title: "Execution Mode",
+                footer:
+                    "JIT is much faster, but needs external support that may not always be available. TCTI is slower, but always works.\n\nAlways JIT waits for JIT when tctiSH opens, and switches to it by itself if it arrives later. The Dynamic modes start with JIT when it can be had at once, and otherwise with TCTI straight away, offering JIT once it can be had (Ask) or switching to it by themselves (Auto); they also offer TCTI, or switch to it, when the code cache needs to grow and JIT's can't. Never JIT always runs with TCTI. A change applies straight away.",
+                options: SettingsViewController.jitOptions,
+                selected: { AppSetting.jitMode.string },
+                choose: {
+                    AppSetting.jitMode.set($0)
+                    Backend.modeChanged()
+                }))
+    }
+
+    private func pushBackgroundShare() {
+        push(
+            OptionListViewController(
+                title: "Background vCPUs",
+                footer: "How many of the foreground's \(Vcpus.foreground) vCPUs Linux keeps "
+                    + "while tctiSH is in the background.",
+                options: BackgroundShare.allCases.map {
+                    SettingsOption(title: SettingsViewController.shareTitle($0), value: $0)
+                },
+                selected: { Vcpus.backgroundShare },
+                choose: { Vcpus.backgroundShare = $0 }))
+    }
+
+    private func pushBackgroundVcpuCores() {
+        let footer =
+            "Where Linux's vCPUs run while tctiSH is in the background. Linux runs significantly slower on the efficiency cores."
+            + "Any Core leaves the choice to iOS. In the foreground, Linux always runs "
+            + "on any core."
+            + (Vcpus.coreClusters.map {
+                " This device has \($0.performance) performance and \($0.efficiency) "
+                    + "efficiency cores."
+            } ?? "")
+
+        push(
+            OptionListViewController(
+                title: "Background vCPU Cores",
+                footer: footer,
+                options: CoreClass.allCases.map { SettingsOption(title: $0.title, value: $0) },
+                selected: { Vcpus.backgroundCores },
+                choose: { Vcpus.backgroundCores = $0 }))
+    }
+}
+
+// MARK: - Storage
+
+/// Where the session is kept: the disk image and boot snapshot names, and
+/// compacting the disk.
+private final class StorageSettingsViewController: SettingsListViewController {
+
+    fileprivate override var isPage: Bool { true }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        title = "Storage"
+        navigationItem.largeTitleDisplayMode = .never
+
+        followCompaction()
+    }
+
+    fileprivate override func buildSections() -> [SettingsSection] {
+        [
+            SettingsSection(
+                header: "Storage",
+                footer:
+                    "Where your session is stored. A disk name that doesn't yet exist creates a fresh machine.\n\nThe disk image grows as Linux writes, and free space goes back to iOS without truncating. Compact Disk copies what Linux is using into a fresh image while Linux keeps running, and then swaps it seamlessly for you.",
+                rows: [
+                    SettingsRow(
+                        id: "disk-name",
+                        title: "Disk Name",
+                        symbol: "rectangle.and.pencil.and.ellipsis",
+                        editable: EditableValue(
+                            text: AppSetting.diskName.string,
+                            placeholder: "disk",
+                            commit: { AppSetting.diskName.set($0) })),
+                    SettingsRow(
+                        id: "boot-snapshot",
+                        title: "Boot Snapshot",
+                        symbol: "externaldrive.badge.timemachine",
+                        editable: EditableValue(
+                            text: AppSetting.bootSnapshot.string,
+                            placeholder: "none",
+                            commit: { AppSetting.bootSnapshot.set($0) })),
+                    Self.compactionRow(on: self),
+                ])
+        ]
+    }
+}
+
+// MARK: - Keyboard
+
+/// The key bar above the software keyboard.
+private final class KeyboardSettingsViewController: SettingsListViewController {
+
+    fileprivate override var isPage: Bool { true }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        title = "Keyboard"
+        navigationItem.largeTitleDisplayMode = .never
+    }
+
+    fileprivate override func buildSections() -> [SettingsSection] {
+        let pinned = BarKey.pinned
+
+        return [
+            SettingsSection(
+                header: "Key Bar",
+                footer:
+                    "Terminal keys unavailable on a software keyboard. Pinned keys sit on the bar, and More has the rest.",
+                rows: [
+                    SettingsRow(
+                        id: "pinned-keys",
+                        title: "Pinned Keys",
+                        detail: pinned.isEmpty ? "None" : "\(pinned.count)",
+                        symbol: "pin",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.push(PinnedKeysViewController()) }),
+                    SettingsRow(
+                        id: "hide-key-bar",
+                        title: "Hide With Hardware Keyboard",
+                        symbol: "keyboard",
+                        toggle: ToggleValue(
+                            isOn: AppSetting.hideKeyBarWithHardwareKeyboard.bool,
+                            commit: { AppSetting.hideKeyBarWithHardwareKeyboard.set($0) })),
+                    SettingsRow(
+                        id: "arrow-repeat-delay",
+                        title: "Arrow Repeat Delay",
+                        symbol: "timer",
+                        slider: SliderValue(
+                            value: Float(ArrowRepeat.delay),
+                            range: Float(ArrowRepeat.shortest)...Float(ArrowRepeat.longest),
+                            step: Float(ArrowRepeat.step),
+                            label: { ArrowRepeat.label(TimeInterval($0)) },
+                            commit: { ArrowRepeat.delay = TimeInterval($0) })),
+                ])
+        ]
+    }
+}
+
+// MARK: - Appearance
+
+/// How the terminal looks.
+private final class AppearanceSettingsViewController: SettingsListViewController {
+
+    fileprivate override var isPage: Bool { true }
+
+    private static let fontSizes = [8, 10, 12, 14, 16, 18, 20, 22, 24, 28, 30]
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        title = "Appearance"
+        navigationItem.largeTitleDisplayMode = .never
+    }
+
+    fileprivate override func buildSections() -> [SettingsSection] {
+        var accent = [
+            SettingsRow(
+                id: "accent-color",
+                title: "Accent Color",
+                symbol: "paintpalette",
+                color: ColorValue(
+                    color: Accent.color,
+                    commit: { [weak self] color in
+                        let wasCustom = Accent.custom != nil
+                        Accent.set(color)
+                        // Only the first change offers going back; reloading on every one would
+                        // rebuild the list under the picker as it's dragged.
+                        if !wasCustom { self?.reload() }
+                    }))
+        ]
+        if Accent.custom != nil {
+            accent.append(
+                SettingsRow(
+                    id: "default-accent-color",
+                    title: "Use Default Accent Color",
+                    symbol: "arrow.uturn.backward",
+                    select: { [weak self] in
+                        Accent.set(nil)
+                        self?.reload()
+                    }))
+        }
+
+        return [
+            SettingsSection(
+                header: "Interface",
+                footer:
+                    "Accent Color tints tctiSH's buttons, icons and highlights. The picker's works in Display P3 for wide gamut support.",
+                rows: accent),
+
+            SettingsSection(
+                header: "Terminal",
+                footer: nil,
+                rows: [
+                    SettingsRow(
+                        id: "font-size",
+                        title: "Font Size",
+                        detail: "\(AppSetting.fontSize.integer)",
+                        symbol: "textformat.size",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.pushFontSize() })
+                ]),
+        ]
+    }
+
+    private func pushFontSize() {
+        push(
+            OptionListViewController(
+                title: "Font Size",
+                footer: "Applies straight away.",
+                options: Self.fontSizes.map { SettingsOption(title: "\($0)", value: $0) },
+                selected: { AppSetting.fontSize.integer },
+                choose: { AppSetting.fontSize.set($0) }))
+    }
+}
+
+// MARK: - Security
+
+/// What programs in Linux may reach beyond it: for now, the clipboard.
+private final class SecuritySettingsViewController: SettingsListViewController {
+
+    fileprivate override var isPage: Bool { true }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        title = "Security"
+        navigationItem.largeTitleDisplayMode = .never
+    }
+
+    fileprivate override func buildSections() -> [SettingsSection] {
+        [
+            SettingsSection(
+                header: "Clipboard",
+                footer:
+                    "Programs in Linux can ask for what's on the clipboard without you knowing, so this setting lets you control it. Copying from Linux to the clipboard always works.",
+                rows: [
+                    SettingsRow(
+                        id: "allow-clipboard-read",
+                        title: "Let Programs Read Clipboard",
+                        symbol: "doc.on.clipboard",
+                        toggle: ToggleValue(
+                            isOn: AppSetting.allowClipboardRead.bool,
+                            commit: { AppSetting.allowClipboardRead.set($0) }))
+                ])
+        ]
     }
 }
 
@@ -1020,11 +1720,12 @@ extension SettingsListViewController {
 
     /// Keeps the row in step with a compaction as it goes.
     fileprivate func followCompaction() {
-        NotificationCenter.default.addObserver(
-            forName: DiskCompaction.stateDidChange, object: nil, queue: .main
-        ) { [weak self] _ in
-            self?.reload()
-        }
+        observers.append(
+            NotificationCenter.default.addObserver(
+                forName: DiskCompaction.stateDidChange, object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.reload()
+            })
     }
 
     /// Says what compacting does and asks first: older saves go with the old
@@ -1078,11 +1779,12 @@ extension SettingsListViewController {
     /// Keeps a screen showing the vCPUs in step with them, as a change takes a
     /// moment to land.
     fileprivate func followVcpus() {
-        NotificationCenter.default.addObserver(
-            forName: Vcpus.stateDidChange, object: nil, queue: .main
-        ) { [weak self] _ in
-            self?.reload()
-        }
+        observers.append(
+            NotificationCenter.default.addObserver(
+                forName: Vcpus.stateDidChange, object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.reload()
+            })
     }
 
     /// Keeps a screen showing the backend in step with it, including after a
@@ -1092,11 +1794,12 @@ extension SettingsListViewController {
             Backend.stateDidChange, Backend.eventDidOccur,
             UIApplication.didBecomeActiveNotification,
         ] {
-            NotificationCenter.default.addObserver(
-                forName: name, object: nil, queue: .main
-            ) { [weak self] _ in
-                self?.reload()
-            }
+            observers.append(
+                NotificationCenter.default.addObserver(
+                    forName: name, object: nil, queue: .main
+                ) { [weak self] _ in
+                    self?.reload()
+                })
         }
     }
 
@@ -2002,7 +2705,7 @@ private final class VcpuCountViewController: SettingsListViewController {
                         accessory: count == Vcpus.foreground ? .checkmark : .none,
                         select: { [weak self] in
                             Vcpus.foreground = count
-                            self?.popToRoot()
+                            self?.popToPage()
                         })
                 })
         ]
@@ -2056,7 +2759,7 @@ private final class VmMemoryViewController: SettingsListViewController {
                         accessory: size == VmMemory.selected ? .checkmark : .none,
                         select: { [weak self] in
                             VmMemory.selected = size
-                            self?.popToRoot()
+                            self?.popToPage()
                         })
                 })
         ]
@@ -2115,7 +2818,7 @@ private final class VmMemoryOverflowViewController: SettingsListViewController {
                         accessory: size == VmMemory.selected ? .checkmark : .none,
                         select: { [weak self] in
                             VmMemory.selected = size
-                            self?.popToRoot()
+                            self?.popToPage()
                         })
                 })
         ]
@@ -2272,7 +2975,7 @@ private final class CodeCacheSizeViewController: SettingsListViewController {
     private func choose(_ size: Int?) {
         CodeCache.mode = mode
         CodeCache.chosenCeiling = size
-        popToRoot()
+        popToPage()
     }
 
     /// The ladder, written out, so the steps are not a surprise.

@@ -39,7 +39,7 @@ final class StatusPill: UIView {
         }
     }
 
-    /// Colour of the label and the dial.
+    /// Color of the label and the dial.
     ///
     /// Defaults to `.label`, which follows the appearance the pill picked from
     /// its backdrop. Set it to say something the message alone can't.
@@ -144,7 +144,7 @@ final class StatusPill: UIView {
         background.layer.cornerCurve = .continuous
         background.clipsToBounds = true
 
-        // A hairline keeps the capsule's edge legible against a terminal that might be any colour
+        // A hairline keeps the capsule's edge legible against a terminal that might be any color
         // the theme fancies.
         background.layer.borderWidth = 1 / UIScreen.main.scale
         background.layer.borderColor = UIColor.separator.cgColor
@@ -219,9 +219,9 @@ final class StatusPill: UIView {
         accessibilityHint = "Swipe up to dismiss"
 
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (pill: Self, _) in
-            pill.refreshLayerColours()
+            pill.refreshLayerColors()
         }
-        refreshLayerColours()
+        refreshLayerColors()
     }
 
     @available(*, unavailable)
@@ -346,7 +346,7 @@ final class StatusPill: UIView {
 
     /// CGColors don't follow the trait environment the way UIColors do, so the
     /// ones handed to layers have to be reapplied by hand.
-    private func refreshLayerColours() {
+    private func refreshLayerColors() {
         background.layer.borderColor = UIColor.separator.cgColor
         applyTint()
     }
@@ -397,11 +397,11 @@ private final class ProgressDial: UIView {
 
     private var state: State = .indeterminate
 
-    /// Colour of everything except the track, which stays a background detail.
+    /// Color of everything except the track, which stays a background detail.
     var tint: UIColor = .label {
         didSet {
             guard tint != oldValue else { return }
-            refreshLayerColours()
+            refreshLayerColors()
         }
     }
 
@@ -441,7 +441,7 @@ private final class ProgressDial: UIView {
             name: UIApplication.willEnterForegroundNotification, object: nil)
 
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (dial: Self, _) in
-            dial.refreshLayerColours()
+            dial.refreshLayerColors()
         }
     }
 
@@ -454,20 +454,20 @@ private final class ProgressDial: UIView {
         super.layoutSubviews()
 
         let side = min(bounds.width, bounds.height)
-        let centre = CGPoint(x: bounds.midX, y: bounds.midY)
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
         let radius = side / 2 - Metric.lineWidth / 2
 
         // Starting at -pi/2 puts the seam at twelve o'clock, so the ring fills from the top the way
         // a clock face would.
         let ring = UIBezierPath(
-            arcCenter: centre, radius: radius,
+            arcCenter: center, radius: radius,
             startAngle: -.pi / 2, endAngle: .pi * 1.5,
             clockwise: true
         ).cgPath
         track.path = ring
         arc.path = ring
         spinner.path = ring
-        mark.path = markPath(for: state, centre: centre, side: side)
+        mark.path = markPath(for: state, center: center, side: side)
 
         for shape in [track, arc, spinner, mark] {
             shape.frame = bounds
@@ -475,9 +475,9 @@ private final class ProgressDial: UIView {
     }
 
     /// The tick or cross drawn inside the ring, sized from the dial.
-    private func markPath(for state: State, centre: CGPoint, side: CGFloat) -> CGPath? {
+    private func markPath(for state: State, center: CGPoint, side: CGFloat) -> CGPath? {
         let point = { (x: CGFloat, y: CGFloat) in
-            CGPoint(x: centre.x + x * side, y: centre.y + y * side)
+            CGPoint(x: center.x + x * side, y: center.y + y * side)
         }
 
         let path = UIBezierPath()
@@ -552,7 +552,7 @@ private final class ProgressDial: UIView {
         let side = min(bounds.width, bounds.height)
         mark.path = markPath(
             for: state,
-            centre: CGPoint(x: bounds.midX, y: bounds.midY),
+            center: CGPoint(x: bounds.midX, y: bounds.midY),
             side: side)
         mark.isHidden = false
 
@@ -599,8 +599,8 @@ private final class ProgressDial: UIView {
         restartSpinnerIfNeeded()
     }
 
-    /// As above: layer colours don't follow the trait environment themselves.
-    private func refreshLayerColours() {
+    /// As above: layer colors don't follow the trait environment themselves.
+    private func refreshLayerColors() {
         track.strokeColor = UIColor.separator.cgColor
         for shape in [arc, spinner, mark] {
             shape.strokeColor = tint.cgColor
