@@ -47,11 +47,23 @@ final class PinnedKeysViewController: UIViewController, UICollectionViewDelegate
         apply(animated: false)
     }
 
-    /// How many fit on the bar at the app's current width.
+    /// Whether the bar is rails, as on a phone in landscape, and they've been
+    /// shown, which is when their capacity is known.
+    private var onRails: Bool {
+        guard traitCollection.userInterfaceIdiom == .phone, let window = view.window,
+            KeyBar.railCapacity != nil
+        else { return false }
+        return window.bounds.width > window.bounds.height
+    }
+
+    /// How many fit on the bar at the app's current width, or on the rails.
     ///
     /// The app's window rather than this screen's, which on iPad is a sheet
     /// narrower than the keyboard the bar sits on.
     private var capacity: Int {
+        if onRails, let rails = KeyBar.railCapacity {
+            return rails
+        }
         guard let window = view.window else { return KeyBar.capacity(forWidth: view.bounds.width) }
 
         // Less the window's safe area at the sides, as the bar keeps clear of it too.
@@ -119,7 +131,9 @@ final class PinnedKeysViewController: UIViewController, UICollectionViewDelegate
 
             var content = UIListContentConfiguration.footer()
             content.text =
-                "Pinned keys sit on the bar in this order. \(Self.fit(capacity)) at this width, beside Hide Keyboard; any past that are grayed out, and stay in More with every key not on the bar."
+                onRails
+                ? "Keys appear on the bar in this order. In landscape, the bar runs down both sides of the screen, left side first. \(Self.fit(capacity)); the rest are grayed out and stay in More."
+                : "Keys appear on the bar in this order. \(Self.fit(capacity)) at this width; the rest are grayed out and stay in More."
             view.contentConfiguration = content
         }
 

@@ -9,8 +9,9 @@
 //  Copyright © 2019 Miguel de Icaza. All rights reserved.
 //
 
-import UIKit
+import GameController
 import SwiftTerm
+import UIKit
 
 class ViewController: UIViewController {
     var tv: TerminalView!
@@ -31,6 +32,10 @@ class ViewController: UIViewController {
     /// The keys above the keyboard. Held here because the terminal lets go of
     /// it while a hardware keyboard has it hidden.
     private(set) var keyBar: KeyBar?
+
+    /// The bottom of the space for the key bar's rails while they're shown:
+    /// the keyboard's top edge, or the screen's bottom with a hardware one.
+    private var railsBottom: CGFloat?
 
     /// The pairing session in progress, if any. Strong: nothing else holds it.
     private var pairingSession: PairableHostPairing?
@@ -98,6 +103,10 @@ class ViewController: UIViewController {
             self?.openSettings(nil)
         }
         keyBar?.didMove = { [weak self] in self?.updateKeyboardDelta() }
+        if let rails = keyBar?.rails {
+            rails.frame = view.bounds
+            view.addSubview(rails)
+        }
 
         currentTerminal.becomeFirstResponder()
 
@@ -1070,11 +1079,15 @@ class ViewController: UIViewController {
         // keyboard over it. A keyboard that is up already covers that strip, so the two don't add.
         let bottom = max(keyboardDelta, view.safeAreaInsets.bottom)
 
+        // Inset for the rails whenever the bar is rails, even while they're hidden, so the terminal
+        // doesn't reflow each time the keyboard comes and goes.
+        let side = padding + (wantsRails ? KeyBar.railWidth : 0)
+
         return CGRect(
-            x: view.safeAreaInsets.left + padding,
+            x: view.safeAreaInsets.left + side,
             y: view.safeAreaInsets.top + padding,
             width: view.frame.width - view.safeAreaInsets.left - view.safeAreaInsets.right
-                - (padding * 2),
+                - (side * 2),
             height: view.frame.height - view.safeAreaInsets.top - bottom - (padding * 2))
     }
 
@@ -1119,6 +1132,9 @@ class ViewController: UIViewController {
     func updateKeyboardDelta() {
         guard let screen = view.window?.screen else { return }
 
+        // Mid-turn, the keyboard's frame is stale; see `expectKeyboardWhileTurning`.
+        guard turningTo == nil else { return }
+
         // Only what's docked: the keyboard along the bottom of the screen, and the bar along it or
         // riding a docked keyboard. A floating keyboard, iPad's small one, is reported where it
         // floats, over the middle of the terminal, which then stopped short above it; floating, it
@@ -1135,20 +1151,138 @@ class ViewController: UIViewController {
         // height: a bar that floats clear of the bottom of the screen covers the gap beneath it
         // too. One that is going away covers none.
         let covering = [keyboardDocked ? keyboard : nil, bar].compactMap { $0 }
-        keyboardDelta =
-            covering.map { frame in
-                let covered = view.bounds.intersection(
-                    view.convert(frame, from: screen.coordinateSpace))
-                return covered.isEmpty ? 0 : view.bounds.maxY - covered.minY
-            }.max() ?? 0
+        func covered(by frame: CGRect) -> CGFloat {
+            let overlap = view.bounds.intersection(
+                view.convert(frame, from: screen.coordinateSpace))
+            return overlap.isEmpty ? 0 : view.bounds.maxY - overlap.minY
+        }
+        keyboardDelta = covering.map(covered(by:)).max() ?? 0
 
-        tv.frame = makeFrame(keyboardDelta: keyboardDelta)
+        // As rails, the zero-height bar marks the keyboard's top edge, or the screen's bottom
+        // with a hardware keyboard, and is on screen only while the terminal has focus. The
+        // keyboard's own frame can't be trusted here: with no accessory height, it has been
+        // reported as a sliver a few points high. The rails hide as soon as the terminal loses
+        // focus.
+        railsBottom = nil
+        if keyBar?.usesRails == true {
+            let top = keyBar?.screenFrame.map {
+                min(max(view.convert($0, from: screen.coordinateSpace).minY, 0), view.bounds.maxY)
+            }
+            if let top, tv.isFirstResponder {
+                railsBottom = top
+                keyboardDelta = view.bounds.maxY - top
+                keyboardBesideRails = keyboardDelta
+            } else {
+                keyboardDelta = 0
+            }
+        } else if tv.isFirstResponder, keyboardDelta > 0 {
+            keyboardUnderStrip = keyboardDelta
+        }
+
+        layoutTerminal()
+    }
+
+    /// The size being turned to, during a turn between strip and rails.
+    private var turningTo: CGSize?
+
+    /// The height the keyboard last covered with rails and with the strip,
+    /// used as estimates during a turn, before the keyboard reports.
+    private var keyboardBesideRails: CGFloat?
+    private var keyboardUnderStrip: CGFloat?
+
+    /// Whether the key bar should be rails: on a phone in landscape, where
+    /// height is scarcest.
+    private func wantsRails(at size: CGSize) -> Bool {
+        traitCollection.userInterfaceIdiom == .phone && size.width > size.height
+    }
+
+    private var wantsRails: Bool { wantsRails(at: view.bounds.size) }
+
+    /// The height the keyboard is expected to cover in a view this tall,
+    /// until it reports. A hardware keyboard covers only the strip, and with
+    /// rails, nothing.
+    private func expectedKeyboard(rails: Bool, height: CGFloat) -> CGFloat {
+        let hardware = GCKeyboard.coalesced != nil
+        if rails {
+            return keyboardBesideRails ?? (hardware ? 0 : height * 0.41)
+        }
+        return keyboardUnderStrip
+            ?? (hardware ? KeyBar.height + view.safeAreaInsets.bottom : height * 0.41)
+    }
+
+    /// Flows the key bar between strip and rails during the turn, rather than
+    /// after it.
+    override func viewWillTransition(
+        to size: CGSize, with coordinator: any UIViewControllerTransitionCoordinator
+    ) {
+        super.viewWillTransition(to: size, with: coordinator)
+
+        // Only turns between strip and rails; other size changes, such as an iPad's, are untouched.
+        let toRails = wantsRails(at: size)
+        guard toRails != wantsRails else { return }
+
+        turningTo = size
+        if let keyBar, toRails != keyBar.usesRails {
+            if toRails {
+                keyBar.turnIntoRails(
+                    height: size.height - expectedKeyboard(rails: true, height: size.height))
+            } else {
+                keyBar.beginReturningToStrip()
+            }
+        }
+
+        coordinator.animate(alongsideTransition: { [weak self] _ in
+            guard let self, let keyBar, !toRails, keyBar.usesRails else { return }
+            let keyboard = expectedKeyboard(rails: false, height: size.height)
+            keyBar.flowIntoStrip(barTop: size.height - keyboard, width: size.width)
+        }) { [weak self] _ in
+            guard let self else { return }
+            turningTo = nil
+            keyBar?.usesRails = wantsRails
+            updateKeyboardDelta()
+        }
     }
 
     /// Sizes the terminal on every layout pass, which rotation and every other
     /// change of size go through, so nothing else needs to.
     override func viewWillLayoutSubviews() {
+        if turningTo != nil {
+            expectKeyboardWhileTurning()
+        } else {
+            keyBar?.usesRails = wantsRails
+        }
+
+        layoutTerminal()
+    }
+
+    /// Estimates where the keyboard will be after the turn, for layout during
+    /// it, as the keyboard reports its frame only afterwards.
+    private func expectKeyboardWhileTurning() {
+        let height = view.bounds.height
+        let rails = keyBar?.usesRails == true && wantsRails
+        let covered = tv.isFirstResponder ? expectedKeyboard(rails: rails, height: height) : 0
+
+        keyboardDelta = covered
+        railsBottom = rails && tv.isFirstResponder && keyBar?.window != nil ? height - covered : nil
+    }
+
+    /// Lays out the terminal around the keyboard and rails, and the rails, if
+    /// shown, either side of it.
+    private func layoutTerminal() {
         tv.frame = makeFrame(keyboardDelta: keyboardDelta)
+
+        // Set on every layout, as autoresizing left it at its portrait size, and a rail outside it
+        // can't be touched.
+        keyBar?.rails.frame = view.bounds
+
+        let insets = view.safeAreaInsets
+        keyBar?.placeRails(
+            in: railsBottom.map { bottom in
+                CGRect(
+                    x: insets.left, y: insets.top,
+                    width: view.bounds.width - insets.left - insets.right,
+                    height: max(0, bottom - insets.top))
+            })
     }
 }
 

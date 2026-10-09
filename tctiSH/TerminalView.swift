@@ -52,6 +52,16 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     /// which looks exactly like a hang unless something says otherwise.
     static let willReconnect = Notification.Name("io.ara.tctish.terminalWillReconnect")
 
+    // MARK: Holding the keyboard
+
+    /// While set, the terminal refuses to give up focus, so that opening More's
+    /// menu from a rail doesn't take it.
+    var holdsKeyboard = false
+
+    public override var canResignFirstResponder: Bool {
+        !holdsKeyboard && super.canResignFirstResponder
+    }
+
     // MARK: Modifiers from the key bar
 
     /// Posted when Shift or Meta, the two modifiers kept here, change.
