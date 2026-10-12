@@ -28,7 +28,7 @@ struct Log {
     static let qemu = Log("qemu")
 
     /// Anything that goes over a wire: the tunnel, the developer disk image,
-    /// SSH, the configuration server.
+    /// the console, the guest agent, the configuration server.
     static let network = Log("network")
 
     /// Files and the places they live.

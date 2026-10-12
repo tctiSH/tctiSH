@@ -38,32 +38,16 @@ MINIROOTFS_SHA256="5acac12c425a0817c1b6a79bdd5df4c73756fc8dc268eab32f8ba830872b8
 # this is the world list, not the install list.
 #
 #   bash            the login shell; /etc/inittab and the guest scripts want it
-#   dropbear        the SSH server the app connects to
 #   netcat-openbsd  tctish-mount pipes QMP commands through it
 #   e2fsprogs       init formats the disk on first boot
 #
 # e2fsprogs used to be `apk add`ed by init at first boot, against a repository
 # that has since gone EOL. It is baked in now, which takes a network round trip
 # off the critical boot path.
-WORLD=(bash dropbear netcat-openbsd e2fsprogs)
+WORLD=(bash netcat-openbsd e2fsprogs)
 
 LOCK="$ASSETS/rootfs.lock"
 OUT="$ASSETS/initrd.img"
-
-# The guest's root password, as a crypt(3) hash, and the shadow lastchg field.
-#
-# The app logs in as root/toor -- see TerminalView.swift, .byPassword(username:
-# "root", password: "toor") -- but Alpine's minirootfs ships `root:*`, which
-# disables password login entirely. Without this line dropbear refuses the app's
-# authentication and the terminal never opens.
-#
-# Carried forward verbatim from the 2022 image rather than generated, because
-# crypt(3) picks a random salt: running `passwd` here would produce a different
-# hash on every build and defeat the whole point of the lock. Not a secret -- it
-# is a fixed placeholder credential for a local VM, and the plaintext is in the
-# app source.
-ROOT_PASSWORD_HASH='$6$ayoNqDz/j3BYEDmV$nFPZdaROuZixFLSh0pG6jdYXxwooeRQ7.jJKuBOu35UQYZ6rGpXjfALby0/QHgAys0c7K1.JDS5yY4YeWLbIl/'
-ROOT_PASSWORD_LASTCHG="19236"
 
 # Timestamps for anything we create. cpio records mtimes and gzip records one in
 # its header, so both have to be pinned or the image differs run to run.
@@ -308,10 +292,10 @@ apply_overlay() {
     # governs what ships, not what the user can install afterwards.
     write_repositories "$root"
 
-    # init, /etc/inittab, /etc/tcti_motd, /etc/config/dropbear, and the two
-    # profile.d scripts -- shell_integration.sh sets the PS1 that reports the
-    # guest's cwd back to the host, and prints tcti_motd; mount_shared.sh mounts
-    # the 9p tag qemu_launcher.c passes as `shared`.
+    # init, /etc/inittab, /etc/tcti_motd, and the two profile.d scripts --
+    # shell_integration.sh sets the PS1 that reports the guest's cwd to the
+    # app's terminal, and prints tcti_motd; mount_shared.sh mounts the 9p tag
+    # qemu_launcher.c passes as `shared`.
     #
     # overlay/etc/motd is empty on purpose: Alpine ships a "Welcome to
     # Alpine!" text, and blanking it is what stops that printing over ours.
@@ -323,17 +307,6 @@ apply_overlay() {
     install -d -m 0755 "$root/usr/bin"
     install -m 0755 "$ASSETS"/scripts/* "$root/usr/bin/"
     ln -sf ../usr/bin/mount.ios "$root/sbin/mount.ios"
-
-    # Let root log in. See ROOT_PASSWORD_HASH above for why this is a literal
-    # rather than a call to passwd.
-    sed -i "s|^root:[^:]*:[^:]*:|root:$ROOT_PASSWORD_HASH:$ROOT_PASSWORD_LASTCHG:|" \
-        "$root/etc/shadow"
-    grep -q '^root:\$6\$' "$root/etc/shadow" ||
-        die "failed to set the root password hash; dropbear would refuse the app's login"
-
-    # init copies this into the user's authorized_keys on first boot.
-    install -d -m 0755 "$root/etc/dropbear"
-    install -m 0644 "$ASSETS/placeholder_keys/placeholder_key.pub" "$root/etc/dropbear/"
 
     # Mountpoint for host folders, and the private directory the app expects.
     install -d -m 0755 "$root/ios_host" "$root/private"

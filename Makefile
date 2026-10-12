@@ -23,8 +23,6 @@ STIKJIT_BUILD     := build-StikJIT
 STIKJIT_FRAMEWORK := $(STIKJIT_BUILD)/StikJIT.xcframework/Info.plist
 IDEVICE_BUILD     := build-idevice
 IDEVICE_LIBRARY   := $(IDEVICE_BUILD)/out/libidevice_ffi.a
-LIBSSH2_BUILD     := build-libssh2
-LIBSSH2_LIBRARY   := $(LIBSSH2_BUILD)/out/libssh2.a
 PODS_MANIFEST     := Pods/Manifest.lock
 TCTICTL_TARGET    := x86_64-unknown-linux-musl
 TCTICTL_BINARY    := utils/tctictl/target/$(TCTICTL_TARGET)/release/tctictl
@@ -124,18 +122,10 @@ $(IDEVICE_LIBRARY): build_idevice.sh
 $(STIKJIT_FRAMEWORK): build_stikjit.sh $(wildcard patches/*.patch) $(IDEVICE_LIBRARY)
 	$(SHELL_WRAPPER) ./build_stikjit.sh
 
-# Pinned by version and hash inside build_libssh2.sh, so again the script is the only prerequisite.
-# No $(SHELL_WRAPPER): it needs Xcode's iOS SDK and nothing the devshell adds.
-$(LIBSSH2_LIBRARY): build_libssh2.sh
-	./build_libssh2.sh
-
-# The vendored SwiftSH podspec is an input too: it is where the pod learns to look in
-# build-libssh2/out, and a change to it means nothing until `pod install` regenerates the project.
-#
 # The touch is because pod install leaves Manifest.lock alone when its content would not change, and
-# for a podspec that is any edit the parsed spec cannot see a comment, for example. Without it the
+# for a Podfile that is any edit the parsed file cannot see, a comment for example. Without it the
 # manifest stays older than its input and every `make build` runs pod install again.
-$(PODS_MANIFEST): Podfile third-party/SwiftSH/SwiftSH.podspec
+$(PODS_MANIFEST): Podfile
 	$(SHELL_WRAPPER) pod install
 	touch $@
 
@@ -187,9 +177,6 @@ host-qemu: $(call HOST_QEMU,$(BACKEND)) ## Build our QEMU for this Mac into buil
 .PHONY: idevice
 idevice: $(IDEVICE_LIBRARY) ## Build idevice's FFI library for iOS from source
 
-.PHONY: libssh2
-libssh2: $(LIBSSH2_LIBRARY) ## Build libssh2 and OpenSSL for iOS, for the vendored SwiftSH pod
-
 .PHONY: stikjit
 stikjit: $(STIKJIT_FRAMEWORK) ## Build build-StikJIT/StikJIT.xcframework from the patched submodule copy
 
@@ -234,7 +221,7 @@ endif
 # once someone has trusted it in the IDE. A command-line build has nobody to ask, so skips the check
 # instead.
 .PHONY: build
-build: $(QEMU_LIBRARY) $(STIKJIT_FRAMEWORK) $(LIBSSH2_LIBRARY) $(PODS_MANIFEST) $(GUEST_IMAGES) ## Build the app for a generic iOS device (GUEST=prebuilt to skip rebuilding the guest images)
+build: $(QEMU_LIBRARY) $(STIKJIT_FRAMEWORK) $(PODS_MANIFEST) $(GUEST_IMAGES) ## Build the app for a generic iOS device (GUEST=prebuilt to skip rebuilding the guest images)
 	xcodebuild -workspace tctiSH.xcworkspace -scheme tctiSH -destination 'generic/platform=iOS' \
 		-skipPackagePluginValidation build
 
@@ -422,11 +409,6 @@ clean-stikjit: ## Remove the StikJIT framework, its archive and the patched sour
 clean-idevice: ## Remove the idevice source checkout and its build output
 	rm -rf $(IDEVICE_BUILD)
 
-# Keeps nothing, tarballs included; they are re-fetched and re-checked against their pinned hashes.
-.PHONY: clean-libssh2
-clean-libssh2: ## Remove the libssh2 and OpenSSL build tree and its downloads
-	rm -rf $(LIBSSH2_BUILD)
-
 # Both QEMU build trees live at build-iOS-arm64/qemu_{tcti,jit}, outside the submodule checkout,
 # so a single `rm -rf build-iOS-arm64` reaches them and leaves the checkout alone. Removing the
 # dependency tarballs with it costs a re-download, which is most of why this is not something to
@@ -462,7 +444,7 @@ unroot-host-qemu: ## Let nix garbage-collect the Mac QEMU builds' libraries (the
 clean: clean-app clean-rust ## Remove the app and tctictl build output
 
 .PHONY: distclean
-distclean: clean clean-stikjit clean-idevice clean-libssh2 clean-deps clean-host-qemu clean-kernel ## Remove everything, including the slow QEMU, StikJIT and kernel builds
+distclean: clean clean-stikjit clean-idevice clean-deps clean-host-qemu clean-kernel ## Remove everything, including the slow QEMU, StikJIT and kernel builds
 
 # -- Utility --------------------------------------------------------------------------------------
 

@@ -506,15 +506,6 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     /// generates OSC-7 each time the prompt is issue.
     public func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
         _cwd = directory
-
-        if let directory = directory {
-            // Get a filename for our shared CWD file...
-            let cwdFile = QEMUInterface.getLastCWDFile()
-
-            // ... and write the CWD into it.
-            try? directory.write(to: cwdFile, atomically: true, encoding: .utf8)
-        }
-
     }
 
     /// Callback that occurs when the guest copies with OSC 52, as tmux, vim and

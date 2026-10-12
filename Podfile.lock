@@ -1,23 +1,16 @@
 PODS:
   - BlueSocket (2.0.3)
-  - SwiftSH (0.1.2)
 
 DEPENDENCIES:
   - BlueSocket
-  - SwiftSH (from `third-party/SwiftSH`)
 
 SPEC REPOS:
   trunk:
     - BlueSocket
 
-EXTERNAL SOURCES:
-  SwiftSH:
-    :path: third-party/SwiftSH
-
 SPEC CHECKSUMS:
   BlueSocket: e06b19d90362672ece8d298cd6bb724e9937fa0b
-  SwiftSH: 6bc688742125e80a39b2e6fd71eda532d92d5020
 
-PODFILE CHECKSUM: eea18d7d53618681dd4df5f30636f7ca1562f18e
+PODFILE CHECKSUM: 3b5d2eab2b41df5c7aa5ef438da3cf8939bb9b42
 
 COCOAPODS: 1.16.2

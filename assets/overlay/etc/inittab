@@ -12,12 +12,16 @@
 # A getty belongs beside the device that backs it. Add one when the port exists.
 ttyS0::respawn:/bin/busybox login -f root
 
+# The app's terminal: a login on the virtio console that it shows as hvc0.
+hvc0::respawn:/usr/bin/tctish-login
+
 # Shut down cleanly when the host asks. QEMU's `system_powerdown` asserts the
 # ACPI power button; the kernel turns that into an input event and this is what
 # listens for it. Without it the request is received and ignored.
 ::respawn:/usr/bin/tctish-powerbtn
 
-# Start an ssh server that we can access from QEMU.
+# Answer the app, which asks whether Linux is up. See tctish-agent.
+::respawn:/usr/bin/tctish-agent
+
 ::respawn:/sbin/syslogd -n -S -s 12 -b 8
-::respawn:/usr/sbin/dropbear -RF
 

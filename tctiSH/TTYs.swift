@@ -230,8 +230,9 @@ final class TTYs {
     /// Whether another user TTY can be added.
     var canAdd: Bool { users.count < TTY.userLimit }
 
-    /// The TTY that shows the SSH session, `hvc0`, or nil if it is closed.
-    var ssh: TTY? { users.first { $0.number == 0 } }
+    /// The TTY that shows `hvc0`, the console Linux's login is on, or nil if it
+    /// is closed.
+    var hvc0: TTY? { users.first { $0.number == 0 } }
 
     /// Whether any TTY other than the selected one has rung the bell while
     /// unmuted and has not been selected since.
@@ -287,7 +288,7 @@ final class TTYs {
         tty.view = view
 
         guard tty.number != 0 else {
-            view.transport = SSHTransport.shared
+            view.transport = ConsoleTransport.shared
             return
         }
 
@@ -429,8 +430,8 @@ final class TTYs {
         }
 
         // Tear down the closed terminals last, once the selection has moved off any of them that
-        // was on screen. Detaching the `hvc0` terminal from its transport leaves the SSH session
-        // running, because the app relies on the session to know whether Linux is up.
+        // was on screen. Detaching the `hvc0` terminal from its transport leaves the console
+        // connected, and what runs on it running, for when the TTY is opened again.
         for tty in closing {
             tty.view?.transport = nil
             tty.view?.removeFromSuperview()

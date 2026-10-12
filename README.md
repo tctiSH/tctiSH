@@ -86,9 +86,8 @@ basic tools installed. How you use this is beyond the scope of this document.
 - At its right is a blue cog, which enters the app's settings screen. Here you can configure the
   behavior of the app, including how much memory it uses, what it does in the background, and other
   properties of its runtime.
-- Your app state is saved whenever the app goes into the background, but running programs are lost
-  due to the terminal's SSH connection starting anew after each resume. If you want stuff to not get
-  lost for now you need to unparent it from your shell.
+- Your app state is saved whenever the app goes into the background, running programs included, and
+  can be resumed when you come back.
 - The `/ios_host` folder is the default form of host access, and corresponds to
   `On My iP(hone|ad)/tctiSH/SharedFolder.d`.
 - You can mount additional host folders by calling `mount -t ios <mount-name> <mount-point>`. This
@@ -173,10 +172,6 @@ the app:
   Run `make` on its own to see the available build steps.
 - `etc/resolv.conf` in the default image points at `192.168.100.3`, QEMU's built-in DNS forwarder,
   which resolves through the phone and so follows its VPN and private DNS settings.
-- The root password is set from a literal hash in `build_rootfs.sh` rather than by calling `passwd`,
-  because crypt(3) salts randomly and a fresh hash each build would defeat the lock. It has to be
-  set at all because Alpine's minirootfs ships `root:*`, which disables password login. The app
-  connects as root/toor.
 - `assets/build_disk.sh` makes `empty.qcow`: a 200 GiB (maximum size) `.qcow2` carrying a
   newly-created but never-mounted ext4 filesystem. Despite the name it is **not** an empty disk, and
   should not become one as we do not want `init` to force format the disk for the user on every
@@ -222,7 +217,7 @@ image is a pinned snapshot, the repositories it contains point at `edge` and hen
 latest packages whenever they add them.
 
 It should be noted that Alpine archives `releases/` indefinitely, but keeps only the latest build of
-each package in `main/`: the base is pinned durably and the sixteen packages are not. When edge
+each package in `main/`: the base is pinned durably and the thirteen packages are not. When edge
 supersedes one of them the old file goes away, `--lock` is how you catch up when building a new
 image.
 
@@ -233,7 +228,7 @@ Everything tctiSH adds _on top_ of the stock Alpine root filesystem lives in `as
 | File                                 | Description                                                                   |
 | ------------------------------------ | ----------------------------------------------------------------------------- |
 | `init`                               | Unpacks into RAM, builds the overlayfs root, hands off to busybox init.       |
-| `etc/inittab`                        | Respawns the getty, syslogd and dropbear.                                     |
+| `etc/inittab`                        | Respawns the logins, the guest agent and syslogd.                             |
 | `etc/profile.d/shell_integration.sh` | The PS1 that reports the guest's cwd, `COLORTERM`, and prints `tcti_motd`.    |
 | `etc/profile.d/mount_shared.sh`      | Mounts the 9p tag `qemu_launcher.c` passes as `shared`.                       |
 | `etc/motd`                           | **Deliberately empty**, so Alpine's greeting does not print over `tcti_motd`. |
@@ -282,9 +277,9 @@ When working directly on the kernel for paravirtualisation or feature-enablement
 very useful to boot the guest kernel locally. This can be done as follows:
 
 ```sh
-make boot-guest                   # JIT, serial console, guest logs in as root
+make boot-guest                   # JIT, hvc0 as the app shows it, guest logs in as root
 make boot-guest BACKEND=tcti      # the same, under TCTI
-make boot-guest ARGS=--ssh        # connect over SSH instead
+make boot-guest ARGS=--serial     # the serial console, with the kernel's log, instead
 make boot-guest ARGS=--help       # the other options
 ```
 
@@ -322,6 +317,6 @@ Console.app, filtered on subsystem `<bundle-id>` (e.g. `io.ara.tctish`) for ever
 | --------------------- | --------------------------------------------------- |
 | `<bundle-id>.jit`     | Enablement decisions, and the helper extension      |
 | `<bundle-id>.qemu`    | Which QEMU build and boot image the VM started with |
-| `<bundle-id>.network` | Tunnel, developer disk image, SSH                   |
+| `<bundle-id>.network` | Tunnel, developer disk image, console, guest agent  |
 | `<bundle-id>.fs`      | Files and where they live                           |
 | `<bundle-id>.ui`      | App lifecycle                                       |

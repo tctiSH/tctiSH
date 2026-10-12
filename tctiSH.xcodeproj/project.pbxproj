@@ -371,7 +371,6 @@
 			);
 			mainGroup = 49BD1A51224207B4005A2252;
 			packageReferences = (
-				498667032575F1FD006BFFA0 /* XCRemoteSwiftPackageReference "SwiftSH.binaries" */,
 				8D2AC18C28C7EF2D005DB7D4 /* XCRemoteSwiftPackageReference "swift-atomics" */,
 				16263731CAA602FE586240C9 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
 			);
@@ -634,7 +633,6 @@
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
-				SWIFT_INCLUDE_PATHS = "$(inherited) $(SRCROOT)/build-libssh2/out";
 				SWIFT_OBJC_BRIDGING_HEADER = "tctiSH/tctiSH-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -674,7 +672,6 @@
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
-				SWIFT_INCLUDE_PATHS = "$(inherited) $(SRCROOT)/build-libssh2/out";
 				SWIFT_OBJC_BRIDGING_HEADER = "tctiSH/tctiSH-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -793,14 +790,6 @@
 			requirement = {
 				kind = exactVersion;
 				version = 1.20.0;
-			};
-		};
-		498667032575F1FD006BFFA0 /* XCRemoteSwiftPackageReference "SwiftSH.binaries" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/migueldeicaza/SwiftSH.binaries";
-			requirement = {
-				branch = master;
-				kind = branch;
 			};
 		};
 		8D2AC18C28C7EF2D005DB7D4 /* XCRemoteSwiftPackageReference "swift-atomics" */ = {

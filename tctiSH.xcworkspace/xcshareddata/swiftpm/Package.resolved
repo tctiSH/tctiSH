@@ -20,15 +20,6 @@
       }
     },
     {
-      "identity" : "swiftsh.binaries",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/migueldeicaza/SwiftSH.binaries",
-      "state" : {
-        "branch" : "master",
-        "revision" : "3ce9fc6d6f26f43952a78d9431985a59008d14d2"
-      }
-    },
-    {
       "identity" : "swiftterm",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/migueldeicaza/SwiftTerm",

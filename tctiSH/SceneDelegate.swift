@@ -15,8 +15,8 @@ import UIKit
 /// that UIKit no longer delivers to `UIApplicationDelegate`, and hands them
 /// straight back to `AppDelegate` where the logic already lives.
 ///
-/// Both directions matter. Backgrounding snapshots the VM; returning has to
-/// rebuild the shell, because the SSH session does not survive being suspended.
+/// Both directions matter. Backgrounding snapshots the VM; returning brings a
+/// parked one back.
 ///
 /// It is also where the home screen's quick actions arrive, by either of the
 /// two doors UIKit delivers them through.

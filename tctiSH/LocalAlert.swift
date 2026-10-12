@@ -17,9 +17,9 @@ enum LocalAlert {
 
     /// Asks to be allowed to post, if that hasn't been settled already.
     ///
-    /// Asked once the shell is up rather than at launch, so the prompt arrives
-    /// when there is a session worth protecting instead of before the app has
-    /// done anything at all.
+    /// Asked once Linux is up rather than at launch, so the prompt arrives when
+    /// there is a session worth protecting instead of before the app has done
+    /// anything at all.
     static func requestPermission() {
         guard !hasAsked else { return }
         hasAsked = true

@@ -191,7 +191,7 @@ final class TTYMenu {
     func confirmClose(_ tty: TTY) {
         confirm(
             title: "Close \(tty.name)?",
-            message: "Programs running in it will be hung up.",
+            message: "Programs running in it keep running, and are there when it is opened again.",
             action: "Close"
         ) { [weak self] in
             self?.store.close(tty)
@@ -204,7 +204,8 @@ final class TTYMenu {
 
         confirm(
             title: count == 1 ? "Close 1 Other TTY?" : "Close \(count) Other TTYs?",
-            message: "Pinned TTYs stay open. Programs running in the others will be hung up.",
+            message:
+                "Pinned TTYs stay open. Programs running in the others keep running, and are there when they are opened again.",
             action: "Close"
         ) { [weak self] in
             self?.store.closeAll(but: tty)

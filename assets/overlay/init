@@ -141,10 +141,82 @@ fi
 mkdir -p /var/tcti-rootfs/rw-ios/userroot/root
 chmod 700 /var/tcti-rootfs/rw-ios/userroot/root
 
-# Create an SSH directory for root, and populate it with our default key.
-mkdir -p /var/tcti-rootfs/rw-ios/userroot/root/.ssh
-cp /etc/dropbear/placeholder_key.pub /var/tcti-rootfs/rw-ios/userroot/root/.ssh/authorized_keys
-chmod -R 600 /var/tcti-rootfs/rw-ios/userroot/root/.ssh
+# Disks from before the terminal moved from SSH to the virtio console.
+#
+# The disk is the overlay's upper layer, so a copy of a file on it hides the
+# image's. Checked on every boot:
+#
+#   /etc/inittab     starts the console's login and the agent. A copy on the
+#                    disk without them, which an older image or an edit may
+#                    have left there, would hide both: a terminal that never
+#                    opens, and an app that never hears that Linux is up. Set
+#                    aside rather than deleted, under a name no earlier copy
+#                    has, and said so at the next login, since an edit of it
+#                    stops working. A whiteout, which is what deleting the
+#                    file leaves, is lifted.
+#
+# And once per disk, so that someone who installs dropbear again on purpose
+# keeps it:
+#
+#   apk's world      loses dropbear, if the disk has its own copy of the file,
+#                    so that the next apk run takes dropbear and the libraries
+#                    it brought away, rather than putting them back.
+#   authorized_keys  init used to copy the repo's placeholder key in on every
+#                    boot. Its private half is public, so the key goes, and
+#                    the file with it if nothing else is left in it.
+#   host keys        the keys dropbear made for itself on first start.
+#
+# The stamp is left only if every step worked, so that a disk that was full,
+# say, has them tried again.
+USERROOT=/var/tcti-rootfs/rw-ios/userroot
+INITTAB="$USERROOT/etc/inittab"
+if [ -c "$INITTAB" ]; then
+	rm -f "$INITTAB"
+elif [ -f "$INITTAB" ] && ! { grep -q '^[^#]*tctish-login' "$INITTAB" &&
+	grep -q '^[^#]*tctish-agent' "$INITTAB"; }; then
+	ASIDE="$INITTAB.before-console"
+	n=1
+	while [ -e "$ASIDE" ]; do
+		ASIDE="$INITTAB.before-console.$n"
+		n=$((n + 1))
+	done
+	mv "$INITTAB" "$ASIDE"
+
+	ASIDE="/etc/${ASIDE##*/}"
+	echo "tctish: moved /etc/inittab to $ASIDE, as it would hide the console" >/dev/kmsg
+
+	# Said once, at the next login, by a script that then removes itself.
+	mkdir -p "$USERROOT/etc/profile.d"
+	cat >"$USERROOT/etc/profile.d/tctish-inittab-notice.sh" <<-EOF
+		echo "tctiSH: your /etc/inittab didn't start this terminal, so it is now $ASIDE."
+		echo "Copy any changes you made to it into /etc/inittab."
+		echo
+		rm -f /etc/profile.d/tctish-inittab-notice.sh
+	EOF
+fi
+
+CONSOLE_STAMP=/var/tcti-rootfs/rw-ios/.tctish-ssh-removed
+if [ ! -e "$CONSOLE_STAMP" ]; then
+	MIGRATED=1
+	if [ -f "$USERROOT/etc/apk/world" ]; then
+		sed -i '/^dropbear$/d' "$USERROOT/etc/apk/world" || MIGRATED=
+	fi
+
+	KEYS="$USERROOT/root/.ssh/authorized_keys"
+	PLACEHOLDER='ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDeeHEUBy1ijDajh7rrxvNn94Z01kq0Ys[^ ]* ktemkin@aigis.ktemk.in'
+	if [ -f "$KEYS" ] && grep -qx "$PLACEHOLDER" "$KEYS"; then
+		sed -i "/^$PLACEHOLDER\$/d" "$KEYS" || MIGRATED=
+		if [ ! -s "$KEYS" ]; then
+			rm -f "$KEYS"
+			rmdir "$USERROOT/root/.ssh" 2>/dev/null
+		fi
+	fi
+
+	rm -f "$USERROOT"/etc/dropbear/dropbear_*_host_key || MIGRATED=
+	rmdir "$USERROOT/etc/dropbear" 2>/dev/null
+
+	[ -n "$MIGRATED" ] && touch "$CONSOLE_STAMP"
+fi
 
 
 # ... and finally, mount together our union.

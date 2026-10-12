@@ -10,7 +10,8 @@
 # What this tests, and what it does not:
 #
 #   it does     the guest image -- the kernel, the initramfs, init, the overlay
-#               root, the disk, 9p, dropbear, and anything you do at the shell --
+#               root, the disk, 9p, the console and its resizing, the agent, and
+#               anything you do at the shell --
 #               on our QEMU: the third-party/qemu fork, built for this Mac by
 #               build_host_qemu.sh, with either backend. TCTI runs natively on
 #               Apple Silicon, so --backend tcti is the app's interpreter, gadgets
@@ -39,7 +40,6 @@ MACHINE="pc-i440fx-11.1"
 
 # Matches qemu_launcher.c. The guest's /etc/network config expects this subnet.
 GUEST_IP="192.168.100.100"
-SSH_PORT="10022"
 MONITOR_PORT="10045"
 
 BACKEND="jit"
@@ -52,10 +52,10 @@ MAX_CPUS="$(sysctl -n hw.logicalcpu_max 2>/dev/null || nproc 2>/dev/null || echo
 [ "$MAX_CPUS" -gt 16 ] && MAX_CPUS=16
 SHARE="/tmp"
 DISK="$ASSETS/boot_guest.qcow"
-KEY="$ASSETS/placeholder_keys/placeholder_key"
+LOG="$ASSETS/boot_guest.log"
 
 FRESH=0
-USE_SSH=0
+USE_SERIAL=0
 SNAPSHOT=""
 
 RED=$'\033[0;31m'
@@ -81,7 +81,8 @@ usage() {
 usage: boot_guest.sh [options]
 
   --backend NAME    jit (the default) or tcti: which build of our QEMU to run.
-  --ssh             Connect over SSH rather than using the serial console.
+  --serial          Use the serial console, with the kernel's log, rather than
+                    hvc0, the console the app shows.
   --fresh           Recreate the working disk from assets/empty.qcow first.
   --snapshot NAME   Resume from a saved snapshot instead of booting cold.
   --share DIR       Host directory offered over 9p as "shared" (default: /tmp).
@@ -97,6 +98,15 @@ runs, so the guest keeps its state; --fresh throws it away.
 The emulator is build-macOS-arm64/qemu_<backend>/qemu-system-x86_64, which
 `make host-qemu BACKEND=<backend>` builds and `make boot-guest` builds first if
 it has to. Setting TCTISH_QEMU runs some other qemu-system-x86_64 instead.
+
+By default this terminal is hvc0, the virtio console the app shows, and its
+size follows this window's, through the monitor's console_resize, as the app's
+does. The kernel's log goes to assets/boot_guest.log. With --serial, this
+terminal is the serial console instead, kernel log and all, as it was before
+the app moved off SSH; hvc0 is then left unconnected.
+
+The guest agent's port is a socket in a temporary directory, named on startup.
+Ask it whether Linux is up with:  printf 'ping 1\n' | nc -U <socket>
 
 The 9p share appears at /ios_host in the guest, mounted for you by
 etc/profile.d/mount_shared.sh at login -- so mounting it by hand gets you
@@ -136,14 +146,12 @@ prepare_disk() {
     fi
 }
 
-# dropbear rejects a key the filesystem lets anyone read, and git stores no mode
-# beyond the executable bit -- so the checked-in key is whatever the umask made
-# it. Copy rather than chmod in place, which would dirty the tree.
-prepare_key() {
-    KEY_COPY="$(mktemp)"
-    cat "$KEY" >"$KEY_COPY"
-    chmod 600 "$KEY_COPY"
-    trap 'rm -f "$KEY_COPY"' EXIT
+# Tells hvc0 this terminal's size, as the app tells it its view's.
+send_console_size() {
+    local size
+    size="$(stty size </dev/tty 2>/dev/null)" || return 0
+    printf 'console_resize hvc0 %s %s\n' "${size#* }" "${size% *}" |
+        nc -w 1 127.0.0.1 "$MONITOR_PORT" >/dev/null 2>&1 || true
 }
 
 # Ask the guest to power down, through the monitor.
@@ -191,7 +199,7 @@ main() {
                 BACKEND="${2:-}"
                 shift
                 ;;
-            --ssh) USE_SSH=1 ;;
+            --serial) USE_SERIAL=1 ;;
             --fresh) FRESH=1 ;;
             --snapshot)
                 SNAPSHOT="${2:-}"
@@ -241,7 +249,10 @@ main() {
         -kernel "$ASSETS/bzImage"
         -initrd "$ASSETS/initrd.img"
         -device virtio-net-pci,id=net1,netdev=net0
-        -netdev "user,id=net0,net=192.168.100.0/24,dhcpstart=$GUEST_IP,hostfwd=tcp:127.0.0.1:$SSH_PORT-:22"
+        -netdev "user,id=net0,net=192.168.100.0/24,dhcpstart=$GUEST_IP"
+        -device virtio-serial-pci,id=vser0,console-size=on
+        -device virtconsole,id=hvc0,chardev=hvc0-socket,bus=vser0.0
+        -device virtserialport,id=agent,chardev=agent-socket,bus=vser0.0,name=io.ara.tctish.agent
         -device virtio-rng-pci
         -device virtio-balloon-pci,free-page-reporting=on
         -device "virtio-blk-pci,id=disk1,drive=drive1,num-queues=$MAX_CPUS"
@@ -252,15 +263,22 @@ main() {
         -no-reboot
     )
 
-    # console=ttyS0 is the one deliberate difference from the app, which reaches
-    # the guest over SSH and leaves the kernel talking to nothing. Here the
-    # console is the point.
+    # The agent's socket. A short path, because a Unix socket's must fit in 104
+    # bytes.
+    AGENT_DIR="$(mktemp -d /tmp/tctish-agent.XXXXXX)"
+    AGENT_SOCKET="$AGENT_DIR/agent.sock"
+    trap 'rm -rf "$AGENT_DIR"' EXIT
+    argv+=(-chardev "socket,id=agent-socket,path=$AGENT_SOCKET,server=on,wait=off")
+
+    # console=ttyS0 is the one deliberate difference from the app, which leaves
+    # the kernel talking to nothing: here the log is worth keeping.
     local cmdline="tcti_disk=file page_reporting.page_reporting_order=2 rcupdate.rcu_cpu_stall_suppress=1"
-    if [ "$USE_SSH" -eq 0 ]; then
-        cmdline="$cmdline console=ttyS0"
-        argv+=(-nographic)
+    cmdline="$cmdline console=ttyS0"
+    if [ "$USE_SERIAL" -eq 1 ]; then
+        argv+=(-nographic -chardev null,id=hvc0-socket)
     else
-        argv+=(-display none -serial null)
+        # signal=off hands Ctrl-C to the guest rather than to QEMU, as in the app.
+        argv+=(-display none -serial "file:$LOG" -chardev stdio,id=hvc0-socket,signal=off)
     fi
     argv+=(-append "$cmdline")
 
@@ -271,39 +289,46 @@ main() {
     note "$QEMU, machine $MACHINE, $CPUS of $MAX_CPUS cpus, $MEMORY"
     note "9p share: $SHARE (tag 'shared')"
     note "monitor: telnet localhost $MONITOR_PORT"
+    note "agent: $AGENT_SOCKET"
 
-    if [ "$USE_SSH" -eq 0 ]; then
-        note "console follows; the guest logs in as root automatically"
+    if [ "$USE_SERIAL" -eq 1 ]; then
+        note "serial console follows; the guest logs in as root automatically"
         echo
-        exec "${argv[@]}"
+        "${argv[@]}"
+        return
     fi
 
-    prepare_key
+    note "kernel log: ${LOG#"$REPO"/}"
+    note "hvc0 follows; the guest logs in as root automatically. 'poweroff' to leave"
+    echo
 
-    # Backgrounded here rather than with QEMU's -daemonize, so that the
-    # script keeps a pid it can wait on and signal. A daemonized QEMU is an
-    # orphan: the only handle on it is a pattern match against its command line,
-    # which is both fragile and unnecessary.
-    "${argv[@]}" &
+    # In the background rather than exec'd, so that this script can pass on
+    # the window's size as it changes: bash runs a trap only between commands,
+    # and `wait` is one it can be interrupted in. QEMU still has the terminal,
+    # as a script without job control keeps everything in one process group,
+    # but its stdin has to be handed over by name: without job control, bash
+    # gives a background command /dev/null otherwise.
+    exec 3<&0
+    "${argv[@]}" <&3 3<&- &
     QEMU_PID=$!
 
-    note "waiting for the guest to answer on port $SSH_PORT"
-    local attempt=0
-    until nc -z 127.0.0.1 "$SSH_PORT" 2>/dev/null; do
-        attempt=$((attempt + 1))
-        [ "$attempt" -lt 60 ] || die "the guest never opened port $SSH_PORT"
-        sleep 1
+    # A TERM sent to this script powers the guest down, rather than pulling
+    # its plug. Closing the window can't: the hangup reaches QEMU as well, as
+    # it shares this process group, and QEMU quits at once on one.
+    trap 'shut_down; exit 0' HUP TERM
+
+    # The size now, once the monitor is listening, and again each time it
+    # changes. QEMU keeps it until the guest's driver is up to be told.
+    until nc -z 127.0.0.1 "$MONITOR_PORT" 2>/dev/null; do
+        kill -0 "$QEMU_PID" 2>/dev/null || break
+        sleep 0.2
     done
+    send_console_size
+    trap send_console_size WINCH
 
-    # The host key changes with every fresh disk, so checking it would only ever
-    # produce a scary warning about a machine that is meant to be disposable.
-    ssh -i "$KEY_COPY" -p "$SSH_PORT" \
-        -o StrictHostKeyChecking=no \
-        -o UserKnownHostsFile=/dev/null \
-        -o LogLevel=ERROR \
-        root@127.0.0.1 || true
-
-    shut_down
+    while kill -0 "$QEMU_PID" 2>/dev/null; do
+        wait "$QEMU_PID" || true
+    done
 }
 
 main "$@"

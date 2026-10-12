@@ -25,10 +25,6 @@ struct DiskMountInfo: Codable {
 /// Provides an interface for running / controlling a QEMU VM.
 public class QEMUInterface {
 
-    /// The hostfwd pattern used to make SSH connections available to the
-    /// application.
-    private static let sshHostForward: String = "tcp:127.0.0.1:10022-:22"
-
     /// The port on which we connect using the QEMU monitor.
     private static let monitorPort: Int32 = 10044
 
@@ -58,6 +54,7 @@ public class QEMUInterface {
 
         // Clear any state left over from previous runs.
         clearLastCWDFile()
+        Self.removeSocketsFromDocuments()
 
         // Figure out where our QEMU resources are...
         let bundlePrefix = Bundle.main.resourcePath!
@@ -93,7 +90,8 @@ public class QEMUInterface {
         let vcpus = launchVcpus(bootImageName: bootImageName)
 
         // ... get a filename for our unix domain monitor-connection socket ...
-        monitorSocketPath = getDatastoreURL("monitor", fileExtension: "socket").path
+        monitorSocketPath = Self.socketPath("monitor")
+        let consoleSocketPath = Self.consoleSocketPath(ConsoleTransport.shared.device)
 
         // Say what we're about to run. A hung VM looks identical whichever build and boot image
         // produced it, and those are exactly the two things that determine whether it *can* boot --
@@ -110,7 +108,8 @@ public class QEMUInterface {
         // ... and start up the QEMU kernel, which will start paused.
         run_background_qemu(
             qemuImage, kernelPath, initrdPath, bundlePrefix, diskPath, sharedFolder, bootImageName,
-            memoryValue, monitorSocketPath, AppDelegate.startsNative, AppDelegate.blessJitRegions,
+            memoryValue, monitorSocketPath, consoleSocketPath, Self.agentSocketPath,
+            AppDelegate.startsNative, AppDelegate.blessJitRegions,
             UInt32(tbSize), UInt32(CodeCache.initialSize), UInt32(vcpus));
         Vcpus.launched(with: vcpus)
 
@@ -207,9 +206,9 @@ public class QEMUInterface {
     /// the machine can be parked. A save that fails, or a machine that won't
     /// stop, goes on as an ordinary save: the machine is left running.
     ///
-    /// Call off the main thread, and only once the shell has connected: a
-    /// snapshot of a machine that has not finished booting is not worth
-    /// resuming, and the check is a view's, so the caller makes it.
+    /// Call off the main thread, and only once Linux is up: a snapshot of a
+    /// machine that has not finished booting is not worth resuming, and the
+    /// check is the guest agent's, so the caller makes it.
     @discardableResult
     func performBackgroundSave(leavingStopped: Bool = false) -> BackgroundSave {
         // See snapshotWorkLock: this whole sequence has to be atomic against a stale-snapshot
@@ -700,17 +699,15 @@ public class QEMUInterface {
     /// Serializes everything that talks to the monitor.
     ///
     /// One socket, one command at a time, one reader. `savevm` holds it for as
-    /// long as the snapshot takes. The collision this prevents is not
-    /// hypothetical: locking the device is both what backgrounds the app, which
-    /// starts a save on a background thread, and what fires
-    /// `applicationProtectedDataWillBecomeUnavailable`, which sends
-    /// `hostfwd_remove` from the main one. Interleaved, the second command's
-    /// prompt is read as the first command finishing.
+    /// long as the snapshot takes. Commands come from more than one thread: a
+    /// save runs on one of its own, while `monitorQueue` carries the console's
+    /// resizes and anything else queued. Interleaved, the second command's
+    /// prompt would be read as the first command finishing.
     private let monitorLock = NSLock()
 
     /// Where queued commands run, in the order they were asked for.
     ///
-    /// Serial, so `hostfwd_remove` cannot overtake `halt`, and off the main
+    /// Serial, so that one command cannot overtake another, and off the main
     /// thread, because the lock above may be held by a snapshot for twenty
     /// seconds and nothing on the main thread may wait that long.
     private let monitorQueue = DispatchQueue(label: "io.ara.tctish.monitor")
@@ -996,14 +993,13 @@ public class QEMUInterface {
     /// the bundled guest kernel, so a new kernel or a changed device list lands
     /// here too. See `VmSnapshots`.
     ///
-    /// Call off the main thread, once the shell is up: it talks to the monitor,
-    /// and `savevm`-adjacent commands want a machine that has finished booting.
+    /// Call off the main thread, once Linux is up: it talks to the monitor, and
+    /// `savevm`-adjacent commands want a machine that has finished booting.
     func discardPreUpgradeSnapshots() {
         guard VmSnapshots.changedSinceLastBoot else { return }
 
-        // Once per process. `connected` goes back to false on a dropped session and true again on
-        // the reconnect, so the notification that brings us here is not as once-only as its comment
-        // suggests.
+        // Once per process. Linux comes up again after every recovery boot, so the notification
+        // that brings us here is not as once-only as its comment suggests.
         guard
             Self.discardLock.withLock({
                 defer { Self.discardStarted = true }
@@ -1165,15 +1161,94 @@ public class QEMUInterface {
         sendMonitorCommand("cont")
     }
 
-    /// Terminates the SSH channel used for console comms.
-    func stopHostChannels() {
-        sendMonitorCommand("hostfwd_remove \(QEMUInterface.sshHostForward)")
+    /// Where QEMU listens for the app's connection to the console `device`.
+    static func consoleSocketPath(_ device: String) -> String {
+        socketPath(device)
     }
 
-    /// Terminates the SSH channel used for console comms.
-    func startHostChannels() {
-        sendMonitorCommand("hostfwd_add \(QEMUInterface.sshHostForward)")
+    /// Where QEMU listens for the app's connection to the guest agent.
+    static let agentSocketPath = socketPath("agent")
+
+    /// Where QEMU listens for one of the app's connections to it, by name.
+    ///
+    /// In the app's tmp folder, which the Files app doesn't show, rather than
+    /// in Documents, which it does. A socket deleted there leaves QEMU unable
+    /// to take a connection again until the next launch, and a folder made
+    /// under its name leaves QEMU unable to start at all. iOS may empty tmp
+    /// while the app isn't running, which is harmless: QEMU makes its sockets
+    /// afresh at every launch.
+    ///
+    /// Names stay short. A Unix socket's path has to fit in 104 bytes with its
+    /// terminating NUL, and on a device the folder's path alone is 89 of them.
+    private static func socketPath(_ name: String) -> String {
+        let path = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("\(name).sock").path
+
+        if path.utf8.count >= MemoryLayout.size(ofValue: sockaddr_un().sun_path) {
+            Log.qemu.fail("socket path is too long to listen at: \(path)")
+        }
+        return path
     }
+
+    /// Removes the sockets that earlier builds made in Documents, where the
+    /// Files app showed them. Only sockets: anything else by those names is
+    /// someone's file.
+    private static func removeSocketsFromDocuments() {
+        for name in ["monitor", "hvc0", "agent"] {
+            let path = getDatastoreURL(name, fileExtension: "socket", create: false).path
+            let type = try? FileManager.default.attributesOfItem(atPath: path)[.type]
+            guard type as? FileAttributeType == .typeSocket else { continue }
+
+            try? FileManager.default.removeItem(atPath: path)
+        }
+    }
+
+    /// Sets the size of the console `device`, which Linux gives its tty.
+    ///
+    /// Sent in order behind any other monitor command, and only the latest size
+    /// for each console, so that a rotation's run of sizes costs one command
+    /// for each console rather than one for each size.
+    ///
+    /// `redrawing` has the programs on the console draw their screens again,
+    /// for a terminal that has lost what they drew: the console is made a row
+    /// shorter first, so that the size changes, and the tty sends SIGWINCH,
+    /// even when the size was already right.
+    func resizeConsole(_ device: String, cols: Int, rows: Int, redrawing: Bool = false) {
+        consoleSizesLock.lock()
+        let sending = !consoleSizes.isEmpty
+        let redraw = redrawing || consoleSizes[device]?.redraw == true
+        consoleSizes[device] = (cols, rows, redraw)
+        consoleSizesLock.unlock()
+
+        guard !sending else { return }
+        monitorQueue.async { [weak self] in
+            guard let self else { return }
+            consoleSizesLock.lock()
+            let sizes = consoleSizes
+            consoleSizes.removeAll()
+            consoleSizesLock.unlock()
+
+            for (device, size) in sizes {
+                if size.redraw, size.rows > 1 {
+                    runMonitorCommandCleanly(
+                        "console_resize \(device) \(size.cols) \(size.rows - 1)", purpose: "console"
+                    )
+
+                    // Linux applies a size from work it schedules, which takes whatever size is
+                    // latest when it runs. Both sizes at once would look like no change at all, and
+                    // signal nothing.
+                    Thread.sleep(forTimeInterval: 0.3)
+                }
+                runMonitorCommandCleanly(
+                    "console_resize \(device) \(size.cols) \(size.rows)", purpose: "console")
+            }
+        }
+    }
+
+    /// The sizes `resizeConsole` has yet to send, by console. A send is on its
+    /// way whenever this isn't empty.
+    private var consoleSizes: [String: (cols: Int, rows: Int, redraw: Bool)] = [:]
+    private let consoleSizesLock = NSLock()
 
     /// Sets up the permissions for using a bookmarked folder. Used to restore
     /// access to an iOS folder.
@@ -1450,19 +1525,11 @@ public class QEMUInterface {
         return QEMUInterface.getSharedFolder()
     }
 
-    /// Returns the path of a shared file that can be used to pass our last-cwd
-    /// to the guest. Contents of the file are managed by our console frontend.
-    static func getLastCWDFile() -> URL {
-        var cwdFile = QEMUInterface.getSharedFolder()
-        cwdFile.appendPathComponent("last_cwd.dat")
-
-        return cwdFile
-    }
-
-    /// Removes any last-CWD file present, which is used to store the current
-    /// CWD.
+    /// Removes `last_cwd.dat` from the shared folder, where the Files app shows
+    /// it. Builds that reached the guest over SSH kept the shell's directory in
+    /// it, so that a new shell could start there; nothing uses it now.
     func clearLastCWDFile() {
-        let cwdFile = QEMUInterface.getLastCWDFile()
+        let cwdFile = QEMUInterface.getSharedFolder().appendingPathComponent("last_cwd.dat")
 
         // If we have a cwdfile, delete it.
         if FileManager.default.fileExists(atPath: cwdFile.path) {
@@ -1662,6 +1729,19 @@ public class QEMUInterface {
         return true
     }
 
+    /// Linux is restarting without having been asked to, as after `reboot` in
+    /// the terminal. Main thread.
+    ///
+    /// The app learns of it from the guest agent, and treats it as it does its
+    /// own recovery boot: nothing is saved, and nothing is handed vCPUs, until
+    /// Linux is up again, and a crash before then is the boot's fault.
+    func linuxRestartingItself() {
+        UserDefaults.standard.set(true, forKey: "attempting_boot")
+        forgetSession(because: "Linux restarted")
+        Vcpus.guestRestarting(qemu: self)
+        GuestAgent.shared.linuxRestarting()
+    }
+
     /// Restarts the VM from scratch, without leaving the app.
     ///
     /// Resets the machine rather than the process. `-loadvm` only applies at
@@ -1692,12 +1772,16 @@ public class QEMUInterface {
         }
 
         // Only now that the reset is on its way: a refused one leaves the session running. Linux
-        // restarting can't be handed vCPUs until its shell is back.
+        // restarting can't be handed vCPUs until it is up again.
         forgetSession(because: "Linux was reset")
-        if Thread.isMainThread {
+        let restarting = {
             Vcpus.guestRestarting(qemu: self)
+            GuestAgent.shared.linuxRestarting()
+        }
+        if Thread.isMainThread {
+            restarting()
         } else {
-            DispatchQueue.main.async { Vcpus.guestRestarting(qemu: self) }
+            DispatchQueue.main.async(execute: restarting)
         }
 
         // Harmless if it's already running, and necessary if it isn't.

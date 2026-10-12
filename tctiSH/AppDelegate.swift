@@ -326,9 +326,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     /// Called by `SceneDelegate`: under the scene life cycle UIKit delivers
     /// background transitions to the scene, not to the application delegate.
     func handleEnteredBackground() {
-        // Going back to the background cancels a reconnect that was waiting on the save. There is
-        // no foreground left to reconnect for, and `handleWillEnterForeground` will ask again.
-        reconnectWhenSaved = false
+        // Going back to the background cancels a wait for the save to finish. There is no
+        // foreground left to tell, and `handleWillEnterForeground` will wait again.
+        returnedMidSave = false
         away.store(true, ordering: .relaxed)
         Vcpus.enteredBackground()
 
@@ -343,11 +343,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return ();
         }
 
-        // Read on the main thread, which is where the SSH session updates `connected`. Never
-        // snapshot a machine that has not finished booting as the invalid snapshot could replace a
-        // valid one.
-        guard SSHTransport.shared.connected else {
-            Log.ui.note("backgrounded before the shell connected; not saving")
+        // Never snapshot a machine that Linux isn't known to be up on, as the invalid snapshot
+        // could replace a valid one. Main thread, where the agent updates it.
+        guard GuestAgent.shared.isUp else {
+            Log.ui.note("backgrounded before Linux was up; not saving")
             return
         }
 
@@ -415,8 +414,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return nil
         }
 
-        // Decided at the last moment. Coming back mid-save means a reconnect is waiting and parking
-        // would only make it wait for a load as well.
+        // Decided at the last moment. Coming back mid-save means someone is waiting for the
+        // terminal, and parking would only make them wait for a load as well.
         guard away.load(ordering: .relaxed) else {
             qemu.continueStopped()
             return nil
@@ -436,12 +435,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         return (tag, codeReleased)
     }
 
-    /// Rebuilds the shell after a spell in the background.
+    /// Picks up where the app left off after a spell in the background.
     ///
-    /// Held back while a save is running. `savevm` stops the guest for as long
-    /// as the snapshot takes, so reconnecting into one means SSH against a
-    /// machine that is not executing: the attempt fails, and the terminal's
-    /// 1.5s poll retries until the VM comes back.
+    /// The terminal needs nothing: its programs belong to the console, and kept
+    /// running for as long as the machine did. A parked machine is brought
+    /// back, though, and a save still running holds the machine stopped, so the
+    /// terminal doesn't answer until it finishes, which is said rather than
+    /// left to look like a hang.
     func handleWillEnterForeground() {
         // The first time, this is the launch: what follows then finds no machine and nothing to do.
         beginBoot()
@@ -453,32 +453,31 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             Backend.conditionsMayHaveChanged()
         }
 
-        // Before looking at the terminal, which may well say it is connected: a parked machine has
-        // to be brought back whatever the view thinks, or it stays parked for good.
+        // A parked machine has to be brought back, or it stays parked for good.
         if let tag = parkedTag {
             unpark(tag: tag)
             return
         }
 
-        let ssh = SSHTransport.shared
-        guard ssh.connected else {
+        if saving, !unparking {
+            Log.ui.note("returned to the foreground mid-save; the terminal waits for it")
+
+            returnedMidSave = true
+            NotificationCenter.default.post(name: AppDelegate.returnedDuringSave, object: nil)
             return
         }
 
-        guard !saving, !unparking else {
-            Log.ui.note("returned to the foreground mid-save; reconnecting once it finishes")
-
-            reconnectWhenSaved = true
-            NotificationCenter.default.post(name: AppDelegate.reconnectDeferred, object: nil)
-            return
+        // Nothing to wait for. A save or an unpark that the app came back during, and then left
+        // again before it finished, has finished since with nobody here to take its pill down. Only
+        // once Linux is up, so that this never takes down the pill for a boot.
+        if !saving, !unparking, GuestAgent.shared.isUp {
+            NotificationCenter.default.post(name: AppDelegate.machineIsBack, object: nil)
         }
-
-        Log.ui.note("returned to the foreground; rebuilding the shell")
-        ssh.forceReconnect()
     }
 
-    /// Whether the shell is waiting for a save before it reconnects.
-    private var reconnectWhenSaved = false
+    /// Whether the app came back while a save was running, and is waiting for
+    /// it to finish.
+    private var returnedMidSave = false
 
     /// Whether the machine is being saved, is parked, or is coming back from a
     /// park, any of which a switch of backend must wait out. Main thread.
@@ -486,8 +485,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         saving || parkedTag != nil || unparking
     }
 
-    /// Posted on the main queue when a reconnect has been held back.
-    static let reconnectDeferred = Notification.Name("io.ara.tctish.reconnectDeferred")
+    /// Posted on the main queue when the app comes back while the session is
+    /// being saved, which holds the machine stopped until it is done.
+    static let returnedDuringSave = Notification.Name("io.ara.tctish.returnedDuringSave")
+
+    /// Posted on the main queue when the machine is running again after the app
+    /// came back to it: a save it came back during has finished, or a parked
+    /// machine has been brought back.
+    static let machineIsBack = Notification.Name("io.ara.tctish.machineIsBack")
 
     /// Marks a save finished, and does whatever was waiting on it.
     private func saveDidFinish(parkedOn tag: String? = nil, codeReleased: Bool = false) {
@@ -499,29 +504,21 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         Vcpus.machineMayHaveChanged()
 
         // Parked just as someone came back. `handleWillEnterForeground` saw a save running and left
-        // it to us, or saw a dropped shell and left nothing at all; either way a parked machine in
-        // the foreground has to come back.
+        // it to us; a parked machine in the foreground has to come back.
         if let tag, !away.load(ordering: .relaxed) {
-            reconnectWhenSaved = false
+            returnedMidSave = false
             unpark(tag: tag)
             return
         }
 
-        guard reconnectWhenSaved else { return }
-        reconnectWhenSaved = false
+        guard returnedMidSave else { return }
+        returnedMidSave = false
 
-        // Checked again rather than assumed: a session that dropped while we were away needs no
-        // forcing, because the terminal's poll is already on it.
-        let ssh = SSHTransport.shared
-        guard ssh.connected else {
-            return
-        }
-
-        Log.ui.note("session save finished; rebuilding the shell")
-        ssh.forceReconnect()
+        Log.ui.note("session save finished; the machine is running again")
+        NotificationCenter.default.post(name: AppDelegate.machineIsBack, object: nil)
     }
 
-    /// Brings a parked machine back, and the shell with it.
+    /// Brings a parked machine back.
     ///
     /// Main thread. The load itself runs off it, because it reads the whole
     /// session back from storage, and the boot pill says what is going on.
@@ -662,15 +659,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         Vcpus.machineMayHaveChanged()
 
-        // A dropped session needs no forcing, as elsewhere: the terminal's poll is already on it,
-        // and brings the pill down when it connects.
-        let ssh = SSHTransport.shared
-        guard ssh.connected else {
-            return
-        }
-
-        Log.ui.note("unparked; rebuilding the shell")
-        ssh.forceReconnect()
+        Log.ui.note("unparked; the machine is running again")
+        NotificationCenter.default.post(name: AppDelegate.machineIsBack, object: nil)
     }
 
     /// Attempts to background the app to Picture in Picture.
@@ -693,20 +683,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func applicationProtectedDataWillBecomeUnavailable(_ application: UIApplication) {
         Log.ui.note("device locked; protected data is going away")
-        qemu?.stopHostChannels()
         configServer?.stop()
     }
 
     func applicationProtectedDataDidBecomeAvailable(_ application: UIApplication) {
         Log.ui.note("device unlocked")
-        Log.network.note("reconnecting SSH channels")
         configServer?.listen()
-        qemu?.startHostChannels()
-
-        // Not into a parked machine, which can't answer; the unpark reconnects once it is running.
-        guard parkedTag == nil, !unparking else { return }
-
-        SSHTransport.shared.forceReconnect()
     }
 
 }

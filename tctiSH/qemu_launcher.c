@@ -48,6 +48,8 @@ struct qemu_args {
     char *disk_args;
     char *shared_folder_args;
     char *monitor_channel_args;
+    char *console_channel_args;
+    char *agent_channel_args;
     char *boot_image_name;
     char *dll_name;
     char *memory_value;
@@ -74,6 +76,8 @@ static void free_qemu_args(struct qemu_args *args) {
     free(args->disk_args);
     free(args->shared_folder_args);
     free(args->monitor_channel_args);
+    free(args->console_channel_args);
+    free(args->agent_channel_args);
     free(args->memory_value);
     free(args->accel_args);
     free(args->smp_args);
@@ -360,11 +364,25 @@ static const char *qemu_disk_device(void) {
     /* We're a terminal; we don't display anything. */                                             \
     "-display", "none",                                                                            \
                                                                                                    \
-    /* Networking. Debug note: one can remove the 127.0.0.1 below to make SSH'ing the VM           \
-       possible from the debug host. This isn't recommended for debug builds. */                   \
+    /* Networking, for the guest's own use. Nothing on the host reaches in through it. */          \
     "-device", "virtio-net-pci,id=net1,netdev=net0",                                               \
-    "-netdev", "user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100,"                      \
-               "hostfwd=tcp:127.0.0.1:10022-:22",                                                  \
+    "-netdev", "user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100",                      \
+                                                                                                   \
+    /* The terminal, and the agent the app asks whether Linux is up.                               \
+                                                                                                   \
+       hvc0 is the terminal: a virtconsole, which Linux makes /dev/hvc0, with a getty on it. Its   \
+       programs belong to the tty, not to a connection, so they carry on through suspends and      \
+       snapshots whether or not the app is attached. console-size=on is our QEMU's: it lets the     \
+       app set the tty's size with the monitor's console_resize, which Linux turns into SIGWINCH.  \
+                                                                                                   \
+       The agent's port is a plain virtserialport, which Linux makes /dev/vportNpM and names in    \
+       sysfs; see tctish-agent in the guest.                                                       \
+                                                                                                   \
+       Each consumes a -chardev that qemu_thread passes separately, which carries a socket path. */ \
+    "-device", "virtio-serial-pci,id=vser0,console-size=on",                                       \
+    "-device", "virtconsole,id=hvc0,chardev=hvc0-socket,bus=vser0.0",                              \
+    "-device", "virtserialport,id=agent,chardev=agent-socket,bus=vser0.0,"                         \
+               "name=io.ara.tctish.agent",                                                         \
                                                                                                    \
     /* Provide our host RNG to our guest; to speed up entropy generation. */                       \
     "-device", "virtio-rng-pci",                                                                   \
@@ -406,7 +424,7 @@ static const char *qemu_disk_device(void) {
 // clang-format on
 
 const char *qemu_machine_signature(void) {
-    // Comfortably more than the ~530 bytes the current list needs. Built under
+    // Comfortably more than the ~750 bytes the current list needs. Built under
     // dispatch_once rather than a flag, because this is reached both from the
     // main thread at launch and from the boot queue when the epoch is recorded.
     // Those two would write identical bytes, so the race is benign -- but a
@@ -493,6 +511,11 @@ static void *qemu_thread(void *raw_args) {
         // Monitor connection for tctiSH. A socket path, so install-specific.
         "-monitor", args->monitor_channel_args,
 
+        // The sockets the app reaches the terminal and the agent through. Paths again; the devices
+        // that consume them are in TCTISH_MACHINE_ARGS.
+        "-chardev", args->console_channel_args,
+        "-chardev", args->agent_channel_args,
+
         // Use JIT if we have JIT hacks, and size the code cache if we were asked
         // to. Never migrated -- see CodeCache -- so deliberately not part of the
         // machine signature.
@@ -556,6 +579,7 @@ void run_background_qemu(const char *qemu_path, const char *kernel_path, const c
                          const char *bios_path, const char *disk_path,
                          const char *shared_folder_path, const char *boot_image_name,
                          const char *memory_value, const char *monitor_socket_path,
+                         const char *console_socket_path, const char *agent_socket_path,
                          bool start_native, bool bless_jit_regions, unsigned int tb_size_mib,
                          unsigned int chunk_mib, unsigned int vcpus) {
     pthread_t thread;
@@ -599,6 +623,15 @@ void run_background_qemu(const char *qemu_path, const char *kernel_path, const c
     args->monitor_channel_args = calloc(ARGUMENT_MAX, sizeof(char));
     snprintf(args->monitor_channel_args, ARGUMENT_MAX, "unix:%s,server=on,wait=off",
              monitor_socket_path);
+
+    // And the terminal's and the agent's. QEMU listens, and the app connects whenever it likes:
+    // output while it isn't connected is thrown away rather than holding the guest up.
+    args->console_channel_args = calloc(ARGUMENT_MAX, sizeof(char));
+    snprintf(args->console_channel_args, ARGUMENT_MAX,
+             "socket,id=hvc0-socket,path=%s,server=on,wait=off", console_socket_path);
+    args->agent_channel_args = calloc(ARGUMENT_MAX, sizeof(char));
+    snprintf(args->agent_channel_args, ARGUMENT_MAX,
+             "socket,id=agent-socket,path=%s,server=on,wait=off", agent_socket_path);
 
     // Create our accelerator argument.
     //

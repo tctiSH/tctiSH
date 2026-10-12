@@ -7,6 +7,7 @@ xcuserdata
 
 # Linux assets.
 *.qcow*
+assets/boot_guest.log
 ramdisk
 
 # Dependency build folders.
@@ -14,6 +15,5 @@ sysroot-iOS-arm64/
 build-iOS-arm64/
 build-StikJIT/
 build-idevice/
-build-libssh2/
 build-kernel/
 build-macOS-arm64/

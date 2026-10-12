@@ -26,17 +26,13 @@ end
 target "tctiSH" do
   use_frameworks!
 
-  # Vendored rather than fetched, so that it links the libssh2 build_libssh2.sh
-  # produces instead of the 2016 one upstream bundles. See its podspec.
-  pod "SwiftSH", :path => "third-party/SwiftSH"
   pod "BlueSocket"
 end
 
 # BlueSocket declares a deployment target far below ours -- 10.0 -- and CocoaPods
 # now keeps each podspec's value rather than raising it to the platform, as
 # it did when these were last generated. Xcode 27 refuses anything that old, so
-# pin every pod to ours. SwiftSH's vendored podspec already says 18.0; pinning it
-# too keeps the two from drifting apart.
+# pin every pod to ours.
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|

@@ -33,7 +33,7 @@ enum DiskCompaction {
         guard state == .idle else {
             return "The disk is already being compacted."
         }
-        guard SSHTransport.shared.connected else {
+        guard GuestAgent.shared.isUp else {
             return "Linux hasn't finished starting. Try again once the terminal is up."
         }
         guard !app.machineIsAway else {

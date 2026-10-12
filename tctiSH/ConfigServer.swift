@@ -396,12 +396,12 @@ class ConfigServer {
 
     }
 
-    /// Command that fetches the CWD for the current shell. Used for restoring
-    /// the CWD after a reconnect.
+    /// Command that fetches the CWD of the shell on `hvc0`, as its prompt last
+    /// reported it.
     private func handleGetCWD(message: ConfigurationMessage, from: Client) {
         let client = from
 
-        if let term = SSHTransport.shared.terminal {
+        if let term = ConsoleTransport.shared.terminal {
             if let cwd = term.cwd {
                 sendResponse(command: "getcwd", key: "cwd", value: cwd, to: client)
             }

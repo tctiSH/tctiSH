@@ -57,10 +57,14 @@ unsigned int qemu_max_vcpus(void);
 /// `vcpus` is how many vCPUs are plugged in at launch, from 1 to
 /// `qemu_max_vcpus()`. A snapshot loaded at launch brings the machine to the
 /// vCPUs it was taken with, so its count only saves that work.
+///
+/// `console_socket_path` and `agent_socket_path` are where QEMU listens for the
+/// app's connections to `hvc0`, the terminal, and to the guest agent.
 void run_background_qemu(const char *qemu_path, const char *kernel_path, const char *initrd_path,
                          const char *bios_path, const char *disk_path,
                          const char *shared_folder_path, const char *boot_image_name,
                          const char *memory_value, const char *monitor_socket_path,
+                         const char *console_socket_path, const char *agent_socket_path,
                          bool start_native, bool bless_jit_regions, unsigned int tb_size_mib,
                          unsigned int chunk_mib, unsigned int vcpus);
 

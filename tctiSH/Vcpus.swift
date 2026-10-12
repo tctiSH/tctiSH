@@ -155,8 +155,8 @@ enum Vcpus {
 
     /// Whether Linux has come up far enough to be handed vCPUs: it hears of
     /// them over ACPI, and one plugged in before its ACPI is up is not seen.
-    /// Set by the first shell, which is well past that, and cleared when Linux
-    /// is started again.
+    /// Set once the guest agent answers, which is well past that, and cleared
+    /// when Linux is started again.
     private static var guestReady = false
 
     /// What the change under way is working toward, read by the vCPU queue
@@ -194,8 +194,8 @@ enum Vcpus {
         }
     }
 
-    /// The shell has connected, so Linux is up. Main thread.
-    static func shellConnected() {
+    /// The guest agent has answered, so Linux is up. Main thread.
+    static func linuxIsUp() {
         guard !guestReady else { return }
 
         guestReady = true
@@ -207,10 +207,10 @@ enum Vcpus {
 
     /// Linux is being started again, by a reset. Main thread.
     ///
-    /// Nothing is plugged in or taken away until its shell is back: its ACPI
-    /// has to be up to hear of it, and its init has to have installed the
-    /// helper that brings a new vCPU online. An unplug that was still
-    /// outstanding is forgotten, as the reset withdrew it.
+    /// Nothing is plugged in or taken away until it is up again: its ACPI has
+    /// to be up to hear of it, and its init has to have installed the helper
+    /// that brings a new vCPU online. An unplug that was still outstanding is
+    /// forgotten, as the reset withdrew it.
     static func guestRestarting(qemu: QEMUInterface) {
         guestReady = false
         goal.store(0, ordering: .relaxed)

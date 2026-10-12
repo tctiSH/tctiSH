@@ -60,8 +60,8 @@ class ViewController: UIViewController {
     /// The terminal on screen: the selected TTY's. Call only from the primary
     /// UI thread.
     ///
-    /// For the state of the SSH session behind `hvc0`, ask `SSHTransport`: the
-    /// selected TTY is often a different one.
+    /// For whether Linux is up, ask `GuestAgent`: the selected TTY is often not
+    /// `hvc0`.
     public static func getCurrentTerminal() -> TctiTermView? {
         TTYs.shared.selected.view
     }
@@ -162,8 +162,9 @@ class ViewController: UIViewController {
 
         currentTerminal.becomeFirstResponder()
 
-        // Start the SSH session behind `hvc0`. It runs whether or not that TTY is open.
-        SSHTransport.shared.start()
+        // Connect to `hvc0`, whether or not that TTY is open, and ask whether Linux is up.
+        ConsoleTransport.shared.start()
+        GuestAgent.shared.start()
 
         // All of these need a window, which is exactly why the launch path couldn't do them itself.
         status = StatusPresenter(over: view, backdrop: currentTerminal.nativeBackgroundColor)
@@ -193,8 +194,8 @@ class ViewController: UIViewController {
         }
 
         // And a save that fails while the app is already in front of someone, which neither of
-        // those covers: coming back mid-save defers the reconnect and leaves the save running, so
-        // its failure arrives with nobody about to become active for it.
+        // those covers: coming back mid-save leaves the save running, so its failure arrives with
+        // nobody about to become active for it.
         NotificationCenter.default.addObserver(
             forName: QEMUInterface.saveDidFail, object: nil, queue: .main
         ) { [weak self] _ in
@@ -232,20 +233,20 @@ class ViewController: UIViewController {
     private func reportBootProgress() {
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(terminalDidConnect),
-            name: SSHTransport.didConnect,
+            selector: #selector(linuxDidComeUp),
+            name: GuestAgent.linuxDidComeUp,
             object: nil)
 
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(terminalWillReconnect),
-            name: SSHTransport.willReconnect,
+            selector: #selector(returnedDuringSave),
+            name: AppDelegate.returnedDuringSave,
             object: nil)
 
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(reconnectDeferred),
-            name: AppDelegate.reconnectDeferred,
+            selector: #selector(machineIsBack),
+            name: AppDelegate.machineIsBack,
             object: nil)
 
         NotificationCenter.default.addObserver(
@@ -260,19 +261,17 @@ class ViewController: UIViewController {
             name: AppDelegate.unparkDidFail,
             object: nil)
 
-        // Belt and braces: the observer goes on before anything could possibly have connected, but
-        // a pill that never goes away is a worse bug than a pill that never appears.
-        guard !SSHTransport.shared.connected else { return }
+        // Belt and braces: the observer goes on before Linux could possibly have answered, but a
+        // pill that never goes away is a worse bug than a pill that never appears.
+        guard !GuestAgent.shared.isUp else { return }
 
         showBootProgress(message: "Starting Linux")
         watchForMissingSnapshot()
     }
 
-    @objc private func terminalDidConnect() {
-        bootStallWatch?.cancel()
-        bootStallWatch = nil
+    @objc private func linuxDidComeUp() {
+        dismissBootProgress()
         stopWatchingForMissingSnapshot()
-        status?.dismiss(key: Self.bootStatusKey)
 
         // Asked for here, and only here: there is now a session that would be lost if saving it
         // went wrong, which is the one thing this app ever posts a notification about. Asking at
@@ -280,40 +279,40 @@ class ViewController: UIViewController {
         LocalAlert.requestPermission()
 
         // Needs a machine that has finished booting, and does nothing at all unless the QEMU
-        // underneath the app has changed its migration format since the last run.
-        //
-        // This is posted from `connected`'s `didSet`, so it arrives on whichever thread brought the
-        // SSH session up rather than on the main one, and `UIApplication.shared` may only be
-        // touched on the main thread. The work itself then goes off it again, because `delvm` is
-        // not instant on a snapshot worth a hundred megabytes.
-        DispatchQueue.main.async {
-            let qemu = (UIApplication.shared.delegate as? AppDelegate)?.qemu
-
-            DispatchQueue.global(qos: .utility).async {
-                qemu?.discardPreUpgradeSnapshots()
-            }
-
-            // Linux is up, so it can be handed the vCPUs wanted now.
-            Vcpus.shellConnected()
+        // underneath the app has changed its migration format since the last run. Off the main
+        // thread, because `delvm` is not instant on a snapshot worth a hundred megabytes.
+        let qemu = (UIApplication.shared.delegate as? AppDelegate)?.qemu
+        DispatchQueue.global(qos: .utility).async {
+            qemu?.discardPreUpgradeSnapshots()
         }
+
+        // Linux is up, so it can be handed the vCPUs wanted now.
+        Vcpus.linuxIsUp()
     }
 
-    /// Says that the session is coming back, after a lock or a spell in the
-    /// background.
+    /// Says why the terminal isn't answering yet: the machine is stopped until
+    /// the save finishes.
     ///
-    /// Shares the boot pill's key, so it inherits the stall watch: a resume
-    /// that never finishes is as much of a dead end as a boot that never
-    /// finishes, and offers the same way out.
-    @objc private func terminalWillReconnect() {
-        showBootProgress(message: "Resuming from snapshot")
-    }
-
-    /// Says why the shell hasn't come back yet.
-    @objc private func reconnectDeferred() {
+    /// Shares the boot pill's key, so it inherits the stall watch: a save that
+    /// never finishes is as much of a dead end as a boot that never finishes,
+    /// and offers the same way out.
+    @objc private func returnedDuringSave() {
         showBootProgress(message: "Finishing session save")
     }
 
-    /// Says why the shell hasn't come back yet when the memory was given back
+    /// The machine is running again, after a save or a park that the app came
+    /// back during.
+    @objc private func machineIsBack() {
+        dismissBootProgress()
+    }
+
+    private func dismissBootProgress() {
+        bootStallWatch?.cancel()
+        bootStallWatch = nil
+        status?.dismiss(key: Self.bootStatusKey)
+    }
+
+    /// Says why the terminal isn't answering yet when the memory was given back
     /// in the background and the session is being read back in.
     @objc private func unparkStarted() {
         // A return that tries again by itself makes the question moot, and answering it afterwards
@@ -429,7 +428,8 @@ class ViewController: UIViewController {
     /// finding the setting for a recovery boot, which is a lot to ask of
     /// someone who has just been left looking at a blank terminal.
     private func bootLooksStalled() {
-        Log.qemu.warn("no shell after \(Int(Self.bootStallDeadline))s; offering a recovery boot")
+        Log.qemu.warn(
+            "nothing back after \(Int(Self.bootStallDeadline))s; offering a recovery boot")
 
         status?.present(
             .init(
@@ -1482,9 +1482,9 @@ extension ViewController {
     /// three. Wrapped here rather than by the terminal, which would break the
     /// line in the middle of a word.
     private func say(_ paragraphs: String...) {
-        // These messages are about Linux starting, so they go on the SSH session's TTY while it's
-        // open, and on the selected terminal otherwise.
-        let tv: TctiTermView = TTYs.shared.ssh?.view ?? terminal
+        // These messages are about Linux starting, so they go on `hvc0`'s TTY while it's open, and
+        // on the selected terminal otherwise.
+        let tv: TctiTermView = TTYs.shared.hvc0?.view ?? terminal
         let width = max(20, tv.getTerminal().cols)
 
         for paragraph in paragraphs {

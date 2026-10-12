@@ -1,0 +1,92 @@
+#!/bin/sh
+#
+# Answers the app over the guest agent's virtio-serial port.
+#
+# The app asks this whether Linux is up: after a cold boot, after resuming a
+# saved session, and after a reset. An answer from here means userspace is
+# running, which no amount of the kernel being alive does. The app saves the
+# session only once it has had one, so a guest that never came up is never
+# saved over one that did.
+#
+# Requests are lines, a word and its argument, and so are the answers:
+#
+#   ping <n>    answered with "pong <n> <boot id>". The app numbers each round
+#               of asking, so an answer left over from before a reset is told
+#               apart.
+#
+# Anything else is answered with "error <word>". Unasked, the agent says
+# "hello <boot id>" when it starts, and "bye <boot id>" when init stops it as
+# Linux shuts down. That is how the app learns of a reboot started in the
+# guest: from the bye at once, or from a hello with a new boot id after a
+# reboot that skipped init (reboot -f). Keep this to named
+# operations: the port is reachable by anything in the app, and a request to
+# run a command would make it a root shell by another name.
+#
+# Started from /etc/inittab as a respawn. Blocked in a read, it costs nothing.
+#
+set -u
+
+NAME="io.ara.tctish.agent"
+
+# Find the port by its name, which QEMU gives it, rather than by number. There
+# is no udev, so /dev/virtio-ports/<name> never appears; devtmpfs makes only
+# the kernel's /dev/vportNpM, whose numbers are the order ports were added in.
+find_port() {
+    for sysdev in /sys/class/virtio-ports/vport*; do
+        [ -e "$sysdev" ] || continue
+
+        if [ "$(cat "$sysdev/name" 2>/dev/null)" = "$NAME" ]; then
+            echo "/dev/$(basename "$sysdev")"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# Linux makes a port before QEMU has named it, so a look early in the boot can
+# miss it. Keep looking rather than exit: inittab respawns this, and a tight
+# loop of failures would fill the log with the same line for ever. A guest
+# booted without the port (not by the app) costs a look a minute.
+tries=0
+until PORT="$(find_port)"; do
+    tries=$((tries + 1))
+    if [ "$tries" -lt 60 ]; then
+        sleep 1
+    else
+        [ "$tries" -eq 60 ] && echo "tctish-agent: no virtio-serial port named $NAME yet" >&2
+        sleep 60
+    fi
+done
+
+# Linux lets a port be open only once. Someone else has it open (cat on the
+# device, say): wait before init starts this again, rather than spin.
+if ! (: <>"$PORT") 2>/dev/null; then
+    echo "tctish-agent: $PORT is busy" >&2
+    sleep 10
+    exit 1
+fi
+
+# Read and write on one descriptor.
+exec 3<>"$PORT"
+
+read -r BOOT_ID < /proc/sys/kernel/random/boot_id
+
+# Waits for the app to connect, like every write here.
+echo "hello $BOOT_ID" >&3
+
+# init sends TERM to everything as Linux shuts down.
+trap 'echo "bye $BOOT_ID" >&3; exit 0' TERM
+
+while :; do
+    while read -r request argument <&3; do
+        case "$request" in
+            ping) echo "pong $argument $BOOT_ID" >&3 ;;
+            *) echo "error $request" >&3 ;;
+        esac
+    done
+
+    # Reads end at once while nothing on the host is connected, which is what
+    # the loop above ending means. Wait for the app, rather than spin.
+    sleep 1
+done
