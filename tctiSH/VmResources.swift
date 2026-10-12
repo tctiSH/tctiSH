@@ -623,6 +623,9 @@ enum AppSetting: String {
     case arrowRepeatDelay = "arrow_repeat_delay"
     case accentColor = "accent_color"
     case allowClipboardRead = "allow_clipboard_read"
+    case scrollback = "scrollback"
+    case ttys = "ttys"
+    case stepThroughSystemTTYs = "step_through_system_ttys"
 
     var string: String {
         UserDefaults.standard.string(forKey: rawValue) ?? ""
@@ -644,6 +647,10 @@ enum AppSetting: String {
         UserDefaults.standard.array(forKey: rawValue) as? [Double] ?? []
     }
 
+    var data: Data? {
+        UserDefaults.standard.data(forKey: rawValue)
+    }
+
     func set(_ value: String) {
         UserDefaults.standard.set(value, forKey: rawValue)
     }
@@ -661,6 +668,10 @@ enum AppSetting: String {
     }
 
     func set(_ value: [Double]) {
+        UserDefaults.standard.set(value, forKey: rawValue)
+    }
+
+    func set(_ value: Data) {
         UserDefaults.standard.set(value, forKey: rawValue)
     }
 

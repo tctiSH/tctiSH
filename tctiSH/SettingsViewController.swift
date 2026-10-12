@@ -1589,6 +1589,9 @@ private final class AppearanceSettingsViewController: SettingsListViewController
 
     private static let fontSizes = [8, 10, 12, 14, 16, 18, 20, 22, 24, 28, 30]
 
+    /// The scrollback lengths offered, in standard 80-column lines.
+    private static let scrollbacks = [500, 1000, 2000, 5000, 10000]
+
     override func viewDidLoad() {
         super.viewDidLoad()
 
@@ -1633,7 +1636,8 @@ private final class AppearanceSettingsViewController: SettingsListViewController
 
             SettingsSection(
                 header: "Terminal",
-                footer: nil,
+                footer:
+                    "The defaults for every TTY. The TTY menu in the switcher allows overriding them.",
                 rows: [
                     SettingsRow(
                         id: "font-size",
@@ -1641,7 +1645,28 @@ private final class AppearanceSettingsViewController: SettingsListViewController
                         detail: "\(AppSetting.fontSize.integer)",
                         symbol: "textformat.size",
                         accessory: .disclosure,
-                        select: { [weak self] in self?.pushFontSize() })
+                        select: { [weak self] in self?.pushFontSize() }),
+                    SettingsRow(
+                        id: "scrollback",
+                        title: "Scrollback",
+                        detail: "\(AppSetting.scrollback.integer.formatted()) lines",
+                        symbol: "scroll",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.pushScrollback() }),
+                ]),
+
+            SettingsSection(
+                header: "Switching TTYs",
+                footer:
+                    "Swiping across the TTYs button, or pressing ⌘⇧[ and ⌘⇧], moves through open TTYS. The locked TTYs can be included if wished.",
+                rows: [
+                    SettingsRow(
+                        id: "step-through-system-ttys",
+                        title: "Include Kernel Log and VM Management",
+                        symbol: "lock",
+                        toggle: ToggleValue(
+                            isOn: AppSetting.stepThroughSystemTTYs.bool,
+                            commit: { AppSetting.stepThroughSystemTTYs.set($0) }))
                 ]),
         ]
     }
@@ -1654,6 +1679,19 @@ private final class AppearanceSettingsViewController: SettingsListViewController
                 options: Self.fontSizes.map { SettingsOption(title: "\($0)", value: $0) },
                 selected: { AppSetting.fontSize.integer },
                 choose: { AppSetting.fontSize.set($0) }))
+    }
+
+    private func pushScrollback() {
+        push(
+            OptionListViewController(
+                title: "Scrollback",
+                footer:
+                    "How much each TTY keeps once it has scrolled off the screen. Every 80 columns is counted as a line if the line is longer than that.",
+                options: Self.scrollbacks.map {
+                    SettingsOption(title: "\($0.formatted()) lines", value: $0)
+                },
+                selected: { AppSetting.scrollback.integer },
+                choose: { AppSetting.scrollback.set($0) }))
     }
 }
 

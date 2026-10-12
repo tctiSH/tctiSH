@@ -14,7 +14,9 @@ import SwiftTerm
 import UIKit
 
 class ViewController: UIViewController {
-    var tv: TerminalView!
+
+    /// The selected TTY's terminal, which is the one on screen.
+    var terminal: TctiTermView { TTYs.shared.selected.view }
 
     /// The padding used around the current view's frame.
     let padding: CGFloat = 7
@@ -33,8 +35,8 @@ class ViewController: UIViewController {
     /// it while a hardware keyboard has it hidden.
     private(set) var keyBar: KeyBar?
 
-    /// The bottom of the space for the key bar's rails while they're shown:
-    /// the keyboard's top edge, or the screen's bottom with a hardware one.
+    /// The bottom of the space for the key bar's rails while they're shown: the
+    /// keyboard's top edge, or the screen's bottom with a hardware one.
     private var railsBottom: CGFloat?
 
     /// The pairing session in progress, if any. Strong: nothing else holds it.
@@ -51,21 +53,72 @@ class ViewController: UIViewController {
     /// Whether the JIT verdict has been logged and shown.
     private var hasReportedJitOutcome = false
 
-    /// Stores the most recently used terminal; for singleton-style fetches.
-    private static var currentTerminal: TctiTermView?
-
     /// Stores the most recently used terminal's view controller; for
     /// singleton-style fetches.
     private static var currentTerminalController: UIViewController?
 
-    /// Fetches the most recently created TctiTermView. Call only from the
-    /// primary UI thread.
+    /// The terminal on screen: the selected TTY's. Call only from the primary
+    /// UI thread.
     ///
-    /// In normal operation; this should always be the only term persented to
-    /// the user.
+    /// For the state of the SSH session behind `hvc0`, ask `SSHTransport`: the
+    /// selected TTY is often a different one.
     public static func getCurrentTerminal() -> TctiTermView? {
-        return currentTerminal
+        TTYs.shared.selected.view
     }
+
+    /// The TTY switcher, while it's open.
+    private(set) var switcher: TTYSwitcherViewController?
+
+    /// Whether the terminal, or the find bar over it, had the keyboard when the
+    /// switcher opened, so that the terminal gets it back when the switcher
+    /// closes.
+    private var keyboardBeforeSwitcher = false
+
+    /// While the switcher is open, the view size that the terminal frame was
+    /// last computed for. The frame is otherwise held still under the switcher;
+    /// a new size means the device turned, and the terminal is resized for it.
+    private var sizeUnderSwitcher: CGSize?
+
+    /// The find bar, while it's open, over the terminal it searches.
+    private var findBar: FindBar?
+
+    /// The switcher button that floats over the terminal while the key bar is
+    /// off screen.
+    private let floatingSwitcher = FloatingSwitcher()
+
+    /// Whether the floating switcher button is shown or fading in.
+    private var floatingSwitcherShown = false
+
+    /// Whether an update of the floating switcher button is already scheduled
+    /// for the next turn of the run loop.
+    private var floatingSwitcherPending = false
+
+    /// The pill that briefly shows which TTY a step landed on.
+    private var stepPill: UILabel?
+
+    /// Builds the TTY menu shown by holding the switcher button. Its Search
+    /// item selects the TTY and opens the find bar on it.
+    private lazy var ttyMenu = TTYMenu(presenter: self) { [weak self] tty in
+        TTYs.shared.select(tty)
+        self?.openFindBar()
+    }
+    private var stepPillExpiry: DispatchWorkItem?
+
+    /// Which way the terminals slide when the selection changes: +1 brings the
+    /// new terminal in from the right, -1 from the left, and nil means no
+    /// slide. Set only while `slide(_:_:)` changes the selection.
+    private var slideDirection: Int?
+
+    /// While terminals slide: the black backdrop behind them, a page under each
+    /// terminal that moves with it (see `slidePage(for:)`), and the number of
+    /// slide animations still running.
+    private var slideBackdrop: UIView?
+    private var slidePages: [ObjectIdentifier: UIView] = [:]
+    private var slidesUnderway = 0
+
+    /// The terminals slid off screen, removed from the view once every slide
+    /// has finished.
+    private var slidOut: [TctiTermView] = []
 
     /// Fetches the root ViewController, which houses our TctiTermView. Call
     /// only from the primary UI thread.
@@ -79,14 +132,12 @@ class ViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        // Start up our terminal emulator, which will display our actual terminal.
-        let currentTerminal = TctiTermView(frame: makeFrame(keyboardDelta: 0))
-
-        tv = currentTerminal
+        // Make every TTY's terminal at the same frame, and put the selected one on screen.
+        TTYs.shared.makeTerminals(frame: makeFrame(keyboardDelta: 0))
+        let currentTerminal = terminal
         view.addSubview(currentTerminal)
 
-        // Update our "most recent" singletons.
-        ViewController.currentTerminal = currentTerminal
+        // Update our "most recent" singleton.
         ViewController.currentTerminalController = self
 
         // Held back while Settings First keeps the boot waiting, since what it says can change in
@@ -107,8 +158,12 @@ class ViewController: UIViewController {
             rails.frame = view.bounds
             view.addSubview(rails)
         }
+        setUpTTYs()
 
         currentTerminal.becomeFirstResponder()
+
+        // Start the SSH session behind `hvc0`. It runs whether or not that TTY is open.
+        SSHTransport.shared.start()
 
         // All of these need a window, which is exactly why the launch path couldn't do them itself.
         status = StatusPresenter(over: view, backdrop: currentTerminal.nativeBackgroundColor)
@@ -118,7 +173,7 @@ class ViewController: UIViewController {
         // seconds, and the boot spinner under it for as long as the VM takes -- so there's never a
         // moment with nothing on screen, which is what made an ordinary wait read as a hang.
         observeJitState()
-        reportBootProgress(for: currentTerminal)
+        reportBootProgress()
         observeJitPreparation()
         observeCodeCache()
         observeBackend()
@@ -174,17 +229,17 @@ class ViewController: UIViewController {
     ///
     /// Open-ended on purpose: there's no way to know how far along a boot is,
     /// so the dial spins rather than inventing a number.
-    private func reportBootProgress(for terminal: TctiTermView) {
+    private func reportBootProgress() {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(terminalDidConnect),
-            name: TctiTermView.didConnect,
+            name: SSHTransport.didConnect,
             object: nil)
 
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(terminalWillReconnect),
-            name: TctiTermView.willReconnect,
+            name: SSHTransport.willReconnect,
             object: nil)
 
         NotificationCenter.default.addObserver(
@@ -207,7 +262,7 @@ class ViewController: UIViewController {
 
         // Belt and braces: the observer goes on before anything could possibly have connected, but
         // a pill that never goes away is a worse bug than a pill that never appears.
-        guard !terminal.connected else { return }
+        guard !SSHTransport.shared.connected else { return }
 
         showBootProgress(message: "Starting Linux")
         watchForMissingSnapshot()
@@ -1158,24 +1213,23 @@ class ViewController: UIViewController {
         }
         keyboardDelta = covering.map(covered(by:)).max() ?? 0
 
-        // As rails, the zero-height bar marks the keyboard's top edge, or the screen's bottom
-        // with a hardware keyboard, and is on screen only while the terminal has focus. The
-        // keyboard's own frame can't be trusted here: with no accessory height, it has been
-        // reported as a sliver a few points high. The rails hide as soon as the terminal loses
-        // focus.
+        // As rails, the zero-height bar marks the keyboard's top edge, or the screen's bottom with
+        // a hardware keyboard, and is on screen only while the terminal has focus. The keyboard's
+        // reported frame can't be trusted here: with no accessory height, it has been reported as a
+        // sliver a few points high. The rails hide as soon as the terminal loses focus.
         railsBottom = nil
         if keyBar?.usesRails == true {
             let top = keyBar?.screenFrame.map {
                 min(max(view.convert($0, from: screen.coordinateSpace).minY, 0), view.bounds.maxY)
             }
-            if let top, tv.isFirstResponder {
+            if let top, terminal.isFirstResponder {
                 railsBottom = top
                 keyboardDelta = view.bounds.maxY - top
                 keyboardBesideRails = keyboardDelta
             } else {
                 keyboardDelta = 0
             }
-        } else if tv.isFirstResponder, keyboardDelta > 0 {
+        } else if terminal.isFirstResponder, keyboardDelta > 0 {
             keyboardUnderStrip = keyboardDelta
         }
 
@@ -1185,8 +1239,8 @@ class ViewController: UIViewController {
     /// The size being turned to, during a turn between strip and rails.
     private var turningTo: CGSize?
 
-    /// The height the keyboard last covered with rails and with the strip,
-    /// used as estimates during a turn, before the keyboard reports.
+    /// The height the keyboard last covered with rails and with the strip, used
+    /// as estimates during a turn, before the keyboard reports.
     private var keyboardBesideRails: CGFloat?
     private var keyboardUnderStrip: CGFloat?
 
@@ -1198,9 +1252,9 @@ class ViewController: UIViewController {
 
     private var wantsRails: Bool { wantsRails(at: view.bounds.size) }
 
-    /// The height the keyboard is expected to cover in a view this tall,
-    /// until it reports. A hardware keyboard covers only the strip, and with
-    /// rails, nothing.
+    /// The height the keyboard is expected to cover in a view this tall, until
+    /// it reports. A hardware keyboard covers only the strip, and with rails,
+    /// nothing.
     private func expectedKeyboard(rails: Bool, height: CGFloat) -> CGFloat {
         let hardware = GCKeyboard.coalesced != nil
         if rails {
@@ -1260,20 +1314,37 @@ class ViewController: UIViewController {
     private func expectKeyboardWhileTurning() {
         let height = view.bounds.height
         let rails = keyBar?.usesRails == true && wantsRails
-        let covered = tv.isFirstResponder ? expectedKeyboard(rails: rails, height: height) : 0
+        let covered = terminal.isFirstResponder ? expectedKeyboard(rails: rails, height: height) : 0
 
         keyboardDelta = covered
-        railsBottom = rails && tv.isFirstResponder && keyBar?.window != nil ? height - covered : nil
+        railsBottom =
+            rails && terminal.isFirstResponder && keyBar?.window != nil ? height - covered : nil
     }
 
     /// Lays out the terminal around the keyboard and rails, and the rails, if
     /// shown, either side of it.
     private func layoutTerminal() {
-        tv.frame = makeFrame(keyboardDelta: keyboardDelta)
+        // While the switcher is open, the terminal frame stays as it was. The switcher takes the
+        // keyboard, so the terminal would otherwise grow into the space the keyboard leaves, then
+        // shrink again when the switcher closes and the keyboard returns: two resizes for nothing.
+        // A new view size, from the device turning, still resizes it, for the keyboard it will have
+        // once the switcher closes, so the switcher's cards take the new shape.
+        if switcher == nil {
+            TTYs.shared.terminalFrame = makeFrame(keyboardDelta: keyboardDelta)
+        } else if view.bounds.size != sizeUnderSwitcher {
+            sizeUnderSwitcher = view.bounds.size
+            let keyboard =
+                keyboardBeforeSwitcher
+                ? expectedKeyboard(rails: wantsRails, height: view.bounds.height) : 0
+            TTYs.shared.terminalFrame = makeFrame(keyboardDelta: keyboard)
+        }
+        layoutFindBar()
+        scheduleFloatingSwitcherUpdate()
 
         // Set on every layout, as autoresizing left it at its portrait size, and a rail outside it
-        // can't be touched.
+        // can't be touched. The switcher's view is set to fill the view on every layout too.
         keyBar?.rails.frame = view.bounds
+        switcher?.view.frame = view.bounds
 
         let insets = view.safeAreaInsets
         keyBar?.placeRails(
@@ -1323,16 +1394,21 @@ extension ViewController {
         }
     }
 
-    /// The same ⌘, on iPhone, which has no menu bar for the app menu's command
-    /// to live in. Not on iPad, where the menu's command already answers it and
-    /// a second would only compete with it.
+    /// On iPhone, which has no menu bar, the key commands that the menu bar
+    /// holds on iPad: Settings (⌘,), Find (⌘F) and the TTY commands. Not on
+    /// iPad, where the menu bar's commands already answer these keys and a
+    /// second set would only compete with them.
     override var keyCommands: [UIKeyCommand]? {
         guard traitCollection.userInterfaceIdiom == .phone else { return super.keyCommands }
 
         let settings = UIKeyCommand(
             title: "Settings…", action: #selector(openSettings(_:)), input: ",",
             modifierFlags: .command)
-        return (super.keyCommands ?? []) + [settings]
+        // On iPad, Find comes from Edit > Find in the menu bar.
+        let find = UIKeyCommand(
+            title: "Find…", action: #selector(find(_:)), input: "f", modifierFlags: .command)
+        return (super.keyCommands ?? []) + Self.ttyFileCommands + Self.ttyViewCommands
+            + Self.ttyWindowCommands + [find, settings]
     }
 }
 
@@ -1406,6 +1482,9 @@ extension ViewController {
     /// three. Wrapped here rather than by the terminal, which would break the
     /// line in the middle of a word.
     private func say(_ paragraphs: String...) {
+        // These messages are about Linux starting, so they go on the SSH session's TTY while it's
+        // open, and on the selected terminal otherwise.
+        let tv: TctiTermView = TTYs.shared.ssh?.view ?? terminal
         let width = max(20, tv.getTerminal().cols)
 
         for paragraph in paragraphs {
@@ -1419,5 +1498,560 @@ extension ViewController {
             }
             tv.feed(text: line + "\r\n\r\n")
         }
+    }
+}
+
+// MARK: - TTYs
+
+extension ViewController {
+
+    /// Wires up both switcher buttons, the key bar's and the floating one, and
+    /// puts each newly selected TTY's terminal on screen.
+    fileprivate func setUpTTYs() {
+        for button in [keyBar?.switcher, floatingSwitcher.button].compactMap({ $0 }) {
+            button.open = { [weak self] in self?.openSwitcher() }
+            button.step = { [weak self] offset in self?.step(by: offset) }
+            button.ttyMenu = { [weak self] interaction in
+                guard let self, switcher == nil, presentedViewController == nil else { return nil }
+                return ttyMenu.menu(for: TTYs.shared.selected, in: interaction)
+            }
+            button.add = { [weak self] in self?.stepToNew() }
+            button.pull = { offset in
+                let ttys = TTYs.shared
+                if ttys.neighbor(by: offset) != nil {
+                    return .step
+                }
+                return offset > 0 && ttys.canAdd ? .add : .none
+            }
+        }
+
+        floatingSwitcher.alpha = 0
+        floatingSwitcher.isHidden = true
+        view.addSubview(floatingSwitcher)
+
+        NotificationCenter.default.addObserver(
+            forName: TTYs.selectionDidChange, object: nil, queue: .main
+        ) { [weak self] note in
+            self?.showSelected(replacing: note.object as? TTY)
+        }
+    }
+
+    /// Puts the selected TTY's terminal on screen in place of `previous`'s, and
+    /// moves the key bar and the keyboard to it.
+    private func showSelected(replacing previous: TTY?) {
+        // Typing in the find bar counts as typing in the terminal it searches: either way, the
+        // incoming terminal takes the keyboard.
+        let typing = previous?.view?.isFirstResponder == true || findBar?.isTyping == true
+        closeFindBar(refocus: false)
+
+        let incoming = terminal
+        let outgoing = previous?.view
+        guard incoming !== outgoing else { return }
+
+        let sliding = incoming.superview === view
+
+        // Set by bounds and center rather than frame: the incoming terminal may still carry the
+        // translation of an earlier slide, and setting the frame of a transformed view would fold
+        // the translation in.
+        let frame = TTYs.shared.terminalFrame
+        incoming.bounds.size = frame.size
+        incoming.center = CGPoint(x: frame.midX, y: frame.midY)
+        if let outgoing, outgoing.superview === view {
+            view.insertSubview(incoming, aboveSubview: outgoing)
+        } else {
+            view.insertSubview(incoming, at: 0)
+        }
+
+        // Point the key bar at the incoming terminal before it takes the keyboard, because the
+        // terminal's input accessory view is read as it becomes first responder.
+        keyBar?.terminal = incoming
+        if typing {
+            _ = incoming.becomeFirstResponder()
+        }
+
+        guard let outgoing else { return }
+        outgoing.inputAccessoryView = nil
+
+        // After a step, the terminals slide across as pages do, the next coming in from the right.
+        // Otherwise, or with Reduce Motion on, the outgoing terminal is swapped out at once.
+        guard let direction = slideDirection, !UIAccessibility.isReduceMotionEnabled else {
+            incoming.transform = .identity
+            outgoing.removeFromSuperview()
+            outgoing.transform = .identity
+            slidePages.values.forEach { $0.removeFromSuperview() }
+            slidePages.removeAll()
+            slideBackdrop?.removeFromSuperview()
+            slideBackdrop = nil
+            return
+        }
+        let distance = (view.bounds.width + Self.slideGap) * CGFloat(direction)
+        let incomingPage = slidePage(for: incoming)
+        let outgoingPage = slidePage(for: outgoing)
+        if !sliding {
+            incoming.transform = CGAffineTransform(translationX: distance, y: 0)
+            incomingPage.transform = incoming.transform
+        }
+
+        slidesUnderway += 1
+        slidOut.append(outgoing)
+        UIView.animate(
+            withDuration: 0.35, delay: 0, usingSpringWithDamping: 1, initialSpringVelocity: 0,
+            options: [.beginFromCurrentState, .allowUserInteraction]
+        ) {
+            incoming.transform = .identity
+            incomingPage.transform = .identity
+            outgoing.transform = CGAffineTransform(translationX: -distance, y: 0)
+            outgoingPage.transform = outgoing.transform
+        } completion: { [weak self] _ in
+            guard let self else { return }
+            slidesUnderway -= 1
+            guard slidesUnderway == 0 else { return }
+
+            // Remove the slid-out terminals only once every slide has finished: a later slide may
+            // be moving one of them out again, or back in, in which case it is now the selected
+            // terminal and stays.
+            for outgoing in slidOut where outgoing !== terminal {
+                outgoing.removeFromSuperview()
+                outgoing.transform = .identity
+            }
+            slidOut.removeAll()
+            slidePages.values.forEach { $0.removeFromSuperview() }
+            slidePages.removeAll()
+            slideBackdrop?.removeFromSuperview()
+            slideBackdrop = nil
+        }
+    }
+
+    /// The width of the black gap between terminals as they slide.
+    private static let slideGap: CGFloat = 8
+
+    /// Returns the page that `terminal` slides on, making it if needed. The
+    /// page is the size of the screen, filled with the terminal's background
+    /// color and rounded at the screen's corners, so each sliding terminal
+    /// looks like the whole screen as seen at rest. Also makes the black
+    /// backdrop that the pages slide over, if there isn't one yet.
+    private func slidePage(for terminal: TctiTermView) -> UIView {
+        if slideBackdrop == nil {
+            let backdrop = UIView(frame: view.bounds)
+            backdrop.backgroundColor = .black
+            backdrop.isUserInteractionEnabled = false
+            view.insertSubview(backdrop, at: 0)
+            slideBackdrop = backdrop
+        }
+        if let page = slidePages[ObjectIdentifier(terminal)] {
+            return page
+        }
+
+        let page = UIView()
+        page.bounds = view.bounds
+        page.center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
+        page.backgroundColor = terminal.nativeBackgroundColor
+        page.layer.cornerRadius = Self.displayCornerRadius(of: view.window?.screen)
+        page.layer.cornerCurve = .continuous
+        page.isUserInteractionEnabled = false
+        view.insertSubview(page, belowSubview: terminal)
+        slidePages[ObjectIdentifier(terminal)] = page
+        return page
+    }
+
+    /// The corner radius of `screen`, read from UIKit's private
+    /// `_displayCornerRadius`, or 0 (square corners) when that isn't available.
+    private static func displayCornerRadius(of screen: UIScreen?) -> CGFloat {
+        let key = "_displayCornerRadius"
+        guard let screen, screen.responds(to: NSSelectorFromString(key)) else { return 0 }
+        return screen.value(forKey: key) as? CGFloat ?? 0
+    }
+
+    // MARK: Stepping
+
+    /// Steps to the next or previous TTY in the step order, for a pull on the
+    /// switcher button or a key command, then shows the step pill. At either
+    /// end of the order, only the pill shows.
+    func step(by offset: Int) {
+        let ttys = TTYs.shared
+        if let next = ttys.neighbor(by: offset) {
+            slide(offset > 0 ? 1 : -1) { ttys.select(next) }
+            UISelectionFeedbackGenerator().selectionChanged()
+        }
+        showStepPill()
+    }
+
+    /// Adds a TTY after the last and steps to it, for a pull on the switcher
+    /// button past the last TTY.
+    private func stepToNew() {
+        let ttys = TTYs.shared
+        guard let tty = ttys.add() else { return }
+        slide(1) { ttys.select(tty) }
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        showStepPill()
+    }
+
+    /// Runs `select`, which changes the selection, with the terminals sliding
+    /// in `direction`: +1 or -1.
+    private func slide(_ direction: Int, _ select: () -> Void) {
+        slideDirection = direction
+        defer { slideDirection = nil }
+        select()
+    }
+
+    /// Briefly shows the selected TTY's name and its position in the step
+    /// order, such as "hvc3 · 4/7", next to the switcher button.
+    private func showStepPill() {
+        let ttys = TTYs.shared
+        let order = ttys.stepOrder
+
+        // A system TTY outside the step order has no position in it, so only its name shows.
+        let pill = stepPill ?? makeStepPill()
+        if let index = order.firstIndex(where: { $0 === ttys.selected }) {
+            pill.text = "\(ttys.selected.name) · \(index + 1)/\(order.count)"
+        } else {
+            pill.text = ttys.selected.name
+        }
+        UIAccessibility.post(notification: .announcement, argument: pill.text)
+
+        // Place the pill above whichever switcher button is showing, right-aligned with it and
+        // inside the safe area. Where there's no room above, as at the top of a rail, place it to
+        // the button's left instead.
+        let size = pill.intrinsicContentSize
+        let width = size.width + 24
+        let height: CGFloat = 30
+        let button = switcherButtonFrame()
+        if button.minY - height - 8 >= view.safeAreaInsets.top {
+            pill.frame = CGRect(
+                x: min(
+                    button.maxX - width, view.bounds.maxX - view.safeAreaInsets.right - 8 - width),
+                y: button.minY - height - 8, width: width, height: height)
+        } else {
+            pill.frame = CGRect(
+                x: button.minX - width - 8, y: button.midY - height / 2, width: width,
+                height: height)
+        }
+        pill.layer.cornerRadius = height / 2
+
+        UIView.animate(withDuration: 0.15) { pill.alpha = 1 }
+
+        stepPillExpiry?.cancel()
+        let expiry = DispatchWorkItem { [weak pill] in
+            UIView.animate(withDuration: 0.3) { pill?.alpha = 0 }
+        }
+        stepPillExpiry = expiry
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: expiry)
+    }
+
+    private func makeStepPill() -> UILabel {
+        let pill = UILabel()
+        pill.font = .preferredFont(forTextStyle: .footnote)
+        pill.textColor = .white
+        pill.textAlignment = .center
+        pill.backgroundColor = UIColor.black.withAlphaComponent(0.75)
+        pill.layer.cornerCurve = .continuous
+        pill.clipsToBounds = true
+        pill.alpha = 0
+        pill.isUserInteractionEnabled = false
+        view.addSubview(pill)
+        stepPill = pill
+        return pill
+    }
+
+    /// The frame of the switcher button on screen, in this view's coordinates,
+    /// or where the floating button goes if neither button is on screen.
+    private func switcherButtonFrame() -> CGRect {
+        var button: UIView?
+        if floatingSwitcherShown {
+            button = floatingSwitcher
+        } else if let bar = keyBar?.switcher, bar.window != nil {
+            button = bar
+        }
+        guard let button, let screen = view.window?.screen else {
+            return floatingSwitcherFrame()
+        }
+        let onScreen = button.convert(button.bounds, to: screen.coordinateSpace)
+        return view.convert(onScreen, from: screen.coordinateSpace)
+    }
+
+    // MARK: The floating switcher button
+
+    /// The floating button's frame: at the bottom right of the safe area, near
+    /// where the trailing capsule or the right rail would be.
+    private func floatingSwitcherFrame() -> CGRect {
+        let size = FloatingSwitcher.size
+        let insets = view.safeAreaInsets
+        return CGRect(
+            x: view.bounds.maxX - insets.right - 8 - size,
+            y: view.bounds.maxY - max(insets.bottom, 8) - size, width: size, height: size)
+    }
+
+    /// Positions the floating button now, and decides whether to show it on the
+    /// next turn of the run loop rather than at once: moving the keyboard from
+    /// one terminal to another takes the key bar off screen and puts it back
+    /// within one turn, which would otherwise flash the floating button.
+    private func scheduleFloatingSwitcherUpdate() {
+        // Set by bounds and center rather than frame: while hidden it keeps a 0.6 scale transform,
+        // and setting a frame on a transformed view resizes it to compensate.
+        let frame = floatingSwitcherFrame()
+        floatingSwitcher.bounds.size = frame.size
+        floatingSwitcher.center = CGPoint(x: frame.midX, y: frame.midY)
+
+        guard !floatingSwitcherPending else { return }
+        floatingSwitcherPending = true
+        DispatchQueue.main.async { [weak self] in
+            self?.floatingSwitcherPending = false
+            self?.updateFloatingSwitcher()
+        }
+    }
+
+    /// Shows the floating button while the key bar is off screen and neither
+    /// the switcher nor the find bar is open, and hides it otherwise.
+    private func updateFloatingSwitcher() {
+        let show = switcher == nil && findBar == nil && keyBar?.window == nil
+        guard show != floatingSwitcherShown else { return }
+        floatingSwitcherShown = show
+
+        view.bringSubviewToFront(floatingSwitcher)
+        if show {
+            floatingSwitcher.isHidden = false
+            floatingSwitcher.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
+        }
+        UIView.animate(
+            withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0,
+            options: [.beginFromCurrentState, .allowUserInteraction]
+        ) {
+            self.floatingSwitcher.alpha = show ? 1 : 0
+            self.floatingSwitcher.transform =
+                show ? .identity : CGAffineTransform(scaleX: 0.6, y: 0.6)
+        } completion: { _ in
+            if !self.floatingSwitcherShown {
+                self.floatingSwitcher.isHidden = true
+            }
+        }
+    }
+
+    // MARK: The switcher
+
+    @objc func toggleSwitcher(_ sender: Any?) {
+        if let switcher {
+            switcher.finish(nil)
+        } else {
+            openSwitcher()
+        }
+    }
+
+    func openSwitcher() {
+        guard switcher == nil, presentedViewController == nil else { return }
+        keyboardBeforeSwitcher = terminal.isFirstResponder || findBar?.isTyping == true
+        closeFindBar(refocus: false)
+
+        sizeUnderSwitcher = view.bounds.size
+
+        let controller = TTYSwitcherViewController()
+        controller.finish = { [weak self] find in self?.closeSwitcher(find: find) }
+        switcher = controller
+
+        addChild(controller)
+        controller.view.frame = view.bounds
+        controller.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(controller.view)
+        controller.didMove(toParent: self)
+
+        // As first responder, the switcher takes focus from the terminal, so the software keyboard
+        // goes down, and it receives the key commands.
+        _ = controller.becomeFirstResponder()
+        scheduleFloatingSwitcherUpdate()
+
+        controller.animateIn(from: terminal)
+    }
+
+    /// Closes the switcher onto the selected TTY, and opens the find bar on it
+    /// if `find` is given, searching for `find` unless it is empty.
+    private func closeSwitcher(find: String?) {
+        guard let controller = switcher, controller.parent === self else { return }
+
+        // Ignore further requests to finish, from a second tap or a key command, while the switcher
+        // animates out.
+        controller.finish = { _ in }
+        controller.view.isUserInteractionEnabled = false
+
+        controller.animateOut(to: terminal) { [weak self] in
+            guard let self else { return }
+
+            controller.willMove(toParent: nil)
+            controller.view.removeFromSuperview()
+            controller.removeFromParent()
+
+            // Give the keyboard back before clearing `switcher`, while the terminal frame is still
+            // held, so that the terminal is laid out once, around the keyboard, rather than first
+            // without it.
+            if let find {
+                openFindBar(term: find.isEmpty ? nil : find)
+            } else if keyboardBeforeSwitcher {
+                _ = terminal.becomeFirstResponder()
+            }
+
+            switcher = nil
+            view.setNeedsLayout()
+            scheduleFloatingSwitcherUpdate()
+        }
+    }
+
+    // MARK: Closing
+
+    /// Asks before closing the selected TTY, as the switcher's X does.
+    private func confirmClosingSelected() {
+        let tty = TTYs.shared.selected
+        guard !tty.isSystem, presentedViewController == nil else { return }
+        ttyMenu.confirmClose(tty)
+    }
+
+    // MARK: Finding
+
+    /// Edit > Find > Find…, or ⌘F: opens the find bar, or focuses its field if
+    /// it's already open.
+    @objc override func find(_ sender: Any?) {
+        guard switcher == nil, presentedViewController == nil else { return }
+        if let findBar {
+            findBar.focus()
+        } else {
+            openFindBar()
+        }
+    }
+
+    /// Edit > Find > Find Next, or ⌘G, while the find bar is open.
+    @objc override func findNext(_ sender: Any?) {
+        findBar?.step(back: false)
+    }
+
+    /// Edit > Find > Find Previous, or ⌘⇧G, while the find bar is open.
+    @objc override func findPrevious(_ sender: Any?) {
+        findBar?.step(back: true)
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        switch action {
+        case #selector(find(_:)):
+            return switcher == nil && presentedViewController == nil
+        case #selector(findNext(_:)), #selector(findPrevious(_:)):
+            return findBar != nil
+        // The TTY commands are off while an alert or a sheet is up, such as one from the switcher.
+        case #selector(newTTY(_:)), #selector(closeTTY(_:)), #selector(toggleSwitcher(_:)),
+            #selector(previousTTY(_:)), #selector(nextTTY(_:)), #selector(jumpToTTY(_:)):
+            return presentedViewController == nil
+        default:
+            return super.canPerformAction(action, withSender: sender)
+        }
+    }
+
+    /// Opens the find bar over the selected TTY's terminal.
+    func openFindBar(term: String? = nil) {
+        closeFindBar(refocus: false)
+
+        let bar = FindBar()
+        bar.terminal = terminal
+        bar.close = { [weak self] in self?.closeFindBar(refocus: true) }
+        findBar = bar
+        view.addSubview(bar)
+        layoutFindBar()
+
+        bar.begin(with: term)
+        scheduleFloatingSwitcherUpdate()
+    }
+
+    private func closeFindBar(refocus: Bool) {
+        guard let bar = findBar else { return }
+        findBar = nil
+        bar.end()
+        bar.removeFromSuperview()
+
+        if refocus {
+            _ = terminal.becomeFirstResponder()
+        }
+        scheduleFloatingSwitcherUpdate()
+    }
+
+    /// Places the find bar along the top of the terminal, centered, and at most
+    /// 520 points wide.
+    private func layoutFindBar() {
+        guard let findBar else { return }
+        let frame = TTYs.shared.terminalFrame
+        let width = min(frame.width, 520)
+        findBar.frame = CGRect(
+            x: frame.midX - width / 2, y: frame.minY, width: width, height: FindBar.height)
+    }
+
+    // MARK: Keyboard shortcuts
+
+    // The TTY commands use Safari's shortcuts for tabs, in the menus where Safari puts them. They
+    // take these key combinations from the guest, which otherwise receives ⌘ as Super. Each list is
+    // made anew on every call, because a key command can be in only one place.
+
+    /// For the File menu: New TTY and Close TTY.
+    static var ttyFileCommands: [UIKeyCommand] {
+        [
+            UIKeyCommand(
+                title: "New TTY", action: #selector(newTTY(_:)), input: "t",
+                modifierFlags: .command),
+            UIKeyCommand(
+                title: "Close TTY", action: #selector(closeTTY(_:)), input: "w",
+                modifierFlags: .command),
+        ]
+    }
+
+    /// For the View menu: the switcher.
+    static var ttyViewCommands: [UIKeyCommand] {
+        [
+            UIKeyCommand(
+                title: "Show All TTYs", action: #selector(toggleSwitcher(_:)), input: "\\",
+                modifierFlags: [.command, .shift])
+        ]
+    }
+
+    /// For the Window menu: the previous and next TTYs, ⌘1 to ⌘8 by position,
+    /// and ⌘9 for the last.
+    static var ttyWindowCommands: [UIKeyCommand] {
+        var commands = [
+            UIKeyCommand(
+                title: "Show Previous TTY", action: #selector(previousTTY(_:)), input: "[",
+                modifierFlags: [.command, .shift]),
+            UIKeyCommand(
+                title: "Show Next TTY", action: #selector(nextTTY(_:)), input: "]",
+                modifierFlags: [.command, .shift]),
+        ]
+        for number in 1...9 {
+            commands.append(
+                UIKeyCommand(
+                    title: number == 9 ? "Show Last TTY" : "Show TTY \(number)",
+                    action: #selector(jumpToTTY(_:)), input: "\(number)", modifierFlags: .command,
+                    propertyList: number))
+        }
+        return commands
+    }
+
+    @objc func newTTY(_ sender: Any?) {
+        // With the switcher open, it adds the TTY and closes onto it.
+        if let switcher {
+            switcher.add()
+            return
+        }
+        guard let tty = TTYs.shared.add() else { return }
+        TTYs.shared.select(tty)
+    }
+
+    @objc func closeTTY(_ sender: Any?) {
+        confirmClosingSelected()
+    }
+
+    @objc func previousTTY(_ sender: Any?) {
+        step(by: -1)
+    }
+
+    @objc func nextTTY(_ sender: Any?) {
+        step(by: 1)
+    }
+
+    @objc func jumpToTTY(_ sender: UIKeyCommand) {
+        guard let number = sender.propertyList as? Int else { return }
+        let order = TTYs.shared.ordered
+        let index = number == 9 ? order.count - 1 : number - 1
+        guard order.indices.contains(index) else { return }
+        TTYs.shared.select(order[index])
     }
 }

@@ -1,5 +1,5 @@
 //
-// Terminal view for tctiSH. Provides an internal SSH connection to our lightweight VM.
+// Terminal view for tctiSH: one TTY's screen, connected to Linux through a transport.
 //
 //  Copyright © 2022 Kate Temkin <k@ktemkin.com>.
 //  Copyright © 2020 Miguel de Icaza.
@@ -9,48 +9,9 @@ import Foundation
 import UIKit
 import AVKit
 import SwiftTerm
-import SwiftSH
-import Combine
 
 /// Termainal view that behaves like an Xterm into our linux environment.
 public class TctiTermView: TerminalView, TerminalViewDelegate {
-
-    /// Interval at which we check for an SSH connection.
-    private static var sshPollingInterval: TimeInterval = 1.5
-
-    /// Whether an attempt is already in flight.
-    ///
-    /// The poll fires every 1.5s until `connected`, which is only set once an
-    /// attempt *succeeds*. Without this, a guest whose sshd takes longer than
-    /// that to come up gets a second `connect()` stacked on the first, and a
-    /// third on that. libssh2 is stateful and not re-entrant, and the result is
-    /// an authentication failure that looks like a wrong password.
-    ///
-    /// Long a source of flakiness, and intended to be fixed in the future.
-    private var connecting: Bool = false
-
-    /// How many attempts have failed since the last success.
-    ///
-    /// The first few failures are ordinary as the guest isn't listening yet, so
-    /// they're noted quietly. After that something is actually wrong, and
-    /// libssh2's tracing gets turned on rather than waiting for someone to
-    /// think of rebuilding with it enabled.
-    private var failedAttempts: Int = 0
-
-    /// Failures to tolerate before assuming it isn't just a slow boot.
-    private static let quietFailures: Int = 3
-
-    var shell: SSHShell?
-    var authenticationChallenge: AuthenticationChallenge?
-
-    /// Posted once the SSH session is up and there's a shell to type at.
-    static let didConnect = Notification.Name("io.ara.tctish.terminalDidConnect")
-
-    /// Posted when the session has gone and we're going after it again.
-    ///
-    /// Reconnecting takes a few seconds and the terminal is dead throughout,
-    /// which looks exactly like a hang unless something says otherwise.
-    static let willReconnect = Notification.Name("io.ara.tctish.terminalWillReconnect")
 
     // MARK: Holding the keyboard
 
@@ -185,14 +146,6 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
             character, modifiers, mode: keyEncodingMode, key: base.count == 1 ? base.first : nil)
     }
 
-    /// Whether the SSH session is up.
-    var connected: Bool = false {
-        didSet {
-            guard connected, !oldValue else { return }
-            NotificationCenter.default.post(name: TctiTermView.didConnect, object: self)
-        }
-    }
-
     var pipController: AVPictureInPictureController?
 
     /// The current working directory, if one is known/available.
@@ -202,13 +155,6 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
             return _cwd
         }
     }
-
-    /// Set to true to enable SSH logging.
-    private static var sshLoggingEnabled: Bool = false
-
-    /// Timer that is used to poll for connections if our connection drops.
-    private var timer: Publishers.Autoconnect<Timer.TimerPublisher>? = nil
-    private var subscription: AnyCancellable? = nil
 
     public override init(frame: CGRect) {
         super.init(frame: frame, font: UIFont(name: "Menlo-Regular", size: 14))
@@ -220,85 +166,60 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
             name: UserDefaults.didChangeNotification, object: nil)
         applySettings()
 
-        // Create the SSH provider we'll use to connect to our instance.
-        //
-        // Using this over e.g. serial mode ensures we have an out-of-band connection for e.g.
-        // terminal resizes to travel over, so SIGWINCH works correctly.
-        makeShell()
-
         // Make sure the terminal looks the way it should before anything's displayed.
         setUpTheming()
 
         setUpPointer()
 
+        // Observe by selector rather than with a block: NotificationCenter removes a selector
+        // observer when the observer is freed, but keeps a block observer until it is removed
+        // explicitly, and a terminal is freed when its TTY is closed.
         NotificationCenter.default.addObserver(
-            forName: Accent.didChange, object: nil, queue: .main
-        ) { [weak self] _ in
-            self?.selectionHandleColor = Accent.color
+            self, selector: #selector(accentChanged), name: Accent.didChange, object: nil)
+    }
+
+    @objc private func accentChanged() {
+        selectionHandleColor = Accent.color
+    }
+
+    // MARK: Transport
+
+    /// The transport that carries this terminal's bytes to and from Linux.
+    /// Setting it detaches the previous transport from this view.
+    var transport: TerminalTransport? {
+        didSet {
+            if oldValue?.terminal === self {
+                oldValue?.terminal = nil
+            }
+            transport?.terminal = self
+        }
+    }
+
+    /// Called when bytes arrive from the far end, unless they are all BEL
+    /// characters.
+    var onOutput: (() -> Void)?
+
+    /// Called when the far end rings the bell.
+    var onBell: (() -> Void)?
+
+    /// Feeds bytes from the transport into the terminal.
+    ///
+    /// The bytes are fed in 1 KB chunks, so that a large burst is parsed a
+    /// piece at a time rather than all at once before anything is drawn.
+    func receive(_ bytes: ArraySlice<UInt8>) {
+        // Bytes that are all BEL only ring the bell, so they don't count as output: a TTY's status
+        // shows a bell differently from output.
+        if bytes.contains(where: { $0 != 0x07 }) {
+            onOutput?()
         }
 
-        // TODO: figure out if this should be automatic?
-        start()
-
-    }
-
-    /// Builds a fresh SSH session.
-    ///
-    /// Always a new one. A session that failed part way through authenticating
-    /// can't be trusted to start again cleanly, so retries begin from scratch
-    /// rather than reusing whatever state the last attempt left behind.
-    private func makeShell() {
-        shell = try? SSHShell(
-            sshLibrary: Libssh2.self,
-            host: "localhost",
-            port: 10022,
-            environment: [],
-            terminal: "xterm-256color")
-
-        shell?.log.enabled =
-            TctiTermView.sshLoggingEnabled
-            || failedAttempts >= TctiTermView.quietFailures
-    }
-
-    /// Starts the actual SSH terminal process.
-    func start() {
-        // Whatever was polling before, this replaces it.
-        subscription?.cancel()
-        timer?.upstream.connect().cancel()
-
-        // Set up a timer to periodically poll our VM until it's ready for connection.
-        timer = Timer.publish(every: TctiTermView.sshPollingInterval, on: .main, in: .common)
-            .autoconnect()
-        subscription = timer?.sink(receiveValue: { _ in
-            if self.connected {
-                self.timer?.upstream.connect().cancel()
-            } else {
-                self.connect()
-            }
-        })
-
-    }
-
-    /// Forces the SSH session to reconnect.
-    func forceReconnect() {
-
-        // We are, as of now, not connected. Saying so matters twice over: it's what lets
-        // `didConnect` fire again when we get back in, and it's what stops the poll below
-        // cancelling itself on the first tick.
-        connected = false
-        connecting = false
-        failedAttempts = 0
-        NotificationCenter.default.post(name: TctiTermView.willReconnect, object: self)
-
-        // Force-recreate our SSH session...
-        makeShell()
-
-        // ... add a line-feed to ensure the cursor is in a valid drawing position, again...
-        self.feed(text: "\r\n")
-
-        // ... and go after it, retrying rather than getting one attempt. A reconnect that quietly
-        // failed used to leave a dead terminal with nothing left to try it again.
-        start()
+        let blocksize = 1024
+        var next = bytes.startIndex
+        while next < bytes.endIndex {
+            let end = min(next + blocksize, bytes.endIndex)
+            feed(byteArray: bytes[next..<end])
+            next = end
+        }
     }
 
     /// Callback notified each time a setting is changed.
@@ -315,17 +236,60 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
             return
         }
 
-        let std = UserDefaults.standard
-
-        // Font size.
-        var new_size = CGFloat(std.integer(forKey: "font_size"))
+        // Font size: this TTY's override, or else the default from Settings.
+        var new_size = CGFloat(fontSizeOverride ?? AppSetting.fontSize.integer)
         if new_size == 0 {
             new_size = self.font.pointSize
         }
         if new_size != self.font.pointSize {
             self.font = UIFont(name: self.font.fontName, size: new_size) ?? self.font
         }
+
+        applyScrollback()
     }
+
+    /// This TTY's font size, or nil for the default in Settings.
+    var fontSizeOverride: Int? {
+        didSet {
+            guard fontSizeOverride != oldValue else { return }
+            applySettings()
+        }
+    }
+
+    /// This TTY's scrollback in standard lines, or nil for the default in
+    /// Settings.
+    var scrollbackOverride: Int? {
+        didSet {
+            guard scrollbackOverride != oldValue else { return }
+            applyScrollback()
+        }
+    }
+
+    /// The scrollback last given to SwiftTerm, in rows of the terminal's width
+    /// rather than standard lines.
+    private var appliedScrollback: Int?
+
+    /// Sets SwiftTerm's scrollback from the setting, which is in standard
+    /// lines.
+    ///
+    /// Every row SwiftTerm keeps holds a cell for every column, so the memory a
+    /// row of scrollback costs grows with the terminal's width. The setting is
+    /// a budget of standard 80-column lines.
+    private func applyScrollback() {
+        let standard = max(0, scrollbackOverride ?? AppSetting.scrollback.integer)
+
+        let screen = window?.windowScene?.screen.bounds ?? UIScreen.main.bounds
+        let cell = ("W" as NSString).size(withAttributes: [.font: font]).width
+        let columns = cell > 0 ? max(1, Int(max(screen.width, screen.height) / cell)) : 80
+        let lines = standard * Self.standardColumns / columns
+
+        guard lines != appliedScrollback else { return }
+        appliedScrollback = lines
+        changeScrollback(lines)
+    }
+
+    /// The width, in columns, of a standard line of scrollback.
+    static let standardColumns = 80
 
     // MARK: Trackpad and mouse
 
@@ -500,89 +464,6 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
             alpha: 1.0)
     }
 
-    func sshEventCallback(data: Data?, error: Data?) {
-        if let d = data {
-            let sliced = Array(d)[0...]
-
-            // We chunk the processing of data, as the SSH library might have received a lot of
-            // data, and we do not want the terminal to parse it all, and then render, we want to
-            // parse in chunks to give the terminal the chance to update the display as it goes.
-            let blocksize = 1024
-            var next = 0
-            let last = sliced.endIndex
-
-            while next < last {
-
-                let end = min(next + blocksize, last)
-                let chunk = sliced[next..<end]
-
-                self.feed(byteArray: chunk)
-                next = end
-            }
-        }
-
-    }
-
-    func connect() {
-        // The guest usually isn't listening yet on the first few tries, which is expected and not
-        // worth reporting. What isn't expected is starting a second attempt over the top of the
-        // first.
-        guard !connecting else {
-            Log.network.note("ssh: still trying the last connection; not starting another")
-            return
-        }
-
-        if let s = shell {
-            connecting = true
-            setUpTheming()
-
-            s.withCallback { [unowned self] (data: Data?, error: Data?) in
-                sshEventCallback(data: data, error: error)
-            }
-            .connect()
-            .authenticate(.byPassword(username: "root", password: "toor"))
-            .open { [unowned self] (error) in
-                self.connecting = false
-
-                if let error {
-                    self.failedAttempts += 1
-
-                    let detail = "attempt \(self.failedAttempts) failed: \(error)"
-                    if self.failedAttempts < TctiTermView.quietFailures {
-                        // Expected while the guest is still coming up.
-                        Log.network.note("ssh: \(detail)")
-                    } else {
-                        Log.network.warn("ssh: \(detail)")
-                        if self.failedAttempts == TctiTermView.quietFailures {
-                            Log.network.warn("ssh: turning on libssh2 tracing for the next attempt")
-                        }
-                    }
-
-                    // Start the next attempt from a clean session; this one got as far as it was
-                    // going to.
-                    self.makeShell()
-                } else {
-                    if self.failedAttempts > 0 {
-                        Log.network.note(
-                            "ssh: connected after \(self.failedAttempts) failed attempts")
-                    }
-                    self.failedAttempts = 0
-
-                    // Mark us as no longer attempting boot.
-                    self.connected = true
-                    UserDefaults.standard.set(false, forKey: "attempting_boot")
-
-                    // Inform the SSH server of our new size, so it can resize its PTY.
-                    let t = self.getTerminal()
-                    _ = s.setTerminalSize(width: UInt(t.cols), height: UInt(t.rows))
-
-                    // Finally, update the terminal to display the new connection.
-                    t.updateFullScreen()
-                }
-            }
-        }
-    }
-
     /// Compliance initializer for things that can do encoding/decoding.
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
@@ -599,6 +480,11 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         // Nothing to do here; the view redraws itself.
     }
 
+    /// Callback that occurs when the far end rings the bell.
+    public func bell(source: TerminalView) {
+        onBell?()
+    }
+
     /// Callback that occurs when the guest VM requests a terminal title change.
     public func setTerminalTitle(source: TerminalView, title: String) {
         Log.ui.note("terminal title is now \(title)")
@@ -607,17 +493,12 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     /// Callback that occurs when the terminal's effective area has changed.
     public func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
 
-        // Pass through the size-change to our SSH session.
-        _ = shell?.setTerminalSize(width: UInt(newCols), height: UInt(newRows))
+        transport?.resize(cols: newCols, rows: newRows)
     }
 
-    /// Function usd to send data across our SSH connection.
+    /// Sends what was typed to the far end, through the transport.
     public func send(source: TerminalView, data: ArraySlice<UInt8>) {
-        shell?.write(Data(data)) { err in
-            if let e = err {
-                print("Error sending \(e)")
-            }
-        }
+        transport?.send(data)
     }
 
     /// Callback that occurs when we receive OSC 7, which indicates the current

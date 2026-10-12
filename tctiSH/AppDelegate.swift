@@ -127,6 +127,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             "hide_key_bar_with_hardware_keyboard": false,
             "arrow_repeat_delay": ArrowRepeat.defaultDelay,
             "allow_clipboard_read": false,
+            "scrollback": TTY.defaultScrollback,
+            "step_through_system_ttys": false,
         ])
 
         // Before anything reads it.
@@ -242,6 +244,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             builder.insertChild(
                 UIMenu(options: .displayInline, children: keyBar), atStartOfMenu: .view)
         }
+
+        func insert(_ commands: [UIKeyCommand], atStartOf menu: UIMenu.Identifier) {
+            let group = UIMenu(options: .displayInline, children: commands)
+            if builder.menu(for: menu) != nil {
+                builder.insertChild(group, atStartOfMenu: menu)
+            } else {
+                builder.insertChild(group, atEndOfMenu: .view)
+            }
+        }
+        insert(ViewController.ttyFileCommands, atStartOf: .file)
+        insert(ViewController.ttyViewCommands, atStartOf: .view)
+        insert(ViewController.ttyWindowCommands, atStartOf: .window)
     }
 
     /// Takes whatever the scene brought with it.
@@ -329,10 +343,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return ();
         }
 
-        // Read on the main thread, because it is the view's idea of whether it is connected. Never
-        // snapshot a machine that has not finished booting: there is nothing in it worth resuming,
-        // and the snapshot could replace a valid one.
-        guard ViewController.getCurrentTerminal()?.connected == true else {
+        // Read on the main thread, which is where the SSH session updates `connected`. Never
+        // snapshot a machine that has not finished booting as the invalid snapshot could replace a
+        // valid one.
+        guard SSHTransport.shared.connected else {
             Log.ui.note("backgrounded before the shell connected; not saving")
             return
         }
@@ -446,7 +460,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return
         }
 
-        guard let terminal = ViewController.getCurrentTerminal(), terminal.connected else {
+        let ssh = SSHTransport.shared
+        guard ssh.connected else {
             return
         }
 
@@ -459,7 +474,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
 
         Log.ui.note("returned to the foreground; rebuilding the shell")
-        terminal.forceReconnect()
+        ssh.forceReconnect()
     }
 
     /// Whether the shell is waiting for a save before it reconnects.
@@ -497,12 +512,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         // Checked again rather than assumed: a session that dropped while we were away needs no
         // forcing, because the terminal's poll is already on it.
-        guard let terminal = ViewController.getCurrentTerminal(), terminal.connected else {
+        let ssh = SSHTransport.shared
+        guard ssh.connected else {
             return
         }
 
         Log.ui.note("session save finished; rebuilding the shell")
-        terminal.forceReconnect()
+        ssh.forceReconnect()
     }
 
     /// Brings a parked machine back, and the shell with it.
@@ -648,12 +664,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         // A dropped session needs no forcing, as elsewhere: the terminal's poll is already on it,
         // and brings the pill down when it connects.
-        guard let terminal = ViewController.getCurrentTerminal(), terminal.connected else {
+        let ssh = SSHTransport.shared
+        guard ssh.connected else {
             return
         }
 
         Log.ui.note("unparked; rebuilding the shell")
-        terminal.forceReconnect()
+        ssh.forceReconnect()
     }
 
     /// Attempts to background the app to Picture in Picture.
@@ -689,7 +706,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Not into a parked machine, which can't answer; the unpark reconnects once it is running.
         guard parkedTag == nil, !unparking else { return }
 
-        ViewController.getCurrentTerminal()?.forceReconnect()
+        SSHTransport.shared.forceReconnect()
     }
 
 }

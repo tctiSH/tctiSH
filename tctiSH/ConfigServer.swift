@@ -401,7 +401,7 @@ class ConfigServer {
     private func handleGetCWD(message: ConfigurationMessage, from: Client) {
         let client = from
 
-        if let term = ViewController.getCurrentTerminal() {
+        if let term = SSHTransport.shared.terminal {
             if let cwd = term.cwd {
                 sendResponse(command: "getcwd", key: "cwd", value: cwd, to: client)
             }

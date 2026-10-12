@@ -33,7 +33,7 @@ enum DiskCompaction {
         guard state == .idle else {
             return "The disk is already being compacted."
         }
-        guard ViewController.getCurrentTerminal()?.connected == true else {
+        guard SSHTransport.shared.connected else {
             return "Linux hasn't finished starting. Try again once the terminal is up."
         }
         guard !app.machineIsAway else {

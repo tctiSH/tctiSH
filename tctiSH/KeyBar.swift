@@ -21,8 +21,8 @@ import UIKit
 /// centered one, with pinned keys that do not fit being left off, starting with
 /// the last pinned key.
 ///
-/// On a phone in landscape, where height is scarce, the bar instead becomes
-/// two vertical rails either side of the terminal; see `placeRails(in:)`.
+/// On a phone in landscape, where height is scarce, the bar instead becomes two
+/// vertical rails either side of the terminal; see `placeRails(in:)`.
 final class KeyBar: UIView, UIInputViewAudioFeedback {
 
     // MARK: Sizes
@@ -43,11 +43,11 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
     /// merge into one.
     private static let mergeGap: CGFloat = 24
 
-    /// The trailing capsule's buttons: Hide Keyboard, for now.
-    private static let trailingButtons = 1
+    /// The number of buttons in the trailing capsule: Show TTYs and Hide
+    /// Keyboard.
+    private static let trailingButtons = 2
 
-    /// The trailing capsule: one button, so a circle.
-    private static var trailingWidth: CGFloat { capsuleHeight }
+    private static var trailingWidth: CGFloat { capsuleWidth(buttons: trailingButtons) }
 
     /// The bar's height, less any safe area beneath it.
     static var height: CGFloat { capsuleHeight + verticalMargin * 2 }
@@ -75,8 +75,22 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
 
     // MARK: State
 
-    private weak var terminal: TctiTermView?
+    /// The terminal the bar types into and is the input accessory of: the
+    /// selected TTY's. The view controller sets it as the selection changes.
+    weak var terminal: TctiTermView? {
+        didSet {
+            guard terminal !== oldValue else { return }
+            observeTerminal()
+            updateAttachment()
+            refreshModifiers()
+        }
+    }
+
     private let openSettings: () -> Void
+
+    /// The Show TTYs button, which opens the TTY switcher and steps through
+    /// TTYs; see `SwitcherButton`.
+    let switcher = SwitcherButton()
 
     private let leading = KeyBar.makeCapsule()
     private let trailing = KeyBar.makeCapsule()
@@ -155,29 +169,31 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
     }()
 
     /// Whether the rails should next appear by flowing out of the keyboard,
-    /// rather than fading in. Set when the bar became rails while the strip
-    /// was off screen.
+    /// rather than fading in. Set when the bar became rails while the strip was
+    /// off screen.
     private var morphsIn = false
 
     private struct StripLayout {
         var keys: [BarKey: CGRect]
         var more: CGRect
+        var switcher: CGRect
         var dismiss: CGRect
 
-        /// Hide Keyboard's own capsule, if it had one.
+        /// The trailing capsule holding Show TTYs and Hide Keyboard, or nil if
+        /// the strip was merged into one capsule.
         var dismissCapsule: CGRect?
     }
 
-    /// Whether Hide Keyboard is moving in its own capsule to the top of the
-    /// right rail, joining it on arrival.
+    /// Whether Show TTYs and Hide Keyboard are moving, in the trailing capsule,
+    /// to the top of the right rail, which they join on arrival.
     private var dismissArriving = false
 
     /// Whether the rails are animating into place. Layout changes meanwhile
     /// retarget the animation rather than cutting it short.
     private var morphing = false
 
-    /// Whether the rails are flowing back into the strip as the phone turns
-    /// to portrait; see `beginReturningToStrip`.
+    /// Whether the rails are flowing back into the strip as the phone turns to
+    /// portrait; see `beginReturningToStrip`.
     private var returning = false
 
     /// The number of pinned keys on the left rail.
@@ -274,6 +290,9 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
 
         trailing.contentView.addSubview(dismiss)
 
+        Self.hover(switcher)
+        trailing.contentView.addSubview(switcher)
+
         // Styled as the bar is, since the capsules inherit from their container.
         rails.backgroundColor = .clear
         rails.overrideUserInterfaceStyle = .dark
@@ -294,7 +313,7 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
     }
 
     /// A capsule of glass, or of frosted material before iOS 26.
-    private static func makeCapsule() -> UIVisualEffectView {
+    static func makeCapsule() -> UIVisualEffectView {
         if #available(iOS 26.0, *) {
             let capsule = UIVisualEffectView(effect: UIGlassEffect())
             capsule.cornerConfiguration = .capsule()
@@ -331,7 +350,7 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
             shape: .roundedRect(circle, radius: side / 2))
     }
 
-    fileprivate static func hover(_ button: UIButton) {
+    static func hover(_ button: UIButton) {
         button.isPointerInteractionEnabled = true
         button.pointerStyleProvider = { button, _, _ in hoverStyle(for: button) }
     }
@@ -419,11 +438,10 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
         var buttonPlaces = places.pins + [places.more]
         if let capsule = places.trailing {
             trailing.frame = capsule
-            trailing.contentView.addSubview(dismiss)
-            dismiss.frame = trailing.bounds
+            lay(out: [switcher, dismiss], in: trailing)
         } else {
-            buttons.append(dismiss)
-            buttonPlaces.append(places.dismiss)
+            buttons += [switcher, dismiss]
+            buttonPlaces += [places.switcher, places.dismiss]
         }
         for (button, place) in zip(buttons, buttonPlaces) {
             leading.contentView.addSubview(button)
@@ -432,15 +450,18 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
 
         more.sideways = nil
         roundCapsules()
+        switcher.capsuleLaidOut()
         didMove?()
     }
 
     /// The strip's capsule and key frames within `content`. Pinned keys and
-    /// More share a capsule at the leading edge, and Hide Keyboard has its own
-    /// at the trailing edge. Merged, all of them share one centered capsule.
+    /// More share a capsule at the leading edge, and Show TTYs and Hide
+    /// Keyboard share one at the trailing edge. When merged, all of them share
+    /// one centered capsule.
     private struct StripPlaces {
         var pins: [CGRect]
         var more: CGRect
+        var switcher: CGRect
         var dismiss: CGRect
         var leading: CGRect
         var trailing: CGRect?
@@ -456,11 +477,11 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
         }
 
         if merged {
-            let width = capsuleWidth(buttons: count + 2)
+            let width = capsuleWidth(buttons: count + 1 + trailingButtons)
             let x = content.midX - width / 2
             return StripPlaces(
                 pins: (0..<count).map { slot($0, from: x) }, more: slot(count, from: x),
-                dismiss: slot(count + 1, from: x),
+                switcher: slot(count + 1, from: x), dismiss: slot(count + 2, from: x),
                 leading: CGRect(x: x, y: content.minY, width: width, height: capsuleHeight),
                 trailing: nil)
         }
@@ -470,7 +491,8 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
             height: capsuleHeight)
         return StripPlaces(
             pins: (0..<count).map { slot($0, from: content.minX) },
-            more: slot(count, from: content.minX), dismiss: trailing,
+            more: slot(count, from: content.minX), switcher: slot(0, from: trailing.minX),
+            dismiss: slot(1, from: trailing.minX),
             leading: CGRect(
                 x: content.minX, y: content.minY, width: capsuleWidth(buttons: count + 1),
                 height: capsuleHeight),
@@ -507,9 +529,10 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
     /// them given nil. `area` spans the safe area's width, from its top down to
     /// the keyboard, or to the screen's bottom with a hardware keyboard.
     ///
-    /// The left rail holds the pinned keys in order. The right rail holds Hide
-    /// Keyboard, More, then any pins that didn't fit on the left. Both share
-    /// the bottom edge a full rail would have if centered in `area`.
+    /// The left rail holds the pinned keys in order. The right rail holds Show
+    /// TTYs, Hide Keyboard, More, then any pins that didn't fit on the left.
+    /// Both end at the bottom edge a full rail would have if centered in
+    /// `area`, unless the right rail would then stick out of the top of `area`.
     func placeRails(in area: CGRect?) {
         // Returning to the strip; see `flowIntoStrip`.
         guard !returning else { return }
@@ -526,7 +549,8 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
         let leftX = area.minX + Self.margin
         let rightX = area.maxX - Self.margin - Self.capsuleHeight
 
-        let stack = [dismiss] + right
+        let top: [UIView] = [switcher, dismiss]
+        let stack = top + right
         leftRail.isHidden = left.isEmpty
 
         if morphsIn, !railsShown {
@@ -538,8 +562,10 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
         let lengths = (
             Self.capsuleWidth(buttons: left.count), Self.capsuleWidth(buttons: stack.count)
         )
+
+        let rightBottom = min(max(bottom, area.minY + Self.margin + lengths.1), area.maxY)
         let rightFrame = CGRect(
-            x: rightX, y: bottom - lengths.1, width: Self.capsuleHeight, height: lengths.1)
+            x: rightX, y: rightBottom - lengths.1, width: Self.capsuleHeight, height: lengths.1)
         animating(gliding: railsShown) {
             self.leftRail.frame = CGRect(
                 x: leftX, y: bottom - lengths.0, width: Self.capsuleHeight, height: lengths.0)
@@ -547,12 +573,12 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
 
             self.leading.frame = rightFrame
             if self.dismissArriving {
-                // Hide Keyboard's capsule moves to the top of the rail.
-                self.lay(out: right, in: self.leading, down: true, from: 1)
+                self.lay(out: right, in: self.leading, down: true, from: top.count)
                 self.trailing.frame = CGRect(
                     origin: rightFrame.origin,
-                    size: CGSize(width: Self.capsuleHeight, height: Self.capsuleHeight))
-                self.dismiss.frame = self.trailing.bounds
+                    size: CGSize(
+                        width: Self.capsuleHeight, height: Self.capsuleWidth(buttons: top.count)))
+                self.lay(out: top, in: self.trailing, down: true)
             } else {
                 self.lay(out: stack, in: self.leading, down: true)
             }
@@ -560,6 +586,7 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
 
         more.sideways = (restingBottom(in: area), rails)
         roundCapsules()
+        switcher.capsuleLaidOut()
         showRails(true)
     }
 
@@ -569,11 +596,12 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
         return max(0, Int(room / buttonWidth))
     }
 
-    /// Shows as many pinned keys as fit: `slots` on the left, and two fewer on
-    /// the right, which also holds Hide Keyboard and More. Returns the left
-    /// rail's keys, and More followed by the right rail's pins.
+    /// Shows as many pinned keys as fit: `slots` on the left, and three fewer
+    /// on the right, which also holds Show TTYs, Hide Keyboard and More.
+    /// Returns the left rail's keys, and More followed by the right rail's
+    /// pins.
     private func prepareRails(slots: Int) -> (left: [UIView], right: [UIView]) {
-        let rightCapacity = max(0, slots - 2)
+        let rightCapacity = max(0, slots - 1 - Self.trailingButtons)
         Self.railCapacity = slots + rightCapacity
         leftSlots = slots
 
@@ -587,10 +615,10 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
 
     // MARK: Flowing between strip and rails
 
-    /// Becomes rails as the phone turns to landscape, starting from the
-    /// strip's current position so the capsules turn with the screen.
-    /// `height` is the expected rail height; the rails are laid out again as
-    /// the screen turns, and once the keyboard reports its position.
+    /// Becomes rails as the phone turns to landscape, starting from the strip's
+    /// current position so the capsules turn with the screen. `height` is the
+    /// expected rail height; the rails are laid out again as the screen turns,
+    /// and once the keyboard reports its position.
     func turnIntoRails(height: CGFloat) {
         guard !usesRails else { return }
 
@@ -617,11 +645,12 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
                 gather(right, at: rightPlaces, in: leading)
                 trailing.isHidden = false
                 trailing.frame = here(capsule)
-                trailing.contentView.addSubview(dismiss)
-                dismiss.frame = trailing.bounds
+                lay(out: [switcher, dismiss], in: trailing)
                 dismissArriving = true
             } else {
-                gather([dismiss] + right, at: [here(strip.dismiss)] + rightPlaces, in: leading)
+                gather(
+                    [switcher, dismiss] + right,
+                    at: [here(strip.switcher), here(strip.dismiss)] + rightPlaces, in: leading)
             }
             roundCapsules()
         }
@@ -642,9 +671,9 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
 
     /// Moves each key to its place on the strip, alongside the turn to
     /// portrait, for a bar whose top is expected at `barTop` on a screen
-    /// `width` wide. If the strip keeps Hide Keyboard apart, it splits off in
-    /// its own capsule. Once the turn ends, the strip takes the keys back in
-    /// the same places.
+    /// `width` wide. If the strip keeps Show TTYs and Hide Keyboard in a
+    /// separate capsule, they split off from the rail in the trailing capsule.
+    /// Once the turn ends, the strip takes the keys back in the same places.
     func flowIntoStrip(barTop: CGFloat, width: CGFloat) {
         guard returning else { return }
 
@@ -665,10 +694,12 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
 
         if !merged {
             UIView.performWithoutAnimation {
-                trailing.frame = railGlass.contentView.convert(
-                    dismiss.frame, from: dismiss.superview)
-                trailing.contentView.addSubview(dismiss)
-                dismiss.frame = trailing.bounds
+                let here = { (view: UIView) in
+                    self.railGlass.contentView.convert(view.frame, from: view.superview)
+                }
+                trailing.frame = here(switcher).union(here(dismiss))
+                    .insetBy(dx: 0, dy: -Self.capsuleInset)
+                lay(out: [switcher, dismiss], in: trailing, down: true)
                 trailing.isHidden = false
             }
         }
@@ -678,14 +709,14 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
         var right: [UIView] = overflow + [more]
         var rightPlaces = overflow.indices.map { pinPlace(leftSlots + $0) } + [places.more]
         if merged {
-            right.append(dismiss)
-            rightPlaces.append(places.dismiss)
+            right += [switcher, dismiss]
+            rightPlaces += [places.switcher, places.dismiss]
         }
         gather(right, at: rightPlaces, in: leading)
 
         if let capsule = places.trailing {
             trailing.frame = capsule
-            dismiss.frame = trailing.bounds
+            lay(out: [switcher, dismiss], in: trailing)
         }
     }
 
@@ -709,8 +740,8 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
     }
 
     /// Where the rails start when there was no strip on screen to flow from:
-    /// end to end along the keyboard's top edge. The right rail's keys are
-    /// reversed, so Hide Keyboard rises to its top.
+    /// end to end along the keyboard's top edge. The right rail's keys are laid
+    /// out in reverse, so Show TTYs, at the right end, rises to the rail's top.
     private func startMorphOnKeyboard(left: [UIView], right: [UIView], in area: CGRect) {
         let leftWidth = Self.capsuleWidth(buttons: left.count)
         let rightWidth = Self.capsuleWidth(buttons: right.count)
@@ -748,11 +779,12 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
             guard let self, finished, morphing else { return }
             morphing = false
 
-            // Hide Keyboard joins the rail where its capsule arrived.
+            // Move Show TTYs and Hide Keyboard from the trailing capsule into the rail, at the top,
+            // where that capsule arrived.
             if dismissArriving {
                 dismissArriving = false
                 trailing.isHidden = true
-                lay(out: [dismiss], in: leading, down: true)
+                lay(out: [switcher, dismiss], in: leading, down: true)
             }
         }
     }
@@ -766,7 +798,7 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
         }
         return StripLayout(
             keys: Dictionary(uniqueKeysWithValues: zip(shown, pinnedViews.map(onScreen))),
-            more: onScreen(more), dismiss: onScreen(dismiss),
+            more: onScreen(more), switcher: onScreen(switcher), dismiss: onScreen(dismiss),
             dismissCapsule: trailing.isHidden ? nil : onScreen(trailing))
     }
 
@@ -1206,17 +1238,31 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
 
     // MARK: Following changes
 
-    private func observe() {
-        let center = NotificationCenter.default
+    /// The observers of modifier changes on the terminal the bar types into,
+    /// replaced when `terminal` changes.
+    private var terminalObservers: [NSObjectProtocol] = []
 
+    private func observeTerminal() {
+        let center = NotificationCenter.default
+        terminalObservers.forEach(center.removeObserver)
+        terminalObservers = []
+
+        guard let terminal else { return }
         for name in [
             Notification.Name.terminalViewControlModifierReset, .terminalViewMetaModifierReset,
             TctiTermView.modifiersDidChange,
         ] {
-            center.addObserver(forName: name, object: terminal, queue: .main) { [weak self] _ in
-                self?.refreshModifiers()
-            }
+            terminalObservers.append(
+                center.addObserver(forName: name, object: terminal, queue: .main) {
+                    [weak self] _ in
+                    self?.refreshModifiers()
+                })
         }
+    }
+
+    private func observe() {
+        let center = NotificationCenter.default
+        observeTerminal()
 
         for name in [
             UIApplication.didEnterBackgroundNotification,
@@ -1356,18 +1402,18 @@ private final class MoreButton: UIButton {
     private static let clearance: CGFloat = 8
 
     /// A menu's width. iOS aligns a menu with its source's leading edge, then
-    /// keeps it on screen, which pushed a menu from a thin sliver back over
-    /// the rail. A source this wide, ending beside the capsule, makes the menu
-    /// end there too.
+    /// keeps it on screen, which pushed a menu from a thin sliver back over the
+    /// rail. A source this wide, ending beside the capsule, makes the menu end
+    /// there too.
     private static let menuWidth: CGFloat = 248
 
     /// Whether the menu is open, so a hardware keyboard's Esc can close it.
     private(set) var isMenuOpen = false
 
     /// Where the menu's bottom goes when it opens to the side, from the right
-    /// rail, as a y in a stationary view; nil to open above. It's the
-    /// capsule's bottom once iOS has hidden the keyboard for the menu, so the
-    /// rails settle level with it.
+    /// rail, as a y in a stationary view; nil to open above. It's the capsule's
+    /// bottom once iOS has hidden the keyboard for the menu, so the rails
+    /// settle level with it.
     var sideways: (bottom: CGFloat, space: UIView)?
 
     /// Called as the menu is created, before it opens, and as it closes.
@@ -1443,8 +1489,8 @@ private final class MoreButton: UIButton {
 
 // MARK: - Rails
 
-/// The transparent view the rails are drawn in, passing any touch that misses
-/// a capsule through to the terminal.
+/// The transparent view the rails are drawn in, passing any touch that misses a
+/// capsule through to the terminal.
 private final class RailsView: UIView {
 
     /// The capsules, the only views that take touches.
