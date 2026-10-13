@@ -111,7 +111,13 @@ public class QEMUInterface {
 
         // ... get a filename for our unix domain monitor-connection socket ...
         monitorSocketPath = Self.socketPath("monitor")
-        let consoleSocketPath = Self.consoleSocketPath(ConsoleTransport.shared.device)
+
+        // ... and for the consoles, which the launcher copies, so the copies made here are freed
+        // once it returns ...
+        let consoleSocketPaths = (0..<Int(TCTISH_CONSOLE_COUNT)).map {
+            UnsafePointer(strdup(Self.consoleSocketPath("hvc\($0)")))
+        }
+        defer { consoleSocketPaths.forEach { free(UnsafeMutablePointer(mutating: $0)) } }
 
         // Say what we're about to run. A hung VM looks identical whichever build and boot image
         // produced it, and those are exactly the two things that determine whether it *can* boot --
@@ -128,7 +134,7 @@ public class QEMUInterface {
         // ... and start up the QEMU kernel, which will start paused.
         run_background_qemu(
             qemuImage, kernelPath, initrdPath, bundlePrefix, diskPath, sharedFolder, bootImageName,
-            memoryValue, monitorSocketPath, consoleSocketPath, Self.agentSocketPath,
+            memoryValue, monitorSocketPath, consoleSocketPaths, Self.agentSocketPath,
             Self.controlSocketPath, ChardevTransport.kernelLog.socketPath, serialLogPath,
             ChardevTransport.vmManagement.socketPath, AppDelegate.startsNative,
             AppDelegate.blessJitRegions,
@@ -1215,8 +1221,8 @@ public class QEMUInterface {
 
     /// Where QEMU listens for one of the app's connections to it, by name.
     ///
-    /// The names in use are `monitor`, `agent`, `ctl`, `hvc0`, `ttyS0` and
-    /// `hmp`.
+    /// The names in use are `monitor`, `agent`, `ctl`, `hvc0` to `hvc11`,
+    /// `ttyS0` and `hmp`.
     ///
     /// In the app's tmp folder, which the Files app doesn't show, rather than
     /// in Documents, which it does. A socket deleted there leaves QEMU unable
@@ -1275,17 +1281,21 @@ public class QEMUInterface {
             consoleSizes.removeAll()
             consoleSizesLock.unlock()
 
-            for (device, size) in sizes {
-                if size.redraw, size.rows > 1 {
-                    runMonitorCommandCleanly(
-                        "console_resize \(device) \(size.cols) \(size.rows - 1)", purpose: "console"
-                    )
+            let redrawn = sizes.filter { $0.value.redraw && $0.value.rows > 1 }
+            for (device, size) in redrawn {
+                runMonitorCommandCleanly(
+                    "console_resize \(device) \(size.cols) \(size.rows - 1)", purpose: "console")
+            }
 
-                    // Linux applies a size from work it schedules, which takes whatever size is
-                    // latest when it runs. Both sizes at once would look like no change at all, and
-                    // signal nothing.
-                    Thread.sleep(forTimeInterval: 0.3)
-                }
+            // Linux applies a size from work it schedules, which takes whatever size is latest when
+            // it runs. Both sizes at once would look like no change at all, and signal nothing. One
+            // wait for every console, so that opening several at once doesn't hold the monitor up
+            // for each.
+            if !redrawn.isEmpty {
+                Thread.sleep(forTimeInterval: 0.3)
+            }
+
+            for (device, size) in sizes {
                 runMonitorCommandCleanly(
                     "console_resize \(device) \(size.cols) \(size.rows)", purpose: "console")
             }

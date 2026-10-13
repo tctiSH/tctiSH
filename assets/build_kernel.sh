@@ -2,9 +2,10 @@
 #
 # Builds the tctiSH guest kernel and writes it to assets/bzImage.
 #
-# The source is a pinned kernel.org release tarball, verified by hash. The whole
-# configuration is assets/kernel/tctish.config, in savedefconfig form, and every
-# symbol in it is asserted against the resolved .config afterwards.
+# The source is a pinned kernel.org release tarball, verified by hash, with the
+# few changes in patch_source below. The whole configuration is
+# assets/kernel/tctish.config, in savedefconfig form, and every symbol in it is
+# asserted against the resolved .config afterwards.
 #
 # Two layers of pinning, for two different kinds of drift:
 #
@@ -380,6 +381,22 @@ unpack_source() {
     touch "$SRC/.tctish-unpacked"
 }
 
+# Our changes to the source. Each is checked on every build, and made only where the tree doesn't
+# have it yet, so that a tree unpacked before it was added gets it, and one that has it keeps its
+# timestamps and isn't rebuilt.
+patch_source() {
+    # The hvc driver makes its tty lines when it registers, and takes no more later: a console past
+    # the last line gets no /dev node that opens. The app gives the guest a virtio console for each
+    # of its user TTYs, hvc0 to hvc11, and upstream makes 8 lines.
+    local hvc="$SRC/drivers/tty/hvc/hvc_console.h"
+    if ! grep -q '^#define HVC_ALLOC_TTY_ADAPTERS[[:space:]]*12$' "$hvc"; then
+        sed -i 's/^#define HVC_ALLOC_TTY_ADAPTERS[[:space:]]*8$/#define HVC_ALLOC_TTY_ADAPTERS\t12/' "$hvc"
+        grep -q '^#define HVC_ALLOC_TTY_ADAPTERS[[:space:]]*12$' "$hvc" ||
+            die "couldn't give the hvc driver 12 tty lines; has ${hvc#"$SRC"/} changed?"
+        note "gave the hvc driver 12 tty lines"
+    fi
+}
+
 # ---------------------------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------------------------
@@ -627,6 +644,7 @@ main() {
         die "no pahole on PATH; CONFIG_DEBUG_INFO_BTF cannot be satisfied"
 
     unpack_source
+    patch_source
     check_toolchain
     configure
 

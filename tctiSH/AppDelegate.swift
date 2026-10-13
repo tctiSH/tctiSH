@@ -322,7 +322,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             self?.bootQemu()
             Log.ui.note("launch: qemu started at \(AppDelegate.sinceLaunch())")
 
-            DispatchQueue.main.async { Backend.booted() }
+            DispatchQueue.main.async {
+                Backend.booted()
+                AppDelegate.qemuStarted = true
+                NotificationCenter.default.post(name: AppDelegate.qemuDidStart, object: nil)
+            }
         }
     }
 
@@ -505,6 +509,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     /// Posted on the main queue when the app comes back while the session is
     /// being saved, which holds the machine stopped until it is done.
     static let returnedDuringSave = Notification.Name("io.ara.tctish.returnedDuringSave")
+
+    /// Posted on the main queue once QEMU has been started, and so is about to
+    /// listen on its sockets.
+    static let qemuDidStart = Notification.Name("io.ara.tctish.qemuDidStart")
+
+    /// Whether QEMU has been started. Main thread.
+    private(set) static var qemuStarted = false
 
     /// Posted on the main queue when the machine is running again after the app
     /// came back to it: a save it came back during has finished, or a parked

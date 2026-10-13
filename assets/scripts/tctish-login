@@ -1,19 +1,101 @@
 #!/bin/sh
 #
 # Logs root in on a console that the app shows as a terminal. Run by
-# /etc/inittab, on the console's tty.
+# /etc/inittab, either on the console's tty, or with the console's name for
+# this to open (tctish-login hvc3).
 #
 # The session belongs to the tty, so it outlives the app's connection: programs
 # carry on through suspends and snapshots, and are there when the app comes
 # back. Exiting the shell ends the session, and init starts a new one.
 #
-# On hvc0 the size of the tty is not set here. The app sends it through QEMU
-# (console_resize), and Linux gives it to the tty every time the tty is opened.
+# On the hvc consoles the size of the tty is not set here. The app sends it
+# through QEMU (console_resize), and Linux gives it to the tty every time the
+# tty is opened.
 #
 # The serial port, ttyS0, has no way to be told, and starts at 0x0, which
 # programs take badly (busybox stty calls it "Not a tty"). It gets 80x24 until
 # someone sets it with `stty rows R cols C`, which the app suggests.
 #
+
+# Given a console, open it, once it has a port behind it. A console without
+# one fails to open, and a guest booted without the app's twelve ports (a test
+# harness, say) would otherwise have init start this again every second for the
+# life of the VM. The ports appear early in the boot, so look every second for
+# a minute, then every minute.
+#
+# init has made this the leader of a new session, with /dev/kmsg as its output,
+# so the open below makes the console its controlling tty. The node is checked
+# first: under a kernel with fewer hvc lines it is missing, and opening it
+# read-write would make a file in its place.
+if [ $# -gt 0 ]; then
+    console="/dev/$1"
+    tries=0
+    until [ -c "$console" ] && (: <>"$console") 2>/dev/null; do
+        tries=$((tries + 1))
+        if [ "$tries" -lt 60 ]; then
+            sleep 1
+        else
+            [ "$tries" -eq 60 ] && echo "tctish-login: $console has no port yet" >&2
+            sleep 60
+        fi
+    done
+
+    exec <>"$console" >&0 2>&0
+
+    # What init does to a tty it opens itself.
+    stty sane
+fi
+
+# On a virtio console, log in once a TTY in the app shows it, so that what the
+# login prints, the motd among it, is seen rather than thrown away. Until then,
+# nothing runs on the console but this.
+#
+# Whether a TTY has shown each console this boot is kept in $CONSOLES. The app
+# tells tctish-agent each time a TTY shows a console, which writes "shown" and
+# then wakes the login waiting there with SIGWINCH; ending a console's
+# programs writes "hidden", so that the next login waits for the next TTY. A
+# login that goes ahead writes "shown" too, so that one after an exit goes
+# ahead at once. With nothing kept this boot, hvc0 goes ahead, as its login
+# always has at boot.
+#
+# The trap is set before the record is first read, and the record is read
+# again on every wake, so a TTY that shows the console at any moment is seen.
+# A signal just before the wait is caught by the flag, and the wait ends each
+# minute in case one lands between the flag's check and the wait.
+CONSOLES=/run/tctish/consoles
+name="$(tty)"
+name="${name#/dev/}"
+case "$name" in
+hvc*)
+    trap 'woken=1' WINCH
+    read -r boot </proc/sys/kernel/random/boot_id
+
+    is_shown() {
+        kept_boot=
+        kept=
+        read -r kept_boot kept 2>/dev/null <"$CONSOLES/$name"
+        if [ "$kept_boot" = "$boot" ]; then
+            [ "$kept" = shown ]
+        else
+            [ "$name" = hvc0 ]
+        fi
+    }
+
+    while :; do
+        woken=
+        is_shown && break
+        sleep 60 &
+        [ -n "$woken" ] || wait $!
+        kill $! 2>/dev/null
+    done
+    trap - WINCH
+
+    # Renamed into place, so that nothing reads half a record.
+    mkdir -p "$CONSOLES" &&
+        echo "$boot shown" >"$CONSOLES/.$name.login" &&
+        mv -f "$CONSOLES/.$name.login" "$CONSOLES/$name"
+    ;;
+esac
 
 # The app's terminal speaks xterm's sequences, and a console has no way to say
 # so. login keeps TERM from the environment it is started with, and nothing else.

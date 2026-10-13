@@ -24,6 +24,11 @@ struct ConfigurationMessage: Codable {
 
     /// The datum associated with the command, if any.
     var value: String?
+
+    /// The controlling tty of the `tctictl` that sent the request: its name in
+    /// Linux (`hvc3`), or `MAJOR:MINOR` if it has no name to find, or nil if
+    /// there is none.
+    var tty: String?
 }
 
 /// Answers `tctictl`, which runs in the guest and talks to the app over the
@@ -428,14 +433,26 @@ final class ConfigServer {
         // Handle each of our various parameters differently.
         switch message.key {
 
-        // Allow adjustment of font size.
+        // Sets the font size of the TTY the request came from.
         case "size":
             if let value = message.value {
                 let size = Int(value)
                 if let size = size {
-                    UserDefaults.standard.set(size, forKey: "font_size")
-                    sendAckResponse(command: "font_size", to: client)
-
+                    guard TTYMenu.fontSizes.contains(size) else {
+                        sendErrorResponse(
+                            "font size must be \(TTYMenu.fontSizes.lowerBound) to "
+                                + "\(TTYMenu.fontSizes.upperBound)", to: client)
+                        return
+                    }
+                    let applied = DispatchQueue.main.sync {
+                        Self.requestingTTY(message).map { TTYs.shared.setFontSize($0, size) }
+                    }
+                    switch applied {
+                    case .success:
+                        sendAckResponse(command: "font_size", to: client)
+                    case .failure(let refusal):
+                        sendErrorResponse(refusal.reason, to: client)
+                    }
                 } else {
                     sendErrorResponse("could not parse font size \(value)", to: client)
                 }
@@ -449,19 +466,41 @@ final class ConfigServer {
 
     }
 
-    /// Command that fetches the CWD of the shell on `hvc0`, as its prompt last
-    /// reported it.
+    /// Command that fetches the CWD of the shell in the TTY the request came
+    /// from, as its prompt last reported it.
     private func handleGetCWD(message: ConfigurationMessage, from: Client) {
         let client = from
 
-        if let term = ConsoleTransport.shared.terminal {
-            if let cwd = term.cwd {
-                sendResponse(command: "getcwd", key: "cwd", value: cwd, to: client)
-                return
-            }
+        let found = DispatchQueue.main.sync { Self.requestingTTY(message).map { $0.view?.cwd } }
+        switch found {
+        case .success(let cwd?):
+            sendResponse(command: "getcwd", key: "cwd", value: cwd, to: client)
+        case .success(nil):
+            sendResponse(command: "getcwd", key: "unknown", value: "", to: client)
+        case .failure(let refusal):
+            sendErrorResponse(refusal.reason, to: client)
         }
+    }
 
-        sendResponse(command: "getcwd", key: "unknown", value: "", to: client)
+    /// The open TTY a request came from, by the controlling tty `tctictl` sent,
+    /// or why it can't be told. Main thread.
+    private static func requestingTTY(
+        _ message: ConfigurationMessage
+    ) -> Result<TTY, QEMUInterface.GuestRefusal> {
+        guard let device = message.tty else {
+            return .failure(
+                .init("tctictl isn't running in a terminal, so it can't tell which TTY to use"))
+        }
+        if let tty = TTYs.shared.tty(onDevice: device) {
+            return .success(tty)
+        }
+        if device.hasPrefix("hvc") {
+            return .failure(.init("no TTY in tctiSH shows \(device)"))
+        }
+        return .failure(
+            .init(
+                "tctictl's terminal isn't one of tctiSH's TTYs (as under tmux or screen), "
+                    + "so it can't tell which TTY to use"))
     }
 
     /// Indicates something was wrong with a received command.

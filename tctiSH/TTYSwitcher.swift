@@ -63,6 +63,9 @@ final class TTYSwitcherViewController: UIViewController {
     private let searchField = UISearchTextField()
     private let cancelSearchButton = UIButton(configuration: .plain())
     private let addButton = UIButton(configuration: .plain())
+
+    /// The pills shown over the switcher, made when the first is.
+    private var status: StatusPresenter?
     private let doneButton = UIButton(configuration: .plain())
     private let countLabel = UILabel()
 
@@ -635,9 +638,9 @@ final class TTYSwitcherViewController: UIViewController {
     private func refreshBars() {
         let count = store.users.count
         countLabel.text = count == 1 ? "1 TTY" : "\(count) TTYs"
-        addButton.isEnabled = store.canAdd
-        addButton.accessibilityHint =
-            store.canAdd ? nil : "There can be at most \(TTY.userLimit) TTYs."
+        // Dimmed at the limit, but still tappable, so that tapping it says why nothing opens.
+        addButton.configuration?.baseForegroundColor = store.canAdd ? .label : .tertiaryLabel
+        addButton.accessibilityHint = store.canAdd ? nil : TTYs.limitMessage
     }
 
     private func configure(result cell: UICollectionViewListCell, for tty: TTY) {
@@ -795,9 +798,26 @@ final class TTYSwitcherViewController: UIViewController {
     // MARK: Actions
 
     func add() {
-        guard let tty = store.add() else { return }
+        guard let tty = store.add() else {
+            explainLimit()
+            return
+        }
         store.select(tty)
         finish(nil)
+    }
+
+    /// Says, in a pill over the switcher, that no more TTYs can be opened.
+    private func explainLimit() {
+        present(TTYs.limitPill)
+        UINotificationFeedbackGenerator().notificationOccurred(.error)
+    }
+
+    /// Shows a pill over the switcher, which would hide one under it.
+    func present(_ item: StatusPresenter.Item) {
+        if status == nil {
+            status = StatusPresenter(over: view, backdrop: tint)
+        }
+        status?.present(item)
     }
 
     private func choose(_ tty: TTY) {

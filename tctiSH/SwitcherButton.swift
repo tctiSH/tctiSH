@@ -30,9 +30,15 @@ final class SwitcherButton: UIButton {
     enum Pull {
         /// Step to the TTY in that direction.
         case step
+
         /// Add a TTY, since there is none further in that direction.
         case add
-        /// Nothing: there is no TTY in that direction, and none can be added.
+
+        /// Nothing: there is no TTY in that direction, and no more can be
+        /// opened. A pull far enough to add one says why instead.
+        case full
+
+        /// Nothing: there is no TTY in that direction.
         case none
     }
 
@@ -44,6 +50,10 @@ final class SwitcherButton: UIButton {
 
     /// Adds a TTY after the last.
     var add: () -> Void = {}
+
+    /// Says that no more TTYs can be added, for a pull that would have added
+    /// one.
+    var atLimit: () -> Void = {}
 
     /// What a pull towards the next TTY (+1) or the previous (-1) would do.
     var pull: (Int) -> Pull = { _ in .none }
@@ -208,7 +218,7 @@ final class SwitcherButton: UIButton {
                 switch pull {
                 case .step: Self.stepReach
                 case .add: Self.addReach
-                case .none: Self.stuckReach
+                case .full, .none: Self.stuckReach
                 }
             let moved = Self.resisted(distance, reach: reach)
             face.transform = CGAffineTransform(translationX: moved, y: 0)
@@ -216,7 +226,7 @@ final class SwitcherButton: UIButton {
             switch pull {
             case .step: arm(abs(distance) >= Self.stepDistance ? .step(offset) : .none)
             case .add: arm(abs(distance) >= Self.addDistance ? .add : .none)
-            case .none: arm(.none)
+            case .full, .none: arm(.none)
             }
 
         case .ended:
@@ -230,6 +240,10 @@ final class SwitcherButton: UIButton {
             case .add:
                 if armed == .add {
                     add()
+                }
+            case .full:
+                if abs(distance) >= Self.addDistance {
+                    atLimit()
                 }
             case .none:
                 break

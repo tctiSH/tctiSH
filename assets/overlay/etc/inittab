@@ -15,8 +15,27 @@
 # two together as Kernel Log: a way in for when hvc0 can't be reached.
 ttyS0::respawn:/usr/bin/tctish-login
 
-# The app's terminal: a login on the virtio console that it shows as hvc0.
+# The app's terminals: a login on each virtio console, hvc0 to hvc11, which
+# the app shows as TTYs of the same names. The app connects to a console only
+# while its TTY is open, and what runs there carries on either way.
+#
+# init opens hvc0 itself, and its login starts at boot, as it always has. The
+# rest open their consoles themselves, on /dev/kmsg until they do, because they
+# can wait: for a console with no port behind it, which is what a guest started
+# with only hvc0 has, and then for a TTY in the app to first show the console,
+# so that the motd is seen. See tctish-login.
 hvc0::respawn:/usr/bin/tctish-login
+kmsg::respawn:/usr/bin/tctish-login hvc1
+kmsg::respawn:/usr/bin/tctish-login hvc2
+kmsg::respawn:/usr/bin/tctish-login hvc3
+kmsg::respawn:/usr/bin/tctish-login hvc4
+kmsg::respawn:/usr/bin/tctish-login hvc5
+kmsg::respawn:/usr/bin/tctish-login hvc6
+kmsg::respawn:/usr/bin/tctish-login hvc7
+kmsg::respawn:/usr/bin/tctish-login hvc8
+kmsg::respawn:/usr/bin/tctish-login hvc9
+kmsg::respawn:/usr/bin/tctish-login hvc10
+kmsg::respawn:/usr/bin/tctish-login hvc11
 
 # The services below run on /dev/kmsg, so what they print to stderr is a line
 # in the kernel's log. Not on the console, which is ttyS0 (console=ttyS0): init

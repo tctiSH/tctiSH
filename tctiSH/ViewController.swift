@@ -73,6 +73,9 @@ class ViewController: UIViewController {
     /// The TTY switcher, while it's open.
     private(set) var switcher: TTYSwitcherViewController?
 
+    /// Whether the switcher is animating out, to be gone once it has.
+    private var switcherClosing = false
+
     /// Whether the terminal, or the find bar over it, had the keyboard when the
     /// switcher opened, so that the terminal gets it back when the switcher
     /// closes.
@@ -175,9 +178,9 @@ class ViewController: UIViewController {
         explainSerialSize()
         guardMonitorCommands()
 
-        // Connect to `hvc0`, whether or not that TTY is open, and ask whether Linux is up. And to
-        // the serial port and the user's monitor, which say something as soon as QEMU starts.
-        ConsoleTransport.shared.start()
+        // Connect to the serial port and the user's monitor, which say something as soon as QEMU
+        // starts, and ask whether Linux is up. The consoles connect themselves once QEMU has
+        // started.
         ChardevTransport.kernelLog.start()
         ChardevTransport.vmManagement.start()
         GuestAgent.shared.start()
@@ -1580,8 +1583,10 @@ extension ViewController {
                 if ttys.neighbor(by: offset) != nil {
                     return .step
                 }
-                return offset > 0 && ttys.canAdd ? .add : .none
+                guard offset > 0 else { return .none }
+                return ttys.canAdd ? .add : .full
             }
+            button.atLimit = { [weak self] in self?.explainTTYLimit() }
         }
 
         floatingSwitcher.alpha = 0
@@ -1611,6 +1616,10 @@ extension ViewController {
                 showSerialSize(cols: t.cols, rows: t.rows)
             }
         }
+
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(couldNotEndPrograms), name: TTYs.couldNotEndPrograms,
+            object: nil)
     }
 
     private static let serialSizeStatusKey = "serial-size"
@@ -2104,6 +2113,7 @@ extension ViewController {
         // animates out.
         controller.finish = { _ in }
         controller.view.isUserInteractionEnabled = false
+        switcherClosing = true
 
         controller.animateOut(to: terminal) { [weak self] in
             guard let self else { return }
@@ -2122,6 +2132,7 @@ extension ViewController {
             }
 
             switcher = nil
+            switcherClosing = false
             view.setNeedsLayout()
             scheduleFloatingSwitcherUpdate()
         }
@@ -2165,8 +2176,13 @@ extension ViewController {
             return switcher == nil && presentedViewController == nil
         case #selector(findNext(_:)), #selector(findPrevious(_:)):
             return findBar != nil
-        // The TTY commands are off while an alert or a sheet is up, such as one from the switcher.
-        case #selector(newTTY(_:)), #selector(closeTTY(_:)), #selector(toggleSwitcher(_:)),
+        // Close TTY stays on, and does nothing while an alert or a sheet is up. Turned off, it lets
+        // ⌘W through to the system's Close Window, which closes the app's only window.
+        case #selector(closeTTY(_:)):
+            return true
+        // The other TTY commands are off while an alert or a sheet is up, such as one from the
+        // switcher.
+        case #selector(newTTY(_:)), #selector(toggleSwitcher(_:)),
             #selector(previousTTY(_:)), #selector(nextTTY(_:)), #selector(jumpToTTY(_:)):
             return presentedViewController == nil
         default:
@@ -2265,8 +2281,34 @@ extension ViewController {
             switcher.add()
             return
         }
-        guard let tty = TTYs.shared.add() else { return }
+        guard let tty = TTYs.shared.add() else {
+            explainTTYLimit()
+            return
+        }
         TTYs.shared.select(tty)
+    }
+
+    /// Says, in a pill, that no more TTYs can be opened.
+    private func explainTTYLimit() {
+        presentOverSwitcher(TTYs.limitPill)
+        UINotificationFeedbackGenerator().notificationOccurred(.error)
+    }
+
+    /// Shows a pill over the switcher while it's open, and over the terminal
+    /// otherwise, as when the switcher is on its way out.
+    private func presentOverSwitcher(_ item: StatusPresenter.Item) {
+        if let switcher, !switcherClosing {
+            switcher.present(item)
+        } else {
+            status?.present(item)
+        }
+    }
+
+    /// Says that the programs on closed TTYs' consoles couldn't be ended.
+    @objc private func couldNotEndPrograms(_ notification: Notification) {
+        guard let message = notification.object as? String else { return }
+        presentOverSwitcher(
+            .init(key: "end-programs", message: message, state: .failed, duration: 5))
     }
 
     @objc func closeTTY(_ sender: Any?) {

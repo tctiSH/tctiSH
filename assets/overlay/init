@@ -158,7 +158,9 @@ chmod 700 /var/tcti-rootfs/rw-ios/userroot/root
 #                    had them, has those brought up to date: the login on
 #                    ttyS0, which lacked the TERM and size tctish-login gives
 #                    it, and services on the console, which is ttyS0 now and
-#                    whose settings init resets each time it starts one.
+#                    whose settings init resets each time it starts one. And a
+#                    copy with a login on hvc0 alone gets the logins on hvc1 to
+#                    hvc11 after it.
 #
 # And once per disk, so that someone who installs dropbear again on purpose
 # keeps it:
@@ -206,6 +208,16 @@ elif [ -f "$INITTAB" ] && grep -qxE 'ttyS0::respawn:/bin/busybox login -f root|:
 		-e 's|^::respawn:/sbin/syslogd -n -S -s 12 -b 8$|kmsg::respawn:/sbin/syslogd -n -S -s 12 -b 8|' \
 		"$INITTAB"
 	echo "tctish: brought /etc/inittab's lines from before Kernel Log up to date" >/dev/kmsg
+fi
+# Trailing spaces and a CR, as an editor may leave, are allowed after hvc0's line.
+if [ -f "$INITTAB" ] && grep -qxE 'hvc0::respawn:/usr/bin/tctish-login[[:space:]]*' "$INITTAB" &&
+	! grep -q 'tctish-login hvc' "$INITTAB"; then
+	awk '{ print }
+		/^hvc0::respawn:\/usr\/bin\/tctish-login[[:space:]]*$/ {
+			for (n = 1; n <= 11; n++) print "kmsg::respawn:/usr/bin/tctish-login hvc" n
+		}' "$INITTAB" >"$INITTAB.tctish" && mv "$INITTAB.tctish" "$INITTAB" &&
+		echo "tctish: added the logins on hvc1 to hvc11 to /etc/inittab" >/dev/kmsg
+	rm -f "$INITTAB.tctish"
 fi
 
 CONSOLE_STAMP=/var/tcti-rootfs/rw-ios/.tctish-ssh-removed

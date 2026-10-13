@@ -44,6 +44,9 @@ final class GuestAgent {
     /// Whether Linux has answered since it was last started.
     private(set) var isUp = false
 
+    /// Why a request fails when Linux restarts before it is answered.
+    static let restartReason = "Linux restarted"
+
     private let socket = ChardevSocket(path: QEMUInterface.agentSocketPath, name: "agent")
 
     /// Which boot of Linux answered, from `/proc/sys/kernel/random/boot_id`, or
@@ -92,7 +95,7 @@ final class GuestAgent {
         isUp = false
         bootID = nil
         round += 1
-        failWaitingRequests(because: "Linux restarted")
+        failWaitingRequests(because: Self.restartReason)
         keepAsking()
     }
 
@@ -134,7 +137,8 @@ final class GuestAgent {
         return box.answer
     }
 
-    private func request(
+    /// `request`, with the arguments as an array.
+    func request(
         _ operation: String, arguments: [String], answered: @escaping (Answer) -> Void
     ) {
         guard isUp, socket.isConnected else {

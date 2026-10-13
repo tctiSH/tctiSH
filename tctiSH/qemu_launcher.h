@@ -33,6 +33,10 @@ bool jit_debugger_tracing(void);
 /// session can still be resumed.
 const char *qemu_machine_signature(void);
 
+/// How many virtio consoles the guest has, `hvc0` to `hvc11`: one for each user
+/// TTY the app can have open.
+#define TCTISH_CONSOLE_COUNT 12
+
 /// The most vCPUs the guest can have, which is how many cores this device has,
 /// up to the guest kernel's 16. Part of the machine, and so of every snapshot.
 unsigned int qemu_max_vcpus(void);
@@ -58,9 +62,10 @@ unsigned int qemu_max_vcpus(void);
 /// `qemu_max_vcpus()`. A snapshot loaded at launch brings the machine to the
 /// vCPUs it was taken with, so its count only saves that work.
 ///
-/// `console_socket_path`, `agent_socket_path` and `control_socket_path` are
-/// where QEMU listens for the app's connections to `hvc0`, the terminal, to the
-/// guest agent, and to `tctictl`'s port;
+/// `console_socket_paths` are where QEMU listens for the app's connections to
+/// the consoles, `TCTISH_CONSOLE_COUNT` of them from `hvc0`.
+/// `agent_socket_path` and `control_socket_path` are where it listens for its
+/// connections to the guest agent and to `tctictl`'s port;
 /// `serial_socket_path` and `management_socket_path` for its connections to the
 /// serial port, which carries the kernel's log, and to the user's monitor.
 /// `serial_log_path` is where QEMU appends everything the serial port sends,
@@ -69,7 +74,7 @@ void run_background_qemu(const char *qemu_path, const char *kernel_path, const c
                          const char *bios_path, const char *disk_path,
                          const char *shared_folder_path, const char *boot_image_name,
                          const char *memory_value, const char *monitor_socket_path,
-                         const char *console_socket_path, const char *agent_socket_path,
+                         const char *const *console_socket_paths, const char *agent_socket_path,
                          const char *control_socket_path, const char *serial_socket_path,
                          const char *serial_log_path, const char *management_socket_path,
                          bool start_native, bool bless_jit_regions, unsigned int tb_size_mib,

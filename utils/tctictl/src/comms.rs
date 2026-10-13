@@ -69,6 +69,34 @@ pub(crate) struct ConfigurationMessage {
 
     /// The argument to the message.
     pub value: Option<String>,
+
+    /// The controlling tty of the tctictl that sent the request, as
+    /// `controlling_tty` gives it, so that the app can tell which of its TTYs
+    /// the request came from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tty: Option<String>,
+}
+
+/// This process's controlling tty, by its name in Linux, or as `MAJOR:MINOR` if
+/// it has no name to find (a pseudo-terminal, as under tmux), or None if it has
+/// none.
+fn controlling_tty() -> Option<String> {
+    // The seventh field, tty_nr, is the fifth after the command's name, which is in parentheses and
+    // can itself hold spaces and parentheses.
+    let stat = fs::read_to_string("/proc/self/stat").ok()?;
+    let fields = &stat[stat.rfind(')')? + 1..];
+    let tty: u32 = fields.split_whitespace().nth(4)?.parse().ok()?;
+    if tty == 0 {
+        return None;
+    }
+
+    // Linux packs the device number as it does for an old-style dev_t.
+    let major = (tty >> 8) & 0xfff;
+    let minor = (tty & 0xff) | ((tty >> 12) & 0xfff00);
+    let named = fs::read_link(format!("/sys/dev/char/{major}:{minor}"))
+        .ok()
+        .and_then(|device| Some(device.file_name()?.to_str()?.to_owned()));
+    Some(named.unwrap_or_else(|| format!("{major}:{minor}")))
 }
 
 /// Finds the port by its name. There is no udev, so `/dev/virtio-ports/<name>`
@@ -167,6 +195,7 @@ pub(crate) fn exchange_message(mut message: ConfigurationMessage) -> Result<Conf
 
     let id = new_id();
     message.id = Some(id.clone());
+    message.tty = controlling_tty();
     send_line(&mut port, &message)?;
 
     let still_waiting = ConfigurationMessage {
@@ -174,6 +203,7 @@ pub(crate) fn exchange_message(mut message: ConfigurationMessage) -> Result<Conf
         command: "still_waiting".to_owned(),
         key: None,
         value: None,
+        tty: None,
     };
 
     // Every request gets an answer with its id; lines with another id are someone else's.
@@ -226,6 +256,7 @@ pub(crate) fn run_command(
         command,
         key,
         value,
+        tty: None,
     };
     exchange_message(message)
 }

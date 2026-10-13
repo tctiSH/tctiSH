@@ -263,6 +263,13 @@ main() {
         -no-reboot
     )
 
+    # The consoles of the app's other TTYs, hvc1 to hvc11, connected to nothing here.
+    local n
+    for n in $(seq 1 11); do
+        argv+=(-device "virtconsole,id=hvc$n,chardev=hvc$n-socket,bus=vser0.0"
+            -chardev "null,id=hvc$n-socket")
+    done
+
     # The agent's socket. A short path, because a Unix socket's must fit in 104
     # bytes.
     AGENT_DIR="$(mktemp -d /tmp/tctish-agent.XXXXXX)"

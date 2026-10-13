@@ -25,6 +25,22 @@
 #   reclaim <id> <MiB>    trims the page cache to that many MiB through the
 #                         kernel's LRU, which keeps the most used.
 #                         "done <id> <MiB before> <MiB after> <ms>"
+#   hangup <id> <console>...
+#                         ends the programs on consoles (hvc3 hvc5), as a
+#                         hangup would: SIGHUP to every process whose
+#                         controlling tty is one of them, then SIGKILL to any
+#                         login session leader still there a second later,
+#                         whose end has the kernel hang the tty up. Programs
+#                         that ignore SIGHUP (nohup) or left the session
+#                         (setsid) carry on. The next login on each waits for a
+#                         TTY to show it; see tctish-login. Several consoles in
+#                         one request share the wait, so a request behind it
+#                         isn't held up a second per console.
+#                         "done <id> <processes hung up> <leaders killed>"
+#   shown <id> <console>  says a TTY in the app shows a console (hvc3), and
+#                         wakes its login if that is waiting to start. "done
+#                         <id>", or "error <id> shown write-failed" if it
+#                         couldn't say so.
 #
 # A request that fails gets "error <id> <word> <reason>", and an unknown one
 # "error <id> <word> unknown". Unasked, the agent says
@@ -47,6 +63,9 @@ set -f
 NAME="io.ara.tctish.agent"
 
 ZONEINFO="/usr/share/zoneinfo"
+
+# Whether a TTY has shown each console this boot; see tctish-login.
+CONSOLES="/run/tctish/consoles"
 
 # Find the port by its name, which QEMU gives it, rather than by number. There
 # is no udev, so /dev/virtio-ports/<name> never appears; devtmpfs makes only
@@ -161,6 +180,152 @@ reclaim() {
     echo "done $id $before $(file_cache_mib) $(($(uptime_ms) - started))"
 }
 
+# The processes whose controlling tty is one of the devices numbered in $1, as
+# Linux writes them in /proc/<pid>/stat, on one line. Only the leaders of their
+# sessions if $2 is "leaders".
+on_tty() {
+    want=" $1 "
+    only="${2:-}"
+    stats="$(
+        set +f
+        echo /proc/[0-9]*/stat
+    )"
+    for stat in $stats; do
+        # The whole file, as a command's name can hold a newline. Error output
+        # is redirected first, so that a process that has ended since the list
+        # was made (the subshell above among them) says nothing.
+        line=
+        IFS= read -r -d '' line 2>/dev/null <"$stat"
+        [ -n "$line" ] || continue
+
+        # After the command's name, which is in parentheses and can hold
+        # anything: state, ppid, pgrp, session, then tty_nr.
+        # shellcheck disable=SC2086
+        set -- ${line##*\) }
+        session="${4:-}"
+        tty="${5:-}"
+        pid="${stat#/proc/}"
+        pid="${pid%/stat}"
+        case "$want" in
+            *" $tty "*) ;;
+            *) continue ;;
+        esac
+        if [ "$only" != leaders ] || [ "$session" = "$pid" ]; then
+            printf '%s ' "$pid"
+        fi
+    done
+}
+
+# The session leaders on the devices numbered in $1 that are among the pids in
+# $2.
+signalled_leaders() {
+    for pid in $(on_tty "$1" leaders); do
+        case " $2 " in
+            *" $pid "*) printf '%s ' "$pid" ;;
+        esac
+    done
+}
+
+# Prints the device number of the console $3, as /proc/<pid>/stat writes it,
+# or answers request $1, operation $2, with an error and fails.
+console_tty() {
+    case "$3" in
+        hvc[0-9] | hvc[1-9][0-9]) ;;
+        *)
+            echo "error $1 $2 bad-console" >&3
+            return 1
+            ;;
+    esac
+    if ! dev="$(cat "/sys/class/tty/$3/dev" 2>/dev/null)"; then
+        echo "error $1 $2 unknown-console" >&3
+        return 1
+    fi
+    major="${dev%:*}"
+    minor="${dev#*:}"
+    echo $(((minor & 255) | (major << 8) | ((minor & ~255) << 12)))
+}
+
+# Records whether a TTY has shown the console $1 this boot, $2 being "shown" or
+# "hidden", and fails if it can't. Renamed into place, so that a login never
+# reads half a record.
+record() {
+    mkdir -p "$CONSOLES" &&
+        echo "$BOOT_ID $2" >"$CONSOLES/.$1.agent" &&
+        mv -f "$CONSOLES/.$1.agent" "$CONSOLES/$1"
+}
+
+# shown <id> <console>
+shown() {
+    tty_nr="$(console_tty "$1" shown "${2:-}")" || return
+    if ! record "$2" shown; then
+        echo "error $1 shown write-failed"
+        return
+    fi
+
+    # The record first, then the signal: a login reads the record each time it
+    # wakes, and only after it can be woken, so it can't miss both.
+    leaders="$(on_tty "$tty_nr" leaders)"
+    # shellcheck disable=SC2086
+    [ -n "$leaders" ] && kill -WINCH $leaders 2>/dev/null
+    echo "done $1"
+}
+
+# hangup <id> <console>...
+hang_up() {
+    id="$1"
+    shift
+    if [ $# -eq 0 ]; then
+        echo "error $id hangup bad-console"
+        return
+    fi
+    ttys=
+    for console in "$@"; do
+        tty_nr="$(console_tty "$id" hangup "$console")" || return
+        ttys="$ttys $tty_nr"
+    done
+
+    # Before the signals, so that the login init starts after an old one ends
+    # finds it. If it can't be written, the next login goes ahead without
+    # waiting, which is better than leaving the programs running.
+    for console in "$@"; do
+        record "$console" hidden
+    done
+
+    pids="$(on_tty "$ttys")"
+    # CONT as well, for stopped jobs, which act on HUP only once they run.
+    if [ -n "$pids" ]; then
+        # shellcheck disable=SC2086
+        kill -HUP $pids 2>/dev/null
+        # shellcheck disable=SC2086
+        kill -CONT $pids 2>/dev/null
+    fi
+
+    # A login whose shell ignores SIGHUP keeps the session, so leaders still
+    # there after a second are killed. Only those signalled above: the login
+    # init starts in an old one's place must stay.
+    waited=0
+    leaders="$(signalled_leaders "$ttys" "$pids")"
+    while [ -n "$leaders" ] && [ "$waited" -lt 10 ]; do
+        sleep 0.1
+        waited=$((waited + 1))
+        leaders="$(signalled_leaders "$ttys" "$pids")"
+    done
+    killed=0
+    for pid in $leaders; do
+        kill -KILL "$pid" 2>/dev/null && killed=$((killed + 1))
+    done
+
+    # Again, now that the old logins are gone: one woken by a TTY just before
+    # this began may have written "shown" over the first.
+    for console in "$@"; do
+        record "$console" hidden
+    done
+
+    # shellcheck disable=SC2086
+    set -- $pids
+    echo "done $id $# $killed"
+}
+
 # Linux makes a port before QEMU has named it, so a look early in the boot can
 # miss it. Keep looking rather than exit: inittab respawns this, and a tight
 # loop of failures would fill the log with the same line for ever. A guest
@@ -207,6 +372,8 @@ while :; do
             zone) set_zone "$id" "${1:-}" ;;
             sync) if sync; then echo "done $id"; else echo "error $id sync failed"; fi ;;
             reclaim) reclaim "$id" "${1:-}" ;;
+            hangup) hang_up "$id" "$@" ;;
+            shown) shown "$id" "${1:-}" ;;
             *) echo "error ${id:--} $request unknown" ;;
         esac >&3
     done

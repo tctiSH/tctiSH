@@ -99,8 +99,9 @@ final class TTYMenu {
         return UIMenu(title: tty.name, children: sections)
     }
 
-    /// The range of font sizes, in points, that Smaller and Larger step within.
-    private static let fontSizes = 6...40
+    /// The range of font sizes, in points, that Smaller and Larger step within,
+    /// and that `tctictl font size` can give a TTY.
+    static let fontSizes = 6...40
 
     /// A row of Smaller, the current size, and Larger, then a Default Font Size
     /// item. The row's items keep the menu open when tapped, and each step
@@ -187,14 +188,15 @@ final class TTYMenu {
 
     // MARK: Asking
 
-    /// Asks for confirmation, then closes `tty`.
+    /// Asks whether to close `tty`, and whether to end the programs running on
+    /// its console or keep them for the next TTY that opens on it.
     func confirmClose(_ tty: TTY) {
-        confirm(
+        confirmClosing(
             title: "Close \(tty.name)?",
-            message: "Programs running in it keep running, and are there when it is opened again.",
-            action: "Close"
-        ) { [weak self] in
-            self?.store.close(tty)
+            message:
+                "Programs running on \(tty.device ?? tty.name) can keep running for the next TTY that opens on it, or end now."
+        ) { [weak self] endingPrograms in
+            self?.store.close(tty, endingPrograms: endingPrograms)
         }
     }
 
@@ -202,22 +204,27 @@ final class TTYMenu {
         let count = store.othersClosed(by: tty).count
         guard count > 0 else { return }
 
-        confirm(
+        confirmClosing(
             title: count == 1 ? "Close 1 Other TTY?" : "Close \(count) Other TTYs?",
             message:
-                "Pinned TTYs stay open. Programs running in the others keep running, and are there when they are opened again.",
-            action: "Close"
-        ) { [weak self] in
-            self?.store.closeAll(but: tty)
+                "Pinned TTYs stay open. Programs running in the others can keep running for the next TTYs that open on their consoles, or end now."
+        ) { [weak self] endingPrograms in
+            self?.store.closeAll(but: tty, endingPrograms: endingPrograms)
         }
     }
 
-    private func confirm(
-        title: String, message: String, action: String, _ confirmed: @escaping () -> Void
+    /// Asks whether to close, offering to keep the programs running or to end
+    /// them, and calls back with whether to end them.
+    private func confirmClosing(
+        title: String, message: String, _ confirmed: @escaping (_ endingPrograms: Bool) -> Void
     ) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(
+            UIAlertAction(title: "Keep Programs Running", style: .default) { _ in confirmed(false) }
+        )
+        alert.addAction(
+            UIAlertAction(title: "End Programs", style: .destructive) { _ in confirmed(true) })
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: action, style: .destructive) { _ in confirmed() })
         presenter?.present(alert, animated: true)
     }
 

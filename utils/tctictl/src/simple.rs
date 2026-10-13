@@ -24,7 +24,10 @@ pub(crate) fn handle_font(property: Option<String>, value: Option<String>) {
     if let Some(property) = property {
         // If we have a value, use it.
         if let Some(value) = value {
-            let _ = set_font_property(property, value);
+            if let Err(err) = set_font_property(property, value) {
+                eprintln!("Couldn't set the font: {err:#}");
+                std::process::exit(1);
+            }
         }
         // Otherwise, fetch it.
         else {

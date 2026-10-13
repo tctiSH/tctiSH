@@ -24,8 +24,8 @@ final class TTY {
         case user(Int)
     }
 
-    /// The maximum number of user TTYs.
-    static let userLimit = 12
+    /// The maximum number of user TTYs: one for each of the guest's consoles.
+    static let userLimit = Int(TCTISH_CONSOLE_COUNT)
 
     /// The default scrollback, in standard 80-column lines.
     static let defaultScrollback = 2000
@@ -153,6 +153,10 @@ final class TTYs {
     /// Posted when a TTY's status changes, with the TTY as the object.
     static let statusDidChange = Notification.Name("io.ara.tctish.ttysStatusDidChange")
 
+    /// Posted when the programs on a closed TTY's console couldn't be ended,
+    /// with a message saying so as the object.
+    static let couldNotEndPrograms = Notification.Name("io.ara.tctish.ttysCouldNotEndPrograms")
+
     /// The system TTYs: Kernel Log, then VM Management.
     let system: [TTY]
 
@@ -252,11 +256,27 @@ final class TTYs {
         all.first { $0.id == id }
     }
 
+    /// The open TTY that shows a device, by its name in Linux (`hvc3`, or
+    /// `ttyS0` for Kernel Log), or nil if no open TTY shows it.
+    func tty(onDevice device: String) -> TTY? {
+        if device == "ttyS0" {
+            return system.first { $0.kind == .kernelLog }
+        }
+        return users.first { $0.device == device }
+    }
+
     /// Whether another user TTY can be added.
     var canAdd: Bool { users.count < TTY.userLimit }
 
-    /// The TTY that shows `hvc0`, the console Linux's login is on, or nil if it
-    /// is closed.
+    /// What to say when another user TTY is asked for but can't be added.
+    static let limitMessage = "At most \(TTY.userLimit) TTYs can be open"
+
+    /// The pill that says so.
+    static let limitPill = StatusPresenter.Item(
+        key: "tty-limit", message: limitMessage, state: .symbol("exclamationmark.circle"),
+        duration: 3)
+
+    /// The TTY that shows `hvc0`, the first console, or nil if it is closed.
     var hvc0: TTY? { users.first { $0.number == 0 } }
 
     /// Whether any TTY the switcher shows, other than the selected one, has
@@ -317,13 +337,8 @@ final class TTYs {
             view.transport = ChardevTransport.kernelLog
         case .vmManagement:
             view.transport = ChardevTransport.vmManagement
-        case .user(0):
-            view.transport = ConsoleTransport.shared
         case .user(let number):
-            view.transport = EchoTransport()
-            view.feed(
-                text: "\u{1b}[2mhvc\(number) isn't connected to Linux yet. "
-                    + "Until then, it echoes what you type.\u{1b}[0m\r\n")
+            view.transport = ConsoleTransport.consoles[number]
         }
     }
 
@@ -422,13 +437,17 @@ final class TTYs {
     /// Closes a user TTY. If it was selected, the user TTY after it is selected
     /// instead, or failing that the one before it, or failing that what
     /// `fallback()` gives.
-    func close(_ tty: TTY) {
-        close([tty])
+    ///
+    /// What runs on the TTY's console keeps running, for when a TTY opens on it
+    /// again, unless `endingPrograms`.
+    func close(_ tty: TTY, endingPrograms: Bool = false) {
+        close([tty], endingPrograms: endingPrograms)
     }
 
-    /// Closes every unpinned user TTY except `tty`.
-    func closeAll(but tty: TTY) {
-        close(users.filter { $0 !== tty && !$0.isPinned })
+    /// Closes every unpinned user TTY except `tty`, ending what runs on their
+    /// consoles if `endingPrograms`.
+    func closeAll(but tty: TTY, endingPrograms: Bool = false) {
+        close(users.filter { $0 !== tty && !$0.isPinned }, endingPrograms: endingPrograms)
     }
 
     /// The TTYs that `closeAll(but:)` would close, for the Close All But This
@@ -437,7 +456,7 @@ final class TTYs {
         users.filter { $0 !== tty && !$0.isPinned }
     }
 
-    private func close(_ closing: [TTY]) {
+    private func close(_ closing: [TTY], endingPrograms: Bool) {
         let closing = closing.filter { tty in !tty.isSystem && users.contains { $0 === tty } }
         guard !closing.isEmpty else { return }
 
@@ -459,8 +478,8 @@ final class TTYs {
         }
 
         // Tear down the closed terminals last, once the selection has moved off any of them that
-        // was on screen. Detaching the `hvc0` terminal from its transport leaves the console
-        // connected, and what runs on it running, for when the TTY is opened again.
+        // was on screen. Detaching a terminal from its console disconnects the app from it, and
+        // leaves what runs on it running; ending that, if asked, comes after.
         for tty in closing {
             tty.view?.transport = nil
             tty.view?.removeFromSuperview()
@@ -469,6 +488,41 @@ final class TTYs {
             tty.view?.updateUiClosed()
         }
         changed()
+
+        if endingPrograms {
+            endPrograms(onConsoles: closing.compactMap(\.number))
+        }
+    }
+
+    /// Has the guest agent hang up the consoles `hvc<number>`, which ends the
+    /// programs on them, and has the next login on each wait for a TTY to show
+    /// it. One request for them all, so that they share one wait, rather than
+    /// holding up later requests a second per console.
+    private func endPrograms(onConsoles numbers: [Int]) {
+        let devices = numbers.map { "hvc\($0)" }
+        let named = ListFormatter.localizedString(byJoining: devices)
+        GuestAgent.shared.request("hangup", arguments: devices) { answer in
+            switch answer {
+            case .done(let counts):
+                Log.ui.note("ttys: hung up \(named): \(counts.joined(separator: " "))")
+
+                // A TTY may have opened on one of the consoles since it closed, as when closing the
+                // last TTY opens a new one. It said it showed the console before the hangup, which
+                // marked the console as not shown, so it says so again for the login that waits.
+                for number in numbers {
+                    ConsoleTransport.consoles[number].redraw()
+                }
+
+            case .failed(let reason):
+                Log.ui.warn("ttys: couldn't hang up \(named): \(reason)")
+
+                // Linux restarting ended the programs anyway.
+                guard reason != GuestAgent.restartReason else { return }
+                NotificationCenter.default.post(
+                    name: Self.couldNotEndPrograms,
+                    object: "Couldn't end the programs on \(named): \(reason)")
+            }
+        }
     }
 
     /// Renames a user TTY. A nil name, or one that is empty once whitespace is

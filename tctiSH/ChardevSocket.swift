@@ -94,6 +94,18 @@ final class ChardevSocket {
         retryTimer = timer
     }
 
+    /// Disconnects, or stops trying to connect. Sends already made still go
+    /// out.
+    func stop() {
+        retryTimer?.invalidate()
+        retryTimer = nil
+        failedAttempts = 0
+
+        guard connection != nil else { return }
+        Log.network.note("\(name): disconnected")
+        disconnect()
+    }
+
     /// Sends bytes to the far end, or drops them if there is no connection.
     func send<Bytes: Sequence<UInt8>>(_ bytes: Bytes) {
         guard let connection else { return }
