@@ -129,6 +129,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             "allow_clipboard_read": false,
             "scrollback": TTY.defaultScrollback,
             "step_through_system_ttys": false,
+            "show_kernel_log": false,
+            "show_vm_management": false,
         ])
 
         // Before anything reads it.

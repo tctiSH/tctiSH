@@ -89,11 +89,12 @@ final class StatusPill: UIView {
     ///
     /// `backdrop` is whatever the pill will be sitting on (the terminal's
     /// background, in practice) and decides whether it dresses light or dark.
-    /// `topOffset` is where it sits in the stack; see `StatusPresenter`.
+    /// `topOffset` is where it sits in the stack; see `StatusPresenter`. A long
+    /// pill stops short of `clearOf`, if given, which must be in `parent`.
     @discardableResult
     static func show(
         in parent: UIView, title: String, over backdrop: UIColor,
-        topOffset: CGFloat = Metric.margin
+        topOffset: CGFloat = Metric.margin, clearOf: UIView? = nil
     ) -> StatusPill {
         let pill = StatusPill(title: title)
         pill.overrideUserInterfaceStyle = style(toSitOn: backdrop)
@@ -117,6 +118,11 @@ final class StatusPill: UIView {
                 greaterThanOrEqualTo: parent.safeAreaLayoutGuide.leadingAnchor,
                 constant: Metric.margin),
         ])
+        if let clearOf {
+            pill.leadingAnchor.constraint(
+                greaterThanOrEqualTo: clearOf.trailingAnchor, constant: Metric.margin
+            ).isActive = true
+        }
 
         pill.alpha = 0
         pill.transform = CGAffineTransform(translationX: 0, y: -10).scaledBy(x: 0.92, y: 0.92)

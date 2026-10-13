@@ -12,8 +12,10 @@ import UIKit
 /// One of the terminals the switcher shows.
 ///
 /// Two belong to the system and always exist: the kernel log and QEMU's
-/// monitor. The rest belong to the user, at most `userLimit` of them, and each
-/// is named for its console device in Linux (`hvc0`, `hvc1`, and so on).
+/// monitor, which the switcher shows only if Settings says to. The rest belong
+/// to the user, at most `userLimit` of them, and each is on a console device in
+/// Linux (`hvc0`, `hvc1`, and so on), named for it unless Settings gives the
+/// console another name.
 final class TTY {
 
     enum Kind: Codable, Hashable {
@@ -85,15 +87,21 @@ final class TTY {
         return nil
     }
 
+    /// The name of a user TTY's console in Linux, as in `hvc0`, or nil for a
+    /// system TTY.
+    var device: String? { number.map { "hvc\($0)" } }
+
     /// The name shown for the TTY: the user's name for it if it has been
     /// renamed, and its default name otherwise.
     var name: String { customName ?? defaultName }
 
+    /// The name the TTY goes by until it is renamed: for a user TTY, the name
+    /// Settings gives its console, or failing that the console's name.
     var defaultName: String {
         switch kind {
         case .kernelLog: "Kernel Log"
         case .vmManagement: "VM Management"
-        case .user(let number): "hvc\(number)"
+        case .user(let number): TTYs.defaultName(ofConsole: "hvc\(number)") ?? "hvc\(number)"
         }
     }
 
@@ -127,13 +135,15 @@ extension TTY.Kind {
 ///
 /// The list of TTYs, their order, pins, names and settings, and the selection
 /// are saved whenever they change and restored at launch. What the terminals
-/// show is not saved.
+/// show is not saved. The names Settings gives consoles, and whether it shows
+/// the system TTYs, are saved as separate settings.
 final class TTYs {
 
     static let shared = TTYs()
 
     /// Posted when TTYs are added or closed, or are reordered, renamed, pinned,
-    /// unpinned or muted, or have their settings changed.
+    /// unpinned or muted, or have their settings changed, and when the system
+    /// TTYs the switcher shows change.
     static let didChange = Notification.Name("io.ara.tctish.ttysDidChange")
 
     /// Posted when a different TTY is selected. The notification's object is
@@ -198,9 +208,18 @@ final class TTYs {
         }
         users = users.filter(\.isPinned) + users.filter { !$0.isPinned }
 
+        // A system TTY that Settings hides is never selected. Something must be, so with no user
+        // TTY and neither system TTY shown, one is opened on hvc0.
+        let shown = system.filter { Self.isShown($0.kind) }
+        if users.isEmpty, shown.isEmpty {
+            users = [TTY(kind: .user(0))]
+        }
+
         self.system = system
         self.users = users
-        selected = (system + users).first { $0.id == saved?.selected } ?? users.first ?? system[1]
+        selected =
+            (shown + users).first { $0.id == saved?.selected } ?? users.first ?? shown.last
+            ?? system[1]
     }
 
     // MARK: Looking
@@ -212,13 +231,19 @@ final class TTYs {
     var pinned: [TTY] { users.filter(\.isPinned) }
     var cards: [TTY] { users.filter { !$0.isPinned } }
 
-    /// Every TTY in switcher order: the system TTYs, then the pinned ones, then
-    /// the cards.
-    var ordered: [TTY] { system + users }
+    /// The system TTYs the switcher shows, which are those Settings says to
+    /// show. Those it hides keep running, but can't be selected.
+    var shownSystem: [TTY] {
+        system.filter { Self.isShown($0.kind) }
+    }
+
+    /// Every TTY the switcher shows, in its order: the system TTYs it shows,
+    /// then the pinned ones, then the cards.
+    var ordered: [TTY] { shownSystem + users }
 
     /// The TTYs that swiping across the switcher button and the keyboard
-    /// shortcuts step through: the user TTYs, preceded by the system TTYs if
-    /// that option is on in Settings.
+    /// shortcuts step through: the user TTYs, preceded by the system TTYs the
+    /// switcher shows if that option is on in Settings.
     var stepOrder: [TTY] {
         AppSetting.stepThroughSystemTTYs.bool ? ordered : users
     }
@@ -234,10 +259,10 @@ final class TTYs {
     /// is closed.
     var hvc0: TTY? { users.first { $0.number == 0 } }
 
-    /// Whether any TTY other than the selected one has rung the bell while
-    /// unmuted and has not been selected since.
+    /// Whether any TTY the switcher shows, other than the selected one, has
+    /// rung the bell while unmuted and has not been selected since.
     var needsAttention: Bool {
-        all.contains { $0 !== selected && !$0.isMuted && $0.hasBelled }
+        ordered.contains { $0 !== selected && !$0.isMuted && $0.hasBelled }
     }
 
     // MARK: Terminals
@@ -287,34 +312,40 @@ final class TTYs {
 
         tty.view = view
 
-        guard tty.number != 0 else {
+        switch tty.kind {
+        case .kernelLog:
+            view.transport = ChardevTransport.kernelLog
+        case .vmManagement:
+            view.transport = ChardevTransport.vmManagement
+        case .user(0):
             view.transport = ConsoleTransport.shared
-            return
+        case .user(let number):
+            view.transport = EchoTransport()
+            view.feed(
+                text: "\u{1b}[2mhvc\(number) isn't connected to Linux yet. "
+                    + "Until then, it echoes what you type.\u{1b}[0m\r\n")
         }
-
-        view.transport = EchoTransport()
-
-        let about =
-            switch tty.kind {
-            case .kernelLog: "The kernel's log will be here once it is connected."
-            case .vmManagement: "QEMU's monitor will be here once it is connected."
-            case .user: "\(tty.defaultName) isn't connected to Linux yet."
-            }
-        view.feed(text: "\u{1b}[2m\(about) Until then, it echoes what you type.\u{1b}[0m\r\n")
     }
 
     // MARK: Status
 
+    /// Whether a TTY's status is kept. A system TTY that Settings hides keeps
+    /// none, so that showing it again doesn't bring back what happened while it
+    /// was hidden.
+    private func keepsStatus(_ tty: TTY) -> Bool {
+        !tty.isSystem || Self.isShown(tty.kind)
+    }
+
     private func noteOutput(on tty: TTY) {
         tty.outputCount &+= 1
 
-        guard tty !== selected, !tty.hasUnseenOutput else { return }
+        guard tty !== selected, !tty.hasUnseenOutput, keepsStatus(tty) else { return }
         tty.hasUnseenOutput = true
         postStatus(of: tty)
     }
 
     private func noteBell(on tty: TTY) {
-        guard !tty.isMuted else { return }
+        guard !tty.isMuted, keepsStatus(tty) else { return }
 
         // The selected TTY is on screen, so its bell gets the haptic tap that SwiftTerm's default
         // bell handler gives, rather than a status icon.
@@ -341,7 +372,7 @@ final class TTYs {
     /// Selecting a TTY counts as seeing it, so its bell and unseen-output
     /// status are cleared.
     func select(_ tty: TTY) {
-        guard tty !== selected, all.contains(where: { $0 === tty }) else { return }
+        guard tty !== selected, ordered.contains(where: { $0 === tty }) else { return }
 
         let previous = selected
         selected = tty
@@ -389,8 +420,8 @@ final class TTYs {
     }
 
     /// Closes a user TTY. If it was selected, the user TTY after it is selected
-    /// instead, or failing that the one before it, or VM Management if it was
-    /// the only user TTY.
+    /// instead, or failing that the one before it, or failing that what
+    /// `fallback()` gives.
     func close(_ tty: TTY) {
         close([tty])
     }
@@ -412,21 +443,19 @@ final class TTYs {
 
         // If the selected TTY is closing, choose the new selection before removing anything, from
         // the current order: the first TTY after it that stays open, or failing that the nearest
-        // one before it that stays, or failing that VM Management.
+        // one before it that stays.
+        let selectedCloses = closing.contains { $0 === selected }
         var next: TTY?
-        if closing.contains(where: { $0 === selected }),
-            let index = users.firstIndex(where: { $0 === selected })
-        {
+        if selectedCloses, let index = users.firstIndex(where: { $0 === selected }) {
             let staying = { (tty: TTY) in !closing.contains { $0 === tty } }
             next =
                 users[(index + 1)...].first(where: staying)
                 ?? users[..<index].last(where: staying)
-                ?? system[1]
         }
 
         users.removeAll { tty in closing.contains { $0 === tty } }
-        if let next {
-            select(next)
+        if selectedCloses {
+            select(next ?? fallback())
         }
 
         // Tear down the closed terminals last, once the selection has moved off any of them that
@@ -443,7 +472,7 @@ final class TTYs {
     }
 
     /// Renames a user TTY. A nil name, or one that is empty once whitespace is
-    /// trimmed, restores the TTY's default name, its device name.
+    /// trimmed, restores the TTY's default name.
     func rename(_ tty: TTY, to name: String?) {
         guard !tty.isSystem else { return }
         let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -482,6 +511,71 @@ final class TTYs {
     func setScrollback(_ tty: TTY, _ lines: Int?) {
         tty.scrollback = lines
         changed()
+    }
+
+    /// Shows or hides a system TTY in the switcher, and saves the choice.
+    /// Hiding one clears its status and, if it is selected, selects the first
+    /// user TTY, or failing that what `fallback()` gives.
+    func setShown(_ kind: TTY.Kind, _ shown: Bool) {
+        guard let setting = Self.shownSetting(kind) else { return }
+        setting.set(shown)
+        if !shown, let tty = system.first(where: { $0.kind == kind }) {
+            if selected === tty {
+                select(users.first ?? fallback())
+            }
+            if tty.hasBelled || tty.hasUnseenOutput {
+                tty.hasBelled = false
+                tty.hasUnseenOutput = false
+                postStatus(of: tty)
+            }
+        }
+        changed()
+    }
+
+    /// What to select when the selected TTY goes and there is no user TTY to
+    /// take its place: VM Management, or failing that Kernel Log, if Settings
+    /// shows it, or else a new TTY.
+    private func fallback() -> TTY {
+        if let shown = shownSystem.last {
+            return shown
+        }
+        if let added = add() {
+            return added
+        }
+        // A fallback is wanted only once there is no user TTY left, so one can always be added.
+        assertionFailure("ttys: nothing to fall back on")
+        return system[1]
+    }
+
+    /// Gives a console, by its name in Linux, the name its TTYs go by until
+    /// they are renamed. A nil name, or one that is empty once whitespace is
+    /// trimmed, goes back to the console's name.
+    func setDefaultName(_ name: String?, ofConsole device: String) {
+        var names = AppSetting.ttyDefaultNames.stringsByKey
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        names[device] = trimmed?.isEmpty == false ? trimmed : nil
+        AppSetting.ttyDefaultNames.set(names)
+        NotificationCenter.default.post(name: Self.didChange, object: self)
+    }
+
+    /// The name Settings gives a console, by its name in Linux, or nil if it
+    /// gives none.
+    static func defaultName(ofConsole device: String) -> String? {
+        AppSetting.ttyDefaultNames.stringsByKey[device]
+    }
+
+    /// Whether Settings says to show a system TTY in the switcher. Always true
+    /// for a user TTY.
+    static func isShown(_ kind: TTY.Kind) -> Bool {
+        shownSetting(kind)?.bool ?? true
+    }
+
+    private static func shownSetting(_ kind: TTY.Kind) -> AppSetting? {
+        switch kind {
+        case .kernelLog: .showKernelLog
+        case .vmManagement: .showVmManagement
+        case .user: nil
+        }
     }
 
     /// Puts the pinned TTYs, or the cards, in the order of `ids`, which must

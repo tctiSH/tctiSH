@@ -9,7 +9,7 @@ import UIKit
 
 // MARK: - The name
 
-/// Shows a TTY's name, followed by its device name if it has been renamed, and
+/// Shows a TTY's name, followed by its console if it goes by another name, and
 /// then its status icons.
 final class TTYNameView: UIStackView {
 
@@ -20,8 +20,15 @@ final class TTYNameView: UIStackView {
     init(font: UIFont) {
         super.init(frame: .zero)
         axis = .horizontal
-        alignment = .firstBaseline
         spacing = 5
+
+        // The name and console share a baseline, and the icons are centered on the line: on the
+        // baseline, the small unseen-output dot sat below the middle of the text.
+        alignment = .center
+        let names = UIStackView(arrangedSubviews: [name, device])
+        names.axis = .horizontal
+        names.alignment = .firstBaseline
+        names.spacing = spacing
 
         name.font = font
         name.textColor = .label
@@ -35,7 +42,7 @@ final class TTYNameView: UIStackView {
         status.pointSize = font.pointSize
         status.alignment = .center
 
-        [name, device, status].forEach(addArrangedSubview)
+        [names, status].forEach(addArrangedSubview)
     }
 
     required init(coder: NSCoder) {
@@ -44,17 +51,17 @@ final class TTYNameView: UIStackView {
 
     func show(_ tty: TTY) {
         name.text = tty.name
-        device.text = tty.customName == nil ? nil : tty.defaultName
+        device.text = tty.name == tty.device ? nil : tty.device
         device.isHidden = device.text == nil
         status.show(tty.statuses)
     }
 
-    /// The VoiceOver label for a TTY: its name, its device name if it has been
-    /// renamed, and its statuses.
+    /// The VoiceOver label for a TTY: its name, its console if it goes by
+    /// another name, and its statuses.
     static func accessibilityLabel(for tty: TTY) -> String {
         var parts = [tty.name]
-        if tty.customName != nil {
-            parts.append(tty.defaultName)
+        if let device = tty.device, device != tty.name {
+            parts.append(device)
         }
         parts += tty.statuses.map(\.accessibilityLabel)
         return parts.joined(separator: ", ")

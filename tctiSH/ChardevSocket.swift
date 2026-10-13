@@ -8,12 +8,16 @@
 import Foundation
 
 /// A connection to a Unix socket that QEMU listens on for one of its character
-/// devices: the terminal's console, or the guest agent's port.
+/// devices: a console, serial port, the user's monitor, or guest agent's port.
 ///
-/// QEMU runs in this process on a thread of its own, and listens only once it
-/// has been started. Use it from the main thread, which is also where responses
-/// are delivered to is delivered. Writes go out in order on a queue of their
-/// own, because one can wait for a while when the guest isn't reading.
+/// QEMU runs in this process on a separate thread, and listens only once it has
+/// been started. Use it from the main thread, which is also where what arrives
+/// is delivered. Writes go out in order on a separate queue, because one can
+/// wait for a while when the guest isn't reading.
+///
+/// A connection can also throw away what arrives, reading it on a separate
+/// queue, for a device whose output the app takes from elsewhere. Reading it
+/// all the same matters: a device QEMU can't write to holds the guest up.
 final class ChardevSocket {
 
     /// How often to try connecting, until a connection succeeds.
@@ -49,10 +53,22 @@ final class ChardevSocket {
     private var failedAttempts = 0
     private let writeQueue: DispatchQueue
 
-    init(path: String, name: String) {
+    /// Whether what arrives is thrown away rather than delivered.
+    private let discardsOutput: Bool
+
+    /// Where what arrives is read: the main queue, or a separate queue when it
+    /// is thrown away, so that the main thread being busy never holds the guest
+    /// up.
+    private let readQueue: DispatchQueue
+
+    init(path: String, name: String, discardingOutput: Bool = false) {
         self.path = path
         self.name = name
+        discardsOutput = discardingOutput
         writeQueue = DispatchQueue(label: "io.ara.tctish.chardev.\(name)", qos: .userInteractive)
+        readQueue =
+            discardingOutput
+            ? DispatchQueue(label: "io.ara.tctish.chardev.\(name).read", qos: .utility) : .main
     }
 
     /// Starts trying to connect, unless already connected or trying. The first
@@ -113,8 +129,11 @@ final class ChardevSocket {
         failedAttempts = 0
         self.connection = connection
 
-        let source = DispatchSource.makeReadSource(fileDescriptor: connection.fd, queue: .main)
-        source.setEventHandler { [weak self] in self?.readAvailable() }
+        let source = DispatchSource.makeReadSource(fileDescriptor: connection.fd, queue: readQueue)
+        source.setEventHandler { [weak self, weak source] in
+            guard let self, let source else { return }
+            readAvailable(from: connection, watchedBy: source)
+        }
 
         // The connection is held until the source is cancelled, so that its descriptor isn't
         // closed, and its number given to something else, while the source is still watching it.
@@ -126,16 +145,27 @@ final class ChardevSocket {
         return true
     }
 
-    private func readAvailable() {
-        guard let connection else { return }
-
+    /// Reads what has arrived on `connection`. Runs on `readQueue`, and so
+    /// touches nothing but its arguments unless that is the main queue.
+    private func readAvailable(from connection: Connection, watchedBy source: DispatchSourceRead) {
         var buffer = [UInt8](repeating: 0, count: Self.readSize)
         let count = buffer.withUnsafeMutableBytes { read(connection.fd, $0.baseAddress, $0.count) }
+        let error = errno
 
         if count > 0 {
-            onReceive?(buffer[..<count])
-        } else if count == 0 || (errno != EAGAIN && errno != EINTR) {
-            let reason = count == 0 ? "closed by QEMU" : String(cString: strerror(errno))
+            if !discardsOutput {
+                onReceive?(buffer[..<count])
+            }
+            return
+        }
+        guard count == 0 || (error != EAGAIN && error != EINTR) else { return }
+
+        // A closed socket stays readable, so stop watching it before this is called again.
+        source.cancel()
+
+        let reason = count == 0 ? "closed by QEMU" : String(cString: strerror(error))
+        DispatchQueue.main.async { [weak self, name] in
+            guard let self, self.connection === connection else { return }
             Log.network.warn("\(name): connection lost (\(reason)); reconnecting")
             disconnect()
 

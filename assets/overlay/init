@@ -153,7 +153,12 @@ chmod 700 /var/tcti-rootfs/rw-ios/userroot/root
 #                    aside rather than deleted, under a name no earlier copy
 #                    has, and said so at the next login, since an edit of it
 #                    stops working. A whiteout, which is what deleting the
-#                    file leaves, is lifted.
+#                    file leaves, is lifted. A copy that does start them but
+#                    has lines from before Kernel Log, exactly as the image
+#                    had them, has those brought up to date: the login on
+#                    ttyS0, which lacked the TERM and size tctish-login gives
+#                    it, and services on the console, which is ttyS0 now and
+#                    whose settings init resets each time it starts one.
 #
 # And once per disk, so that someone who installs dropbear again on purpose
 # keeps it:
@@ -193,6 +198,14 @@ elif [ -f "$INITTAB" ] && ! { grep -q '^[^#]*tctish-login' "$INITTAB" &&
 		echo
 		rm -f /etc/profile.d/tctish-inittab-notice.sh
 	EOF
+elif [ -f "$INITTAB" ] && grep -qxE 'ttyS0::respawn:/bin/busybox login -f root|::respawn:/usr/bin/tctish-(powerbtn|agent)|::respawn:/sbin/syslogd -n -S -s 12 -b 8' "$INITTAB"; then
+	sed -i \
+		-e 's|^ttyS0::respawn:/bin/busybox login -f root$|ttyS0::respawn:/usr/bin/tctish-login|' \
+		-e 's|^::respawn:/usr/bin/tctish-powerbtn$|kmsg::respawn:/usr/bin/tctish-powerbtn|' \
+		-e 's|^::respawn:/usr/bin/tctish-agent$|kmsg::respawn:/usr/bin/tctish-agent|' \
+		-e 's|^::respawn:/sbin/syslogd -n -S -s 12 -b 8$|kmsg::respawn:/sbin/syslogd -n -S -s 12 -b 8|' \
+		"$INITTAB"
+	echo "tctish: brought /etc/inittab's lines from before Kernel Log up to date" >/dev/kmsg
 fi
 
 CONSOLE_STAMP=/var/tcti-rootfs/rw-ios/.tctish-ssh-removed

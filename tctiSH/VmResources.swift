@@ -626,6 +626,9 @@ enum AppSetting: String {
     case scrollback = "scrollback"
     case ttys = "ttys"
     case stepThroughSystemTTYs = "step_through_system_ttys"
+    case showKernelLog = "show_kernel_log"
+    case showVmManagement = "show_vm_management"
+    case ttyDefaultNames = "tty_default_names"
 
     var string: String {
         UserDefaults.standard.string(forKey: rawValue) ?? ""
@@ -651,6 +654,10 @@ enum AppSetting: String {
         UserDefaults.standard.data(forKey: rawValue)
     }
 
+    var stringsByKey: [String: String] {
+        UserDefaults.standard.dictionary(forKey: rawValue) as? [String: String] ?? [:]
+    }
+
     func set(_ value: String) {
         UserDefaults.standard.set(value, forKey: rawValue)
     }
@@ -672,6 +679,10 @@ enum AppSetting: String {
     }
 
     func set(_ value: Data) {
+        UserDefaults.standard.set(value, forKey: rawValue)
+    }
+
+    func set(_ value: [String: String]) {
         UserDefaults.standard.set(value, forKey: rawValue)
     }
 

@@ -45,6 +45,10 @@ final class StatusPresenter {
     }
 
     private weak var parent: UIView?
+
+    /// A view in the parent that a long pill stops short of, such as a button
+    /// at the same height.
+    weak var keepsClearOf: UIView?
     private let backdrop: UIColor
 
     /// The pills on screen, top to bottom, in the order they were added.
@@ -75,7 +79,8 @@ final class StatusPresenter {
                 in: parent,
                 title: item.message,
                 over: backdrop,
-                topOffset: offset(forRow: pills.count))
+                topOffset: offset(forRow: pills.count),
+                clearOf: keepsClearOf)
             pill.setState(item.state, animated: false)
             pill.tint = item.tint ?? .label
             pill.onTap = item.onTap

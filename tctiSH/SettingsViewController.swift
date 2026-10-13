@@ -34,6 +34,10 @@ private struct EditableValue {
     var text: String
     var placeholder: String
 
+    /// Capitalizes for a name a person reads; left alone for a machine name,
+    /// such as a disk file.
+    var capitalization: UITextAutocapitalizationType = .none
+
     /// Called on every keystroke, so the setting is never left unsaved.
     var commit: (String) -> Void
 }
@@ -439,10 +443,10 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
         field.clearButtonMode = .whileEditing
         field.returnKeyType = .done
 
-        // These are machine names -- a disk file and a snapshot tag -- so the keyboard should not
-        // be trying to be helpful about them.
+        // Mostly machine names -- a disk file and a snapshot tag -- so the keyboard should not be
+        // trying to be helpful about them.
         field.autocorrectionType = .no
-        field.autocapitalizationType = .none
+        field.autocapitalizationType = editable.capitalization
         field.spellCheckingType = .no
 
         // Sized by its frame and its intrinsic width, *not* by a constraint. Cell accessories
@@ -1092,6 +1096,14 @@ final class SettingsViewController: SettingsListViewController,
                         accessory: .disclosure,
                         select: { [weak self] in self?.push(StorageSettingsViewController()) }),
                     SettingsRow(
+                        id: "terminals",
+                        title: "Terminals",
+                        symbol: "terminal",
+                        accessory: .disclosure,
+                        select: { [weak self] in
+                            self?.push(TerminalsSettingsViewController())
+                        }),
+                    SettingsRow(
                         id: "keyboard",
                         title: "Keyboard",
                         symbol: "keyboard",
@@ -1528,6 +1540,133 @@ private final class StorageSettingsViewController: SettingsListViewController {
     }
 }
 
+// MARK: - Terminals
+
+/// The TTYs: their defaults, and which of the system TTYs the switcher shows.
+private final class TerminalsSettingsViewController: SettingsListViewController {
+
+    fileprivate override var isPage: Bool { true }
+
+    /// The scrollback lengths offered, in standard 80-column lines.
+    private static let scrollbacks = [500, 1000, 2000, 5000, 10000]
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        title = "Terminals"
+        navigationItem.largeTitleDisplayMode = .never
+    }
+
+    fileprivate override func buildSections() -> [SettingsSection] {
+        let named = AppSetting.ttyDefaultNames.stringsByKey.count
+        let anyShown = AppSetting.showKernelLog.bool || AppSetting.showVmManagement.bool
+
+        return [
+            SettingsSection(
+                header: "Defaults",
+                footer:
+                    "For every TTY. The TTY menu in the switcher allows changing these for a specific TTY.",
+                rows: [
+                    SettingsRow(
+                        id: "scrollback",
+                        title: "Scrollback",
+                        detail: "\(AppSetting.scrollback.integer.formatted()) lines",
+                        symbol: "scroll",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.pushScrollback() }),
+                    SettingsRow(
+                        id: "default-names",
+                        title: "Names",
+                        detail: named == 0 ? "None" : "\(named)",
+                        symbol: "character.cursor.ibeam",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.push(TTYNamesViewController()) }),
+                ]),
+
+            SettingsSection(
+                header: "System TTYs",
+                footer:
+                    "Kernel Log streams the kernel log and also provides a recovery login when needed. VM Management is QEMU's monitor. Both run regardless of visibility. Closing the last TTY while both are hidden opens a new one.\n\nSwiping across the TTYs button, or pressing ⌘⇧[ and ⌘⇧], moves through open TTYs. The system TTYs shown can be included.",
+                rows: [
+                    SettingsRow(
+                        id: "show-kernel-log",
+                        title: "Show Kernel Log",
+                        symbol: "text.alignleft",
+                        toggle: ToggleValue(
+                            isOn: AppSetting.showKernelLog.bool,
+                            commit: { [weak self] in
+                                TTYs.shared.setShown(.kernelLog, $0)
+                                self?.reload()
+                            })),
+                    SettingsRow(
+                        id: "show-vm-management",
+                        title: "Show VM Management",
+                        symbol: "slider.horizontal.3",
+                        toggle: ToggleValue(
+                            isOn: AppSetting.showVmManagement.bool,
+                            commit: { [weak self] in
+                                TTYs.shared.setShown(.vmManagement, $0)
+                                self?.reload()
+                            })),
+                    SettingsRow(
+                        id: "step-through-system-ttys",
+                        title: "Include When Switching",
+                        symbol: "arrow.left.arrow.right",
+                        toggle: ToggleValue(
+                            isOn: AppSetting.stepThroughSystemTTYs.bool,
+                            isEnabled: anyShown,
+                            commit: { AppSetting.stepThroughSystemTTYs.set($0) })),
+                ]),
+        ]
+    }
+
+    private func pushScrollback() {
+        push(
+            OptionListViewController(
+                title: "Scrollback",
+                footer:
+                    "How much each TTY keeps once it has scrolled off the screen. Every 80 columns is counted as a line if the line is longer than that.",
+                options: Self.scrollbacks.map {
+                    SettingsOption(title: "\($0.formatted()) lines", value: $0)
+                },
+                selected: { AppSetting.scrollback.integer },
+                choose: { AppSetting.scrollback.set($0) }))
+    }
+}
+
+/// The names that TTYs on each console go by until they are renamed.
+private final class TTYNamesViewController: SettingsListViewController {
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        title = "Names"
+        navigationItem.largeTitleDisplayMode = .never
+    }
+
+    fileprivate override func buildSections() -> [SettingsSection] {
+        let names = AppSetting.ttyDefaultNames.stringsByKey
+
+        return [
+            SettingsSection(
+                header: nil,
+                footer:
+                    "What a TTY is called until it is renamed. Left empty, a TTY is called by its console's name.",
+                rows: (0..<TTY.userLimit).map { number in
+                    let device = "hvc\(number)"
+                    return SettingsRow(
+                        id: device,
+                        title: device,
+                        editable: EditableValue(
+                            text: names[device] ?? "",
+                            placeholder: device,
+                            capitalization: .words,
+                            commit: { TTYs.shared.setDefaultName($0, ofConsole: device) }))
+                })
+        ]
+    }
+}
+
 // MARK: - Keyboard
 
 /// The key bar above the software keyboard.
@@ -1589,9 +1728,6 @@ private final class AppearanceSettingsViewController: SettingsListViewController
 
     private static let fontSizes = [8, 10, 12, 14, 16, 18, 20, 22, 24, 28, 30]
 
-    /// The scrollback lengths offered, in standard 80-column lines.
-    private static let scrollbacks = [500, 1000, 2000, 5000, 10000]
-
     override func viewDidLoad() {
         super.viewDidLoad()
 
@@ -1637,7 +1773,7 @@ private final class AppearanceSettingsViewController: SettingsListViewController
             SettingsSection(
                 header: "Terminal",
                 footer:
-                    "The defaults for every TTY. The TTY menu in the switcher allows overriding them.",
+                    "The default for every TTY. The TTY menu in the switcher allows overriding it.",
                 rows: [
                     SettingsRow(
                         id: "font-size",
@@ -1645,28 +1781,7 @@ private final class AppearanceSettingsViewController: SettingsListViewController
                         detail: "\(AppSetting.fontSize.integer)",
                         symbol: "textformat.size",
                         accessory: .disclosure,
-                        select: { [weak self] in self?.pushFontSize() }),
-                    SettingsRow(
-                        id: "scrollback",
-                        title: "Scrollback",
-                        detail: "\(AppSetting.scrollback.integer.formatted()) lines",
-                        symbol: "scroll",
-                        accessory: .disclosure,
-                        select: { [weak self] in self?.pushScrollback() }),
-                ]),
-
-            SettingsSection(
-                header: "Switching TTYs",
-                footer:
-                    "Swiping across the TTYs button, or pressing ⌘⇧[ and ⌘⇧], moves through open TTYS. The locked TTYs can be included if wished.",
-                rows: [
-                    SettingsRow(
-                        id: "step-through-system-ttys",
-                        title: "Include Kernel Log and VM Management",
-                        symbol: "lock",
-                        toggle: ToggleValue(
-                            isOn: AppSetting.stepThroughSystemTTYs.bool,
-                            commit: { AppSetting.stepThroughSystemTTYs.set($0) }))
+                        select: { [weak self] in self?.pushFontSize() })
                 ]),
         ]
     }
@@ -1679,19 +1794,6 @@ private final class AppearanceSettingsViewController: SettingsListViewController
                 options: Self.fontSizes.map { SettingsOption(title: "\($0)", value: $0) },
                 selected: { AppSetting.fontSize.integer },
                 choose: { AppSetting.fontSize.set($0) }))
-    }
-
-    private func pushScrollback() {
-        push(
-            OptionListViewController(
-                title: "Scrollback",
-                footer:
-                    "How much each TTY keeps once it has scrolled off the screen. Every 80 columns is counted as a line if the line is longer than that.",
-                options: Self.scrollbacks.map {
-                    SettingsOption(title: "\($0.formatted()) lines", value: $0)
-                },
-                selected: { AppSetting.scrollback.integer },
-                choose: { AppSetting.scrollback.set($0) }))
     }
 }
 

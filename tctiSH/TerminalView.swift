@@ -202,6 +202,16 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     /// Called when the far end rings the bell.
     var onBell: (() -> Void)?
 
+    /// Called when something is typed or pasted into the terminal. Not called
+    /// for what the terminal answers by itself, such as a shell's question
+    /// about where the cursor is.
+    var onTyping: (() -> Void)?
+
+    /// Set while SwiftTerm answers by itself, as it does to a question about
+    /// where the cursor is. The answer goes through `send(source:data:)` the
+    /// same as typing does.
+    private var answering = false
+
     /// Feeds bytes from the transport into the terminal.
     ///
     /// The bytes are fed in 1 KB chunks, so that a large burst is parsed a
@@ -213,6 +223,10 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
             onOutput?()
         }
 
+        let anchor = scrolledTo()
+
+        // SwiftTerm scrolls the view as it takes the output in, which is not the user scrolling.
+        moving = true
         let blocksize = 1024
         var next = bytes.startIndex
         while next < bytes.endIndex {
@@ -220,6 +234,159 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
             feed(byteArray: bytes[next..<end])
             next = end
         }
+        moving = false
+
+        if let anchor {
+            hold(at: anchor)
+        }
+        // The output may have cleared the screen or the scrollback, leaving nothing to hold on to.
+        isFollowing = swiftTermFollows
+    }
+
+    // MARK: Following new output
+
+    /// Posted when a terminal starts or stops following new output, with the
+    /// terminal as the object.
+    static let followingDidChange = Notification.Name("io.ara.tctish.terminalFollowingDidChange")
+
+    /// Whether new output scrolls the terminal to show it. Cleared when the
+    /// user scrolls up from the bottom, and set again when they scroll back
+    /// down to it, type, or `follow()` is called. Kept in step with SwiftTerm
+    /// when something else moves the view, such as the find bar.
+    ///
+    /// SwiftTerm stops following only while a finger is on the screen, which
+    /// leaves out a trackpad, a mouse wheel and the momentum of a flick. So
+    /// once such a scroll comes to rest, SwiftTerm is told where it ended, and
+    /// while this is clear the terminal is put back where it was after each
+    /// piece of output.
+    private(set) var isFollowing = true {
+        didSet {
+            guard isFollowing != oldValue else { return }
+            NotificationCenter.default.post(name: Self.followingDidChange, object: self)
+        }
+    }
+
+    /// Set while output or this class moves the view, so that it isn't taken
+    /// for the user scrolling.
+    private var moving = false
+
+    /// Tells SwiftTerm where a scroll it didn't follow came to rest; see
+    /// `settle()`.
+    private var settling: DispatchWorkItem?
+
+    public override var contentOffset: CGPoint {
+        didSet { noteScroll() }
+    }
+
+    /// Scrolls to the bottom, and follows new output from there.
+    func follow() {
+        settling?.cancel()
+        settling = nil
+        isFollowing = true
+
+        moving = true
+        scrollTo(row: Int.max)
+        moving = false
+    }
+
+    /// The height of a row, from the size SwiftTerm would like the terminal to
+    /// be.
+    private var rowHeight: CGFloat {
+        let rows = getTerminal().rows
+        return rows > 0 ? getOptimalFrameSize().height / CGFloat(rows) : 0
+    }
+
+    /// The row at the top of the screen, rounded as SwiftTerm rounds it: a
+    /// pixel up, so that floating-point error can't make it the row above.
+    private var topRow: Int {
+        let pixel = 1 / max(traitCollection.displayScale, 1)
+        return Int(((contentOffset.y + pixel) / rowHeight).rounded(.down))
+    }
+
+    private var isAtBottom: Bool {
+        let bottom = max(0, contentSize.height - bounds.height + adjustedContentInset.bottom)
+        return contentOffset.y >= bottom - rowHeight / 2
+    }
+
+    /// Whether SwiftTerm is following new output: the screen can't scroll, or
+    /// it shows the bottom.
+    private var swiftTermFollows: Bool {
+        getTerminal().isCurrentBufferAlternate || !canScroll || scrollPosition >= 1
+    }
+
+    private var userIsScrolling: Bool {
+        let state = panGestureRecognizer.state
+        return state == .began || state == .changed || isDecelerating
+    }
+
+    /// Follows or stops following as the view moves. The user scrolls with the
+    /// pan gesture (a finger, a trackpad or a mouse wheel) or a flick's
+    /// momentum. Anything else goes through SwiftTerm, which knows where the
+    /// view is by then: the find bar, a selection dragged past the edge, or
+    /// SwiftTerm itself.
+    private func noteScroll() {
+        guard !moving, rowHeight > 0 else { return }
+        guard userIsScrolling else {
+            if settling == nil {
+                isFollowing = swiftTermFollows
+            }
+            return
+        }
+
+        isFollowing = isAtBottom
+        if !isFollowing, !isTracking {
+            settleSoon()
+        }
+    }
+
+    private func settleSoon() {
+        settling?.cancel()
+        let settling = DispatchWorkItem { [weak self] in self?.settle() }
+        self.settling = settling
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: settling)
+    }
+
+    /// Once a scroll that SwiftTerm didn't follow has come to rest, tells it
+    /// the row now at the top, so that it stays there. SwiftTerm keeps to whole
+    /// rows, so the view moves to the nearest.
+    private func settle() {
+        settling = nil
+        guard !userIsScrolling else {
+            settleSoon()
+            return
+        }
+        guard !isFollowing, rowHeight > 0 else { return }
+
+        moving = true
+        scrollTo(row: Int((contentOffset.y / rowHeight).rounded()), notifyAccessibility: false)
+        moving = false
+        isFollowing = swiftTermFollows
+    }
+
+    /// The row at the top of the screen, counted from the first line ever
+    /// written so that it stays put as scrollback is trimmed, or nil if the
+    /// terminal is following. A program using the alternate screen, as a
+    /// full-screen one does, has no scrollback, so the terminal follows it.
+    private func scrolledTo() -> Int? {
+        let terminal = getTerminal()
+        if terminal.isCurrentBufferAlternate {
+            isFollowing = true
+        }
+        guard !isFollowing, rowHeight > 0 else { return nil }
+        return topRow + terminal.buffer.totalLinesTrimmed
+    }
+
+    /// Puts the terminal back with `anchor`, from `scrolledTo()`, at the top of
+    /// the screen, if output moved it.
+    private func hold(at anchor: Int) {
+        let terminal = getTerminal()
+        guard !terminal.isCurrentBufferAlternate, rowHeight > 0 else { return }
+        let row = max(0, anchor - terminal.buffer.totalLinesTrimmed)
+        guard terminal.buffer.yDisp != row || topRow != row else { return }
+
+        moving = true
+        scrollTo(row: row, notifyAccessibility: false)
+        moving = false
     }
 
     /// Callback notified each time a setting is changed.
@@ -498,7 +665,22 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
 
     /// Sends what was typed to the far end, through the transport.
     public func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        if !answering {
+            onTyping?()
+            // Typing goes back to the bottom, to show what is typed and what it answers.
+            if !isFollowing {
+                follow()
+            }
+        }
         transport?.send(data)
+    }
+
+    /// Sends what the terminal answers by itself, such as a report of where the
+    /// cursor is, which isn't typing.
+    public override func send(source: Terminal, data: ArraySlice<UInt8>) {
+        answering = true
+        defer { answering = false }
+        super.send(source: source, data: data)
     }
 
     /// Callback that occurs when we receive OSC 7, which indicates the current

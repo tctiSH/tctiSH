@@ -10,10 +10,11 @@ import UIKit
 
 /// Shows every TTY at once, in the way Safari shows its tabs.
 ///
-/// The locked system TTYs and any pinned ones are pills along the top; the rest
-/// are cards, each with a regularly refreshed picture of its screen. Tapping a
-/// TTY selects it and closes the switcher. Long-pressing one opens its menu,
-/// and dragging a user TTY reorders it within its section.
+/// The locked system TTYs that Settings shows and any pinned TTYs are pills
+/// along the top; the rest are cards, each with a regularly refreshed picture
+/// of its screen. Tapping a TTY selects it and closes the switcher.
+/// Long-pressing one opens its menu, and dragging a user TTY reorders it within
+/// its section.
 ///
 /// The main view controller adds the switcher as a child laid over the
 /// terminal, so that the terminal stays in place underneath and keeps updating.
@@ -599,7 +600,7 @@ final class TTYSwitcherViewController: UIViewController {
         if query.isEmpty {
             snapshot.appendSections([.pinned, .cards])
             snapshot.appendItems(
-                (store.system + store.pinned).map { .pill($0.id) }, toSection: .pinned)
+                (store.shownSystem + store.pinned).map { .pill($0.id) }, toSection: .pinned)
             snapshot.appendItems(store.cards.map { .card($0.id) }, toSection: .cards)
         } else {
             snapshot.appendSections([.results])
@@ -869,9 +870,9 @@ final class TTYSwitcherViewController: UIViewController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: search)
     }
 
-    /// Finds the user TTYs whose name, default name or scrollback contains the
-    /// query, ignoring case, and shows them as results. An empty query shows
-    /// the pills and cards again.
+    /// Finds the user TTYs whose name, default name, console or scrollback
+    /// contains the query, ignoring case, and shows them as results. An empty
+    /// query shows the pills and cards again.
     private func runSearch() {
         pendingSearch = nil
         query = (searchField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -883,6 +884,7 @@ final class TTYSwitcherViewController: UIViewController {
                 let named =
                     tty.name.localizedCaseInsensitiveContains(query)
                     || tty.defaultName.localizedCaseInsensitiveContains(query)
+                    || tty.device?.localizedCaseInsensitiveContains(query) == true
                 if named || match.count > 0 {
                     matches.append((tty.id, match))
                 }
@@ -1128,7 +1130,7 @@ extension TTYSwitcherViewController: UICollectionViewDragDelegate, UICollectionV
     }
 
     private func firstMovable(inSection index: Int) -> Int {
-        dataSource.sectionIdentifier(for: index) == .pinned ? store.system.count : 0
+        dataSource.sectionIdentifier(for: index) == .pinned ? store.shownSystem.count : 0
     }
 }
 

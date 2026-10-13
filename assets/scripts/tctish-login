@@ -7,8 +7,12 @@
 # carry on through suspends and snapshots, and are there when the app comes
 # back. Exiting the shell ends the session, and init starts a new one.
 #
-# The size of the tty is not set here. The app sends it through QEMU
+# On hvc0 the size of the tty is not set here. The app sends it through QEMU
 # (console_resize), and Linux gives it to the tty every time the tty is opened.
+#
+# The serial port, ttyS0, has no way to be told, and starts at 0x0, which
+# programs take badly (busybox stty calls it "Not a tty"). It gets 80x24 until
+# someone sets it with `stty rows R cols C`, which the app suggests.
 #
 
 # The app's terminal speaks xterm's sequences, and a console has no way to say
@@ -21,5 +25,9 @@ export TERM=xterm-256color
 # have Linux send the terminal a Ctrl-S of its own. And have backspace take
 # back a whole character, not one byte of it.
 stty -ixon -ixoff iutf8
+
+case "$(tty)" in
+/dev/ttyS*) [ -n "$(stty size 2>/dev/null)" ] || stty rows 24 cols 80 ;;
+esac
 
 exec /bin/busybox login -f root

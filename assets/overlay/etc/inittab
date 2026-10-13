@@ -10,18 +10,27 @@
 # and a steady trickle of writes to flash for nothing.
 #
 # A getty belongs beside the device that backs it. Add one when the port exists.
-ttyS0::respawn:/bin/busybox login -f root
+#
+# The kernel's log goes to this port too (console=ttyS0), and the app shows the
+# two together as Kernel Log: a way in for when hvc0 can't be reached.
+ttyS0::respawn:/usr/bin/tctish-login
 
 # The app's terminal: a login on the virtio console that it shows as hvc0.
 hvc0::respawn:/usr/bin/tctish-login
 
+# The services below run on /dev/kmsg, so what they print to stderr is a line
+# in the kernel's log. Not on the console, which is ttyS0 (console=ttyS0): init
+# resets a process's tty to its defaults each time it starts one, and on the
+# console that would undo tctish-login's settings for the login on ttyS0,
+# flow control and all, whenever one of these started or came back.
+
 # Shut down cleanly when the host asks. QEMU's `system_powerdown` asserts the
 # ACPI power button; the kernel turns that into an input event and this is what
 # listens for it. Without it the request is received and ignored.
-::respawn:/usr/bin/tctish-powerbtn
+kmsg::respawn:/usr/bin/tctish-powerbtn
 
 # Answer the app, which asks whether Linux is up. See tctish-agent.
-::respawn:/usr/bin/tctish-agent
+kmsg::respawn:/usr/bin/tctish-agent
 
-::respawn:/sbin/syslogd -n -S -s 12 -b 8
+kmsg::respawn:/sbin/syslogd -n -S -s 12 -b 8
 

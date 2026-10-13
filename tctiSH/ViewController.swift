@@ -31,6 +31,10 @@ class ViewController: UIViewController {
     /// Shows system status: how we're running and what's happening alongside.
     private var status: StatusPresenter?
 
+    /// Whether the pill about ttyS0's size is up, and so follows the
+    /// terminal's.
+    private var serialSizeShown = false
+
     /// The keys above the keyboard. Held here because the terminal lets go of
     /// it while a hardware keyboard has it hidden.
     private(set) var keyBar: KeyBar?
@@ -85,6 +89,12 @@ class ViewController: UIViewController {
     /// The switcher button that floats over the terminal while the key bar is
     /// off screen.
     private let floatingSwitcher = FloatingSwitcher()
+
+    /// Goes back to the newest output in a terminal scrolled up from it.
+    private let followButton = FollowButton()
+
+    /// Whether the follow button is shown or fading in.
+    private var followButtonShown = false
 
     /// Whether the floating switcher button is shown or fading in.
     private var floatingSwitcherShown = false
@@ -162,12 +172,19 @@ class ViewController: UIViewController {
 
         currentTerminal.becomeFirstResponder()
 
-        // Connect to `hvc0`, whether or not that TTY is open, and ask whether Linux is up.
+        explainSerialSize()
+        guardMonitorCommands()
+
+        // Connect to `hvc0`, whether or not that TTY is open, and ask whether Linux is up. And to
+        // the serial port and the user's monitor, which say something as soon as QEMU starts.
         ConsoleTransport.shared.start()
+        ChardevTransport.kernelLog.start()
+        ChardevTransport.vmManagement.start()
         GuestAgent.shared.start()
 
         // All of these need a window, which is exactly why the launch path couldn't do them itself.
         status = StatusPresenter(over: view, backdrop: currentTerminal.nativeBackgroundColor)
+        status?.keepsClearOf = followButton
 
         // These stack rather than take turns, so both are on screen together. Order here is
         // stacking order: the JIT verdict on top, where it reads first and then leaves after a few
@@ -1529,10 +1546,141 @@ extension ViewController {
         floatingSwitcher.isHidden = true
         view.addSubview(floatingSwitcher)
 
+        followButton.alpha = 0
+        followButton.isHidden = true
+        followButton.onTap = { [weak self] in self?.terminal.follow() }
+        view.addSubview(followButton)
+
+        NotificationCenter.default.addObserver(
+            forName: TctiTermView.followingDidChange, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let self, note.object as? TctiTermView === terminal else { return }
+            updateFollowButton()
+        }
+
         NotificationCenter.default.addObserver(
             forName: TTYs.selectionDidChange, object: nil, queue: .main
         ) { [weak self] note in
-            self?.showSelected(replacing: note.object as? TTY)
+            guard let self else { return }
+            showSelected(replacing: note.object as? TTY)
+            updateFollowButton()
+            if serialSizeShown {
+                let t = terminal.getTerminal()
+                showSerialSize(cols: t.cols, rows: t.rows)
+            }
+        }
+    }
+
+    private static let serialSizeStatusKey = "serial-size"
+    private static let monitorGuardStatusKey = "monitor-guard"
+
+    /// The serial port has no way to be told the terminal's size, so the first
+    /// time something is typed into Kernel Log in each launch, say how to set
+    /// it by hand, for the size the terminal has. Kept, and kept up to date,
+    /// until it is swiped away, but shown only while Kernel Log is.
+    private func explainSerialSize() {
+        guard let view = TTYs.shared.system.first(where: { $0.kind == .kernelLog })?.view else {
+            return
+        }
+        view.onTyping = { [weak self, weak view] in
+            guard let self, let view else { return }
+            view.onTyping = nil
+
+            serialSizeShown = true
+            let t = view.getTerminal()
+            showSerialSize(cols: t.cols, rows: t.rows)
+        }
+        ChardevTransport.kernelLog.onResize = { [weak self] cols, rows in
+            guard let self, serialSizeShown else { return }
+            showSerialSize(cols: cols, rows: rows)
+        }
+    }
+
+    /// Shows the pill if Kernel Log is selected, and takes it away otherwise.
+    private func showSerialSize(cols: Int, rows: Int) {
+        guard TTYs.shared.selected.kind == .kernelLog else {
+            status?.dismiss(key: Self.serialSizeStatusKey)
+            return
+        }
+        status?.present(
+            .init(
+                key: Self.serialSizeStatusKey,
+                message: "Size ttyS0 by hand: stty rows \(rows) cols \(cols)",
+                state: .symbol("ruler"),
+                duration: nil,
+                animated: false,
+                onSwipeAway: { [weak self] in self?.serialSizeShown = false }))
+    }
+
+    /// Has VM Management ask before submitting a command that would end,
+    /// restart or rearrange the VM under the app; see `MonitorGuard`.
+    private func guardMonitorCommands() {
+        ChardevTransport.vmManagement.confirm = { [weak self] risk, answer in
+            guard let self else {
+                answer(false)
+                return
+            }
+            ask(about: risk, answer: answer)
+        }
+    }
+
+    /// Asks about a monitor command, from whatever is on top, and answers
+    /// exactly once. VM Management sends nothing until it has an answer, so one
+    /// that can't be asked is answered no, and said so.
+    private func ask(
+        about risk: MonitorGuard.Risk, answer: @escaping (Bool) -> Void, attempt: Int = 0
+    ) {
+        var presenter: UIViewController = self
+        while let next = presenter.presentedViewController {
+            presenter = next
+        }
+
+        // Not over something on its way out, or over another question, which is answered first.
+        if presenter.isBeingDismissed || presenter is UIAlertController {
+            askAgain(about: risk, answer: answer, attempt: attempt)
+            return
+        }
+
+        var answered = false
+        let reply = { (submit: Bool) in
+            guard !answered else { return }
+            answered = true
+            answer(submit)
+        }
+        let alert = UIAlertController(
+            title: risk.title, message: risk.message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in reply(false) })
+        alert.addAction(UIAlertAction(title: risk.action, style: .destructive) { _ in reply(true) })
+        presenter.present(alert, animated: true)
+
+        // A presentation UIKit refuses only logs, so look.
+        DispatchQueue.main.async { [weak self] in
+            guard alert.presentingViewController == nil, !answered else { return }
+            answered = true
+            self?.askAgain(about: risk, answer: answer, attempt: attempt)
+        }
+    }
+
+    private func askAgain(
+        about risk: MonitorGuard.Risk, answer: @escaping (Bool) -> Void, attempt: Int
+    ) {
+        guard attempt < 20 else {
+            Log.ui.warn("couldn't ask about a monitor command (\(risk.title)); not sending it")
+            answer(false)
+            status?.present(
+                .init(
+                    key: Self.monitorGuardStatusKey,
+                    message: "Not sent: tctiSH couldn't ask first",
+                    state: .symbol("exclamationmark.triangle"),
+                    duration: 4))
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self else {
+                answer(false)
+                return
+            }
+            ask(about: risk, answer: answer, attempt: attempt + 1)
         }
     }
 
@@ -1792,6 +1940,10 @@ extension ViewController {
         floatingSwitcher.bounds.size = frame.size
         floatingSwitcher.center = CGPoint(x: frame.midX, y: frame.midY)
 
+        let follow = followButtonFrame()
+        followButton.bounds.size = follow.size
+        followButton.center = CGPoint(x: follow.midX, y: follow.midY)
+
         guard !floatingSwitcherPending else { return }
         floatingSwitcherPending = true
         DispatchQueue.main.async { [weak self] in
@@ -1803,6 +1955,8 @@ extension ViewController {
     /// Shows the floating button while the key bar is off screen and neither
     /// the switcher nor the find bar is open, and hides it otherwise.
     private func updateFloatingSwitcher() {
+        updateFollowButton()
+
         let show = switcher == nil && findBar == nil && keyBar?.window == nil
         guard show != floatingSwitcherShown else { return }
         floatingSwitcherShown = show
@@ -1822,6 +1976,44 @@ extension ViewController {
         } completion: { _ in
             if !self.floatingSwitcherShown {
                 self.floatingSwitcher.isHidden = true
+            }
+        }
+    }
+
+    // MARK: The follow button
+
+    /// The follow button's frame: at the top left of the terminal, or under the
+    /// find bar while that is open.
+    private func followButtonFrame() -> CGRect {
+        let terminal = TTYs.shared.terminalFrame
+        let size = FollowButton.size
+        let top = terminal.minY + (findBar == nil ? 0 : FindBar.height) + 8
+        return CGRect(x: terminal.minX + 8, y: top, width: size, height: size)
+    }
+
+    /// Shows the follow button while the selected terminal has been scrolled up
+    /// from its newest output and the switcher is closed, and hides it
+    /// otherwise.
+    private func updateFollowButton() {
+        let show = switcher == nil && !terminal.isFollowing
+        guard show != followButtonShown else { return }
+        followButtonShown = show
+
+        // Brought forward only to show it: on the way out, it fades under the switcher.
+        if show {
+            view.bringSubviewToFront(followButton)
+            followButton.isHidden = false
+            followButton.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
+        }
+        UIView.animate(
+            withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0,
+            options: [.beginFromCurrentState, .allowUserInteraction]
+        ) {
+            self.followButton.alpha = show ? 1 : 0
+            self.followButton.transform = show ? .identity : CGAffineTransform(scaleX: 0.6, y: 0.6)
+        } completion: { _ in
+            if !self.followButtonShown {
+                self.followButton.isHidden = true
             }
         }
     }

@@ -74,6 +74,26 @@ public class QEMUInterface {
         let fromResumeImage = bootImageName != nil && bootImageName == getResumeImage()
         DispatchQueue.main.async { self.bootedFromResumeImage = fromResumeImage }
 
+        // A snapshot booted in an earlier launch, so Kernel Log has nothing from before it.
+        if let bootImageName {
+            let from =
+                fromResumeImage
+                ? "Resuming a saved session."
+                : bootImageName == "instantboot"
+                    ? "Starting from the clean boot snapshot."
+                    : "Starting from the snapshot \(bootImageName)."
+            DispatchQueue.main.async {
+                ChardevTransport.kernelLog.note(
+                    "\(from) What the kernel said before then is in dmesg.")
+            }
+        }
+
+        // QEMU appends to the serial port's log, so the last launch's has to go first.
+        let serialLogPath = ChardevTransport.kernelLog.logPath!
+        if unlink(serialLogPath) != 0, errno != ENOENT {
+            Log.qemu.warn("couldn't remove the old serial log: \(String(cString: strerror(errno)))")
+        }
+
         // ... find where our QEMU binary is actually located ...
         let qemuImage = getAppropriateQemuFramework().path
 
@@ -109,9 +129,12 @@ public class QEMUInterface {
         run_background_qemu(
             qemuImage, kernelPath, initrdPath, bundlePrefix, diskPath, sharedFolder, bootImageName,
             memoryValue, monitorSocketPath, consoleSocketPath, Self.agentSocketPath,
-            AppDelegate.startsNative, AppDelegate.blessJitRegions,
+            ChardevTransport.kernelLog.socketPath, serialLogPath,
+            ChardevTransport.vmManagement.socketPath, AppDelegate.startsNative,
+            AppDelegate.blessJitRegions,
             UInt32(tbSize), UInt32(CodeCache.initialSize), UInt32(vcpus));
         Vcpus.launched(with: vcpus)
+        DispatchQueue.main.async { ChardevTransport.kernelLog.followLog() }
 
         // Mark what we booted with, so the next launch can tell whether the settings moved.
         VmMemory.recordBooted()
@@ -985,7 +1008,7 @@ public class QEMUInterface {
     }
 
     /// The snapshot tags this app writes by itself.
-    private static let ownedSnapshotTags = ["instant_resume_a", "instant_resume_b", "instantboot"]
+    static let ownedSnapshotTags = ["instant_resume_a", "instant_resume_b", "instantboot"]
 
     /// Clears up snapshots that describe a machine this build no longer makes.
     ///
@@ -1169,7 +1192,15 @@ public class QEMUInterface {
     /// Where QEMU listens for the app's connection to the guest agent.
     static let agentSocketPath = socketPath("agent")
 
+    /// Where QEMU keeps what a character device sends, by name. Beside the
+    /// sockets, and made afresh at every launch, as they are.
+    static func logPath(_ name: String) -> String {
+        URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("\(name).log").path
+    }
+
     /// Where QEMU listens for one of the app's connections to it, by name.
+    ///
+    /// The names in use are `monitor`, `agent`, `hvc0`, `ttyS0` and `hmp`.
     ///
     /// In the app's tmp folder, which the Files app doesn't show, rather than
     /// in Documents, which it does. A socket deleted there leaves QEMU unable
@@ -1180,7 +1211,7 @@ public class QEMUInterface {
     ///
     /// Names stay short. A Unix socket's path has to fit in 104 bytes with its
     /// terminating NUL, and on a device the folder's path alone is 89 of them.
-    private static func socketPath(_ name: String) -> String {
+    static func socketPath(_ name: String) -> String {
         let path = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("\(name).sock").path
 

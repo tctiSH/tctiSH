@@ -50,6 +50,8 @@ struct qemu_args {
     char *monitor_channel_args;
     char *console_channel_args;
     char *agent_channel_args;
+    char *serial_channel_args;
+    char *management_channel_args;
     char *boot_image_name;
     char *dll_name;
     char *memory_value;
@@ -78,6 +80,8 @@ static void free_qemu_args(struct qemu_args *args) {
     free(args->monitor_channel_args);
     free(args->console_channel_args);
     free(args->agent_channel_args);
+    free(args->serial_channel_args);
+    free(args->management_channel_args);
     free(args->memory_value);
     free(args->accel_args);
     free(args->smp_args);
@@ -401,12 +405,17 @@ static const char *qemu_disk_device(void) {
        is 2 MiB, and memory a workload leaves fragmented stays resident on the host even though    \
        the guest counts it free: after a build, about 220 MiB of it.                               \
                                                                                                    \
+       `console=ttyS0` puts the kernel's log on the serial port, which the app shows as Kernel     \
+       Log, and `earlyprintk` has it there from the first instruction: a virtio console only       \
+       exists once virtio is up, which is too late for a guest that dies early. The serial port    \
+       is the machine's one 8250, always there; only what it is connected to is passed separately. \
+                                                                                                   \
        `rcu_cpu_stall_suppress=1` because the guest's clock jumps, by design. Our QEMU catches     \
        the clock up after every stop and every snapshot load, so a guest that was away for an      \
        hour comes back an hour later, and RCU reads the jump as a CPU that stalled for an hour.    \
        KVM guests are told when they were paused; under TCG there is no way to tell them. */       \
     "-append", "tcti_disk=file page_reporting.page_reporting_order=2 "                             \
-               "rcupdate.rcu_cpu_stall_suppress=1",                                                \
+               "console=ttyS0 earlyprintk=serial,ttyS0 rcupdate.rcu_cpu_stall_suppress=1",         \
                                                                                                    \
     /* The CPU model: x86-64-v3 (AVX2, FMA, BMI2 and MOVBE on top of SSE4.2), which the software   \
        people want to run increasingly assumes. QEMU's default, qemu64, stops at SSE3.             \
@@ -516,6 +525,16 @@ static void *qemu_thread(void *raw_args) {
         "-chardev", args->console_channel_args,
         "-chardev", args->agent_channel_args,
 
+        // The serial port, ttyS0: the kernel's log, and a login for when hvc0 can't be reached.
+        // The app shows it as Kernel Log. The port is the machine's either way, otherwise
+        // connected to nothing, so this is a path rather than shape too.
+        "-chardev", args->serial_channel_args,
+        "-serial", "chardev:ttyS0-socket",
+
+        // A monitor of the user's, which the app shows as VM Management. Separate from the app's,
+        // so that what is typed there never lands in the middle of a command the app is running.
+        "-monitor", args->management_channel_args,
+
         // Use JIT if we have JIT hacks, and size the code cache if we were asked
         // to. Never migrated -- see CodeCache -- so deliberately not part of the
         // machine signature.
@@ -580,8 +599,10 @@ void run_background_qemu(const char *qemu_path, const char *kernel_path, const c
                          const char *shared_folder_path, const char *boot_image_name,
                          const char *memory_value, const char *monitor_socket_path,
                          const char *console_socket_path, const char *agent_socket_path,
-                         bool start_native, bool bless_jit_regions, unsigned int tb_size_mib,
-                         unsigned int chunk_mib, unsigned int vcpus) {
+                         const char *serial_socket_path, const char *serial_log_path,
+                         const char *management_socket_path, bool start_native,
+                         bool bless_jit_regions, unsigned int tb_size_mib, unsigned int chunk_mib,
+                         unsigned int vcpus) {
     pthread_t thread;
     pthread_attr_t qosAttribute;
 
@@ -632,6 +653,17 @@ void run_background_qemu(const char *qemu_path, const char *kernel_path, const c
     args->agent_channel_args = calloc(ARGUMENT_MAX, sizeof(char));
     snprintf(args->agent_channel_args, ARGUMENT_MAX,
              "socket,id=agent-socket,path=%s,server=on,wait=off", agent_socket_path);
+
+    // The serial port's and the user's monitor's, the same way. QEMU also keeps everything the
+    // serial port sends in a file, connected or not, which is where the app reads it from: what the
+    // kernel says before the app has connected is kept. Appended, so the app can trim it.
+    args->serial_channel_args = calloc(ARGUMENT_MAX, sizeof(char));
+    snprintf(args->serial_channel_args, ARGUMENT_MAX,
+             "socket,id=ttyS0-socket,path=%s,server=on,wait=off,logfile=%s,logappend=on",
+             serial_socket_path, serial_log_path);
+    args->management_channel_args = calloc(ARGUMENT_MAX, sizeof(char));
+    snprintf(args->management_channel_args, ARGUMENT_MAX, "unix:%s,server=on,wait=off",
+             management_socket_path);
 
     // Create our accelerator argument.
     //

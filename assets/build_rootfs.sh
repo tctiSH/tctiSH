@@ -292,10 +292,11 @@ apply_overlay() {
     # governs what ships, not what the user can install afterwards.
     write_repositories "$root"
 
-    # init, /etc/inittab, /etc/tcti_motd, and the two profile.d scripts --
+    # init, /etc/inittab, /etc/tcti_motd, and the profile.d scripts --
     # shell_integration.sh sets the PS1 that reports the guest's cwd to the
     # app's terminal, and prints tcti_motd; mount_shared.sh mounts the 9p tag
-    # qemu_launcher.c passes as `shared`.
+    # qemu_launcher.c passes as `shared`; confirm_poweroff.sh asks before
+    # poweroff and halt, which leave the app without a VM.
     #
     # overlay/etc/motd is empty on purpose: Alpine ships a "Welcome to
     # Alpine!" text, and blanking it is what stops that printing over ours.

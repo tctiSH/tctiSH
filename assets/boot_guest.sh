@@ -102,8 +102,8 @@ it has to. Setting TCTISH_QEMU runs some other qemu-system-x86_64 instead.
 By default this terminal is hvc0, the virtio console the app shows, and its
 size follows this window's, through the monitor's console_resize, as the app's
 does. The kernel's log goes to assets/boot_guest.log. With --serial, this
-terminal is the serial console instead, kernel log and all, as it was before
-the app moved off SSH; hvc0 is then left unconnected.
+terminal is the serial console instead, kernel log and login together, as the
+app's Kernel Log shows it; hvc0 is then left unconnected.
 
 The guest agent's port is a socket in a temporary directory, named on startup.
 Ask it whether Linux is up with:  printf 'ping 1\n' | nc -U <socket>
@@ -270,10 +270,8 @@ main() {
     trap 'rm -rf "$AGENT_DIR"' EXIT
     argv+=(-chardev "socket,id=agent-socket,path=$AGENT_SOCKET,server=on,wait=off")
 
-    # console=ttyS0 is the one deliberate difference from the app, which leaves
-    # the kernel talking to nothing: here the log is worth keeping.
-    local cmdline="tcti_disk=file page_reporting.page_reporting_order=2 rcupdate.rcu_cpu_stall_suppress=1"
-    cmdline="$cmdline console=ttyS0"
+    local cmdline="tcti_disk=file page_reporting.page_reporting_order=2"
+    cmdline="$cmdline console=ttyS0 earlyprintk=serial,ttyS0 rcupdate.rcu_cpu_stall_suppress=1"
     if [ "$USE_SERIAL" -eq 1 ]; then
         argv+=(-nographic -chardev null,id=hvc0-socket)
     else
@@ -299,7 +297,7 @@ main() {
     fi
 
     note "kernel log: ${LOG#"$REPO"/}"
-    note "hvc0 follows; the guest logs in as root automatically. 'poweroff' to leave"
+    note "hvc0 follows; the guest logs in as root automatically. 'poweroff', then y, to leave"
     echo
 
     # In the background rather than exec'd, so that this script can pass on

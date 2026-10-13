@@ -1,6 +1,6 @@
 //
 //  GuestAgent.swift
-//  The app's side of tctish-agent, which says whether what arrivesLinux is up.
+//  The app's side of tctish-agent, which says whether Linux is up.
 //
 //  Copyright © 2026 Ara Adkins.
 //
