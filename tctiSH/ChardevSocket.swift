@@ -47,7 +47,7 @@ final class ChardevSocket {
     /// guest isn't reading.
     private(set) var unsentCount = 0
 
-    private var connection: Connection?
+    private var connection: SocketConnection?
     private var readSource: DispatchSourceRead?
     private var retryTimer: Timer?
     private var failedAttempts = 0
@@ -113,7 +113,7 @@ final class ChardevSocket {
 
     /// Makes one attempt to connect, and says whether it succeeded.
     private func connect() -> Bool {
-        let opened = Connection.open(path)
+        let opened = SocketConnection.open(path)
 
         guard case .connected(let connection) = opened else {
             failedAttempts += 1
@@ -147,7 +147,9 @@ final class ChardevSocket {
 
     /// Reads what has arrived on `connection`. Runs on `readQueue`, and so
     /// touches nothing but its arguments unless that is the main queue.
-    private func readAvailable(from connection: Connection, watchedBy source: DispatchSourceRead) {
+    private func readAvailable(
+        from connection: SocketConnection, watchedBy source: DispatchSourceRead
+    ) {
         var buffer = [UInt8](repeating: 0, count: Self.readSize)
         let count = buffer.withUnsafeMutableBytes { read(connection.fd, $0.baseAddress, $0.count) }
         let error = errno
@@ -181,8 +183,9 @@ final class ChardevSocket {
     }
 }
 
-/// An open socket, closed when nothing holds it any longer.
-private final class Connection {
+/// An open socket, closed when nothing holds it any longer. Non-blocking: read
+/// it once `poll` says there's something to read.
+final class SocketConnection {
     let fd: Int32
 
     private init(fd: Int32) {
@@ -194,7 +197,7 @@ private final class Connection {
     }
 
     enum Opened {
-        case connected(Connection)
+        case connected(SocketConnection)
 
         /// Failed, with an errno.
         case failed(Int32)
@@ -204,7 +207,7 @@ private final class Connection {
     static func open(_ path: String) -> Opened {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return .failed(errno) }
-        let connection = Connection(fd: fd)
+        let connection = SocketConnection(fd: fd)
 
         // A write to a socket QEMU has closed fails with EPIPE rather than killing the app.
         var on: Int32 = 1

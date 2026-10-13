@@ -13,16 +13,22 @@ import Atomics
 class AppDelegate: UIResponder, UIApplicationDelegate {
     var qemu: QEMUInterface?
     var configServer: ConfigServer?
-    var saving: Bool = false
+    var saving: Bool = false {
+        didSet { QEMUInterface.machineAway.store(machineIsAway, ordering: .relaxed) }
+    }
 
     /// The snapshot the machine is parked on, while parked: stopped, saved, and
     /// its RAM given back to iOS. Main thread only.
     ///
     /// See `handleEnteredBackground` and `unpark`.
-    private var parkedTag: String?
+    private var parkedTag: String? {
+        didSet { QEMUInterface.machineAway.store(machineIsAway, ordering: .relaxed) }
+    }
 
     /// Whether an `unpark` is running. Main thread only.
-    private var unparking = false
+    private var unparking = false {
+        didSet { QEMUInterface.machineAway.store(machineIsAway, ordering: .relaxed) }
+    }
 
     /// Whether the code cache was handed back while parked, and has to be
     /// prepared again before the machine may run. Main thread only.
@@ -123,6 +129,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             "code_cache_notifications": true,
             "park_in_background": false,
             "release_code_cache_in_background": false,
+            "file_cache_budget": GuestPreparation.defaultFileCacheBudget,
+            "shared_folder_write_back": true,
             "pinned_keys": BarKey.defaultPinned.map(\.rawValue),
             "hide_key_bar_with_hardware_keyboard": false,
             "arrow_repeat_delay": ArrowRepeat.defaultDelay,
@@ -158,9 +166,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         AppDelegate.snapshotEpochChanged = VmSnapshots.changedSinceLastBoot
         AppDelegate.isFirstBoot = qemu!.isFirstBoot()
 
-        // Listens on a socket and does not care whether the VM is up yet, so it stays here where
-        // the scene callbacks can rely on finding it.
-        configServer = ConfigServer(qemuInterface: qemu!, listenImmediately: true)
+        // Connects to its port once QEMU is listening, whether or not the VM is up yet, so it lives
+        // here, where the scene callbacks can rely on finding it.
+        configServer = ConfigServer(qemuInterface: qemu!)
 
         // Settings First holds the boot until settings is closed.
         NotificationCenter.default.addObserver(
@@ -387,8 +395,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // ever goes with the machine's memory: a machine that isn't parked is still running on it.
         let parking = AppSetting.parkInBackground.bool
         let releasingCode = parking && AppSetting.releaseCodeCacheInBackground.bool
+        let fileCacheBudget = AppSetting.fileCacheBudget.integer
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // Before the save, so that the guest's dirty data is on the disk the snapshot holds,
+            // and the cache it drops isn't in the snapshot at all.
+            GuestPreparation.prepareForSave(fileCacheBudget: fileCacheBudget) {
+                self?.away.load(ordering: .relaxed) ?? false
+            }
+
             let parked = self?.save(thenPark: parking, releasingCode: releasingCode)
 
             DispatchQueue.main.async {
@@ -685,12 +700,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func applicationProtectedDataWillBecomeUnavailable(_ application: UIApplication) {
         Log.ui.note("device locked; protected data is going away")
-        configServer?.stop()
     }
 
     func applicationProtectedDataDidBecomeAvailable(_ application: UIApplication) {
         Log.ui.note("device unlocked")
-        configServer?.listen()
     }
 
 }

@@ -15,7 +15,11 @@
 #
 # It stays coherent with changes made on the iOS side: a file's cached pages are kept from open to
 # close, and dropped at the next open if its version (QEMU's: mtime in seconds, and size) changed.
-# Writes still go straight to the host.
+#
+# With tctiSH's Write-Back Caching on, cache=mmap instead: the same, but writes are held and reach
+# the host in larger pieces by ordinary writeback. That's safe because the app has Linux write out
+# dirty data before each background save. tctictl asks the app which mode to use; without the app,
+# or with no answer within a few seconds, it's readahead, which writes straight through.
 if [ "$(id -u)" = 0 ]; then
 	(
 		# busybox's flock can't time out, so timeout runs it. The lock belongs to the open file,
@@ -24,7 +28,10 @@ if [ "$(id -u)" = 0 ]; then
 			echo "tctiSH: another login is still mounting /ios_host, so this one didn't wait."
 			exit
 		fi
-		grep -qs '^shared /ios_host 9p ' /proc/mounts ||
-			mount -t 9p -o trans=virtio,cache=readahead shared /ios_host -oversion=9p2000.L
+		grep -qs '^shared /ios_host 9p ' /proc/mounts && exit
+
+		cache="$(timeout 3 tctictl lowlevel share-cache 2>/dev/null)"
+		[ "$cache" = mmap ] || cache=readahead
+		mount -t 9p -o "trans=virtio,cache=$cache" shared /ios_host -oversion=9p2000.L
 	) 9>>/run/lock/tctish-share
 fi

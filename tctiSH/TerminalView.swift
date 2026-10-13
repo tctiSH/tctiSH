@@ -158,6 +158,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
 
     public override init(frame: CGRect) {
         super.init(frame: frame, font: UIFont(name: "Menlo-Regular", size: 14))
+        isMade = true
         self.terminalDelegate = self
 
         // Handle settings changes.
@@ -270,6 +271,11 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     /// for the user scrolling.
     private var moving = false
 
+    /// Whether SwiftTerm's initializer has finished. Until then there is no
+    /// terminal to ask for rows, yet UIKit can already move the view, from
+    /// `UIScrollView.init(frame:)`, which that initializer calls.
+    private var isMade = false
+
     /// Tells SwiftTerm where a scroll it didn't follow came to rest; see
     /// `settle()`.
     private var settling: DispatchWorkItem?
@@ -325,7 +331,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     /// view is by then: the find bar, a selection dragged past the edge, or
     /// SwiftTerm itself.
     private func noteScroll() {
-        guard !moving, rowHeight > 0 else { return }
+        guard isMade, !moving, rowHeight > 0 else { return }
         guard userIsScrolling else {
             if settling == nil {
                 isFollowing = swiftTermFollows

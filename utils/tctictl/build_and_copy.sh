@@ -3,14 +3,14 @@
 # Builds the utility, and copies the result into our ramdisk.
 #
 # `tctictl` is the guest-side configuration tool: it ships inside initrd.img at
-# ./bin/tctictl and talks to the app, so that things only the host can do -- a
+# ./usr/bin/tctictl and talks to the app, so that things only the host can do -- a
 # file picker, mounting an iOS folder -- can be asked for from inside the VM.
 #
 set -euo pipefail
 
 BASEDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ASSETS="$BASEDIR/../../assets"
-RAMDISK_BIN="$ASSETS/ramdisk/bin"
+RAMDISK_BIN="$ASSETS/ramdisk/usr/bin"
 
 TARGET="x86_64-unknown-linux-musl"
 

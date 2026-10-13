@@ -248,7 +248,7 @@ final class TTYSwitcherViewController: UIViewController {
         }
 
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) {
-            [weak self] collectionView, indexPath, item in
+            collectionView, indexPath, item in
             switch item {
             case .result(let id):
                 return collectionView.dequeueConfiguredReusableCell(

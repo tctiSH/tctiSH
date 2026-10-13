@@ -14,7 +14,7 @@ do
 
 	# Handle fake mounts.
 	-f )
-	  FAKE
+	  FAKE=1
 	  shift
 	  ;;
 	
@@ -44,17 +44,10 @@ if [ $# != 2 ]; then
 	exit -1
 fi
 
-# Perform the actual mount
+# Perform the actual mount: tctictl asks for the folder, shares it as /ios_host/$1, and binds that
+# at $2.
 if [ $FAKE == 1 ]; then
-	echo tctictl mount $1
+	echo tctictl mount --name "$1" "$2"
 else
-	tctictl mount $1
-fi
-
-
-# Perform the actual mount
-if [ $FAKE == 1 ]; then
-	echo mount --bind /ios_host/$1 $2
-else
-	 mount --bind /ios_host/$1 $2
+	tctictl mount --name "$1" "$2"
 fi

@@ -30,7 +30,6 @@
     // Submodules and vendored code. Reformatting any of these would either be
     // lost on the next update or turn a future rebase into a merge conflict.
     "third-party/**",
-    "Pods/**",
 
     // Guest-side build scripts and their notes; a world apart.
     "assets/**",
@@ -48,7 +47,6 @@
     "build-*/**",
     "sysroot-*/**",
     "Cargo.lock",
-    "Podfile.lock",
     "flake.lock",
 
     // Local-only working notes; never committed, so never reformatted.

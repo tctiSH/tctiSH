@@ -38,13 +38,15 @@ MINIROOTFS_SHA256="5acac12c425a0817c1b6a79bdd5df4c73756fc8dc268eab32f8ba830872b8
 # this is the world list, not the install list.
 #
 #   bash            the login shell; /etc/inittab and the guest scripts want it
-#   netcat-openbsd  tctish-mount pipes QMP commands through it
 #   e2fsprogs       init formats the disk on first boot
+#   tzdata          tctish-agent points /etc/localtime at the device's zone
+#   merge-usr       merges /bin, /sbin and /lib into /usr, in the image at build
+#                   time and on each disk at boot; see merge_usr()
 #
 # e2fsprogs used to be `apk add`ed by init at first boot, against a repository
 # that has since gone EOL. It is baked in now, which takes a network round trip
 # off the critical boot path.
-WORLD=(bash netcat-openbsd e2fsprogs)
+WORLD=(bash e2fsprogs tzdata merge-usr)
 
 LOCK="$ASSETS/rootfs.lock"
 OUT="$ASSETS/initrd.img"
@@ -279,6 +281,25 @@ do_lock() {
 # Overlay
 # ---------------------------------------------------------------------------------------------
 
+# Merges /bin, /sbin and /lib into /usr, leaving each a link to its /usr
+# counterpart, as Alpine's merge-usr does to a running system. The image must
+# agree with the disk, which is the overlay's upper layer: a link on the disk
+# hides a directory in the image, and a directory on the disk hides the
+# image's link, with everything under either. init merges each disk the same
+# way at boot. sbin stays separate from bin (no --bins), merge-usr's default.
+merge_usr() {
+    local root="$1" dir
+
+    note "merging /usr"
+    chroot "$root" /usr/bin/merge-usr >"$root/../merge-usr.log" 2>&1 || {
+        cat "$root/../merge-usr.log" >&2
+        die "merge-usr failed"
+    }
+    for dir in bin sbin lib; do
+        [ -L "$root/$dir" ] || die "/$dir is still a directory after merge-usr"
+    done
+}
+
 # Everything tctiSH adds on top of stock Alpine. Kept as real files in the repo
 # rather than as edits to an unpacked image, so a guest change is a reviewable
 # diff rather than an opaque one inside a binary.
@@ -307,7 +328,8 @@ apply_overlay() {
     # /usr/bin, differing by one stray space; one file and a symlink instead.
     install -d -m 0755 "$root/usr/bin"
     install -m 0755 "$ASSETS"/scripts/* "$root/usr/bin/"
-    ln -sf ../usr/bin/mount.ios "$root/sbin/mount.ios"
+    # Absolute: /sbin is usr/sbin, so a relative link would resolve from there.
+    ln -sf /usr/bin/mount.ios "$root/sbin/mount.ios"
 
     # Mountpoint for host folders, and the private directory the app expects.
     install -d -m 0755 "$root/ios_host" "$root/private"
@@ -315,9 +337,11 @@ apply_overlay() {
     # tctictl is built separately, by utils/tctictl/build_and_copy.sh, because it
     # needs the Rust musl toolchain from the devshell rather than anything here.
     # Its absence is normal on a first build and must not be fatal.
+    #
+    # In /usr/bin with the tctish-* scripts, its real path in a /usr-merged image.
     local tctictl="$REPO/utils/tctictl/target/x86_64-unknown-linux-musl/release/tctictl"
     if [ -f "$tctictl" ]; then
-        install -m 0755 "$tctictl" "$root/bin/tctictl"
+        install -m 0755 "$tctictl" "$root/usr/bin/tctictl"
         note "included tctictl"
     else
         warn "tctictl not built; the image will not contain it. Run 'make tctictl' first if you want it."
@@ -407,6 +431,9 @@ do_build() {
     note "installing ${#args[@]} packages offline"
     with_proc "$root"
     chroot "$root" /sbin/apk add --no-network --allow-untrusted "${args[@]}" >/dev/null
+
+    # With /proc still there, which Rosetta needs to run it.
+    merge_usr "$root"
     without_proc "$root"
 
     # Before the overlay, not in normalise() after it: the overlay ships the

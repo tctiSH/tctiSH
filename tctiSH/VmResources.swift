@@ -617,6 +617,8 @@ enum AppSetting: String {
     case codeCacheNotifications = "code_cache_notifications"
     case parkInBackground = "park_in_background"
     case releaseCodeCacheInBackground = "release_code_cache_in_background"
+    case fileCacheBudget = "file_cache_budget"
+    case sharedFolderWriteBack = "shared_folder_write_back"
     case keepScreenAwake = "keep_screen_awake"
     case pinnedKeys = "pinned_keys"
     case hideKeyBarWithHardwareKeyboard = "hide_key_bar_with_hardware_keyboard"

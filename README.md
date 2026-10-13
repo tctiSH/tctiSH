@@ -63,7 +63,7 @@ To build the app onto your device, you can follow these steps:
 
 2. Build the dependencies by running `make build`. This will take some time the first time you do
    it, as it has to fetch all the devshell dependencies and build our QEMU fork.
-3. Open `tctiSH.xcworkspace` in Xcode. Open the tctiSH project settings and select the tctiSH target
+3. Open `tctiSH.xcodeproj` in Xcode. Open the tctiSH project settings and select the tctiSH target
    before changing the team to your team and setting a bundle identifier you can build with. Then
    select the JITHelper target and do the same.
 4. In Xcode's build menu select tctiSH as the scheme and your device as the build target (we do not

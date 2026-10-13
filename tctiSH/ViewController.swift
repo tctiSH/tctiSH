@@ -170,7 +170,7 @@ class ViewController: UIViewController {
         }
         setUpTTYs()
 
-        currentTerminal.becomeFirstResponder()
+        _ = currentTerminal.becomeFirstResponder()
 
         explainSerialSize()
         guardMonitorCommands()
@@ -181,6 +181,7 @@ class ViewController: UIViewController {
         ChardevTransport.kernelLog.start()
         ChardevTransport.vmManagement.start()
         GuestAgent.shared.start()
+        GuestClock.shared.start()
 
         // All of these need a window, which is exactly why the launch path couldn't do them itself.
         status = StatusPresenter(over: view, backdrop: currentTerminal.nativeBackgroundColor)
@@ -196,6 +197,8 @@ class ViewController: UIViewController {
         observeCodeCache()
         observeBackend()
         observeQuickActions()
+        observeGuestZone()
+        observeGuestSnapshotLoads()
 
         // Every moment someone could be told. Becoming active covers a launch that follows the
         // failed save and a return from the backgrounding that caused it, including the first
@@ -631,6 +634,45 @@ class ViewController: UIViewController {
     }
 
     private static let saveStatusKey = "session-save"
+
+    /// Says when Linux changes time zone to follow the device, because programs
+    /// already running keep the old one until restarted.
+    private func observeGuestZone() {
+        NotificationCenter.default.addObserver(
+            forName: GuestClock.zoneDidChange, object: nil, queue: .main
+        ) { [weak self] notification in
+            guard let zone = notification.object as? String else { return }
+
+            self?.status?.present(
+                .init(
+                    key: Self.zoneStatusKey,
+                    message: "Now on \(zone) time; restart programs to follow",
+                    state: .symbol("clock.fill"),
+                    duration: 6))
+        }
+    }
+
+    private static let zoneStatusKey = "guest-zone"
+
+    /// Says when `tctictl snapshot load` fails, which starts Linux afresh and
+    /// loses the session.
+    private func observeGuestSnapshotLoads() {
+        NotificationCenter.default.addObserver(
+            forName: QEMUInterface.guestSnapshotLoadFailed, object: nil, queue: .main
+        ) { [weak self] notification in
+            let tag = notification.object as? String ?? "the snapshot"
+
+            self?.status?.present(
+                .init(
+                    key: Self.guestSnapshotStatusKey,
+                    message: "Couldn't load '\(tag)'; Linux is starting afresh",
+                    state: .symbol("exclamationmark.triangle.fill"),
+                    duration: 8,
+                    tint: .systemOrange))
+        }
+    }
+
+    private static let guestSnapshotStatusKey = "guest-snapshot"
 
     private static let bootStatusKey = "boot"
 

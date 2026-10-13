@@ -8,40 +8,157 @@
 # session only once it has had one, so a guest that never came up is never
 # saved over one that did.
 #
-# Requests are lines, a word and its argument, and so are the answers:
+# Each request is a line: a word, the app's id for it, and any arguments. The
+# answer repeats the id, so that the app can ignore an answer from before a
+# reset:
 #
-#   ping <n>    answered with "pong <n> <boot id>". The app numbers each round
-#               of asking, so an answer left over from before a reset is told
-#               apart.
+#   ping <n>              "pong <n> <boot id>". The app numbers each round of
+#                         asking.
+#   time <id> <s.ns>      sets the clock to the host's time if it's more than a
+#                         quarter second behind or two seconds ahead.
+#                         "done <id> stepped|kept <offset>", with the offset in
+#                         seconds, positive if the clock was behind.
+#   zone <id> <name>      sets the guest's IANA zone (Europe/Amsterdam).
+#                         "done <id> unchanged", or "done <id> changed <old>",
+#                         where <old> is the previous zone, or - if none.
+#   sync <id>             writes out all dirty data. "done <id>"
+#   reclaim <id> <MiB>    trims the page cache to that many MiB through the
+#                         kernel's LRU, which keeps the most used.
+#                         "done <id> <MiB before> <MiB after> <ms>"
 #
-# Anything else is answered with "error <word>". Unasked, the agent says
+# A request that fails gets "error <id> <word> <reason>", and an unknown one
+# "error <id> <word> unknown". Unasked, the agent says
 # "hello <boot id>" when it starts, and "bye <boot id>" when init stops it as
 # Linux shuts down. That is how the app learns of a reboot started in the
 # guest: from the bye at once, or from a hello with a new boot id after a
-# reboot that skipped init (reboot -f). Keep this to named
-# operations: the port is reachable by anything in the app, and a request to
-# run a command would make it a root shell by another name.
+# reboot that skipped init (reboot -f).
+#
+# Keep this to named operations: the port is reachable by anything in the app,
+# and a request to run a command would make it a root shell by another name.
+# No argument is ever parsed by a shell as more than one word.
 #
 # Started from /etc/inittab as a respawn. Blocked in a read, it costs nothing.
 #
 set -u
 
+# Arguments are split into words below; no glob in them may expand.
+set -f
+
 NAME="io.ara.tctish.agent"
+
+ZONEINFO="/usr/share/zoneinfo"
 
 # Find the port by its name, which QEMU gives it, rather than by number. There
 # is no udev, so /dev/virtio-ports/<name> never appears; devtmpfs makes only
 # the kernel's /dev/vportNpM, whose numbers are the order ports were added in.
 find_port() {
+    set +f
     for sysdev in /sys/class/virtio-ports/vport*; do
         [ -e "$sysdev" ] || continue
 
         if [ "$(cat "$sysdev/name" 2>/dev/null)" = "$NAME" ]; then
+            set -f
             echo "/dev/$(basename "$sysdev")"
             return 0
         fi
     done
+    set -f
 
     return 1
+}
+
+# The file cache the kernel can reclaim, in MiB: its two file LRU lists. Not
+# Cached, which also counts tmpfs and the initramfs, which reclaim can't touch.
+file_cache_mib() {
+    awk '/^Active\(file\):/ { a = $2 } /^Inactive\(file\):/ { i = $2 }
+        END { print int((a + i) / 1024) }' /proc/meminfo
+}
+
+# Milliseconds since boot, to the kernel's tick.
+uptime_ms() {
+    awk '{ print int($1 * 1000) }' /proc/uptime
+}
+
+# time <id> <seconds.nanoseconds>
+set_time() {
+    id="$1"
+    case "${2:-}" in
+        "" | *[!0-9.]* | *.*.*)
+            echo "error $id time bad-time"
+            return
+            ;;
+    esac
+
+    if result="$(tctictl lowlevel set-clock "$2" 2>&1)"; then
+        echo "done $id $result"
+    else
+        echo "error $id time $(echo "$result" | tr '\n' ' ')"
+    fi
+}
+
+# zone <id> <name>
+set_zone() {
+    id="$1"
+    zone="${2:-}"
+
+    # Zone names are letters, digits, _ + - and /: no dots, so no "..", and no
+    # leading /.
+    case "$zone" in
+        "" | /* | *[!A-Za-z0-9_+/-]*)
+            echo "error $id zone bad-name"
+            return
+            ;;
+    esac
+    if [ ! -f "$ZONEINFO/$zone" ]; then
+        echo "error $id zone unknown-zone"
+        return
+    fi
+
+    old="$(readlink /etc/localtime 2>/dev/null)"
+    if [ "$old" = "$ZONEINFO/$zone" ]; then
+        echo "done $id unchanged"
+        return
+    fi
+    case "$old" in
+        "$ZONEINFO"/*) old="${old#"$ZONEINFO"/}" ;;
+        *) old="-" ;;
+    esac
+
+    # Renamed into place, so that nothing reads a missing or half-written
+    # /etc/localtime. musl reads it once per process, when TZ is unset.
+    if ln -sf "$ZONEINFO/$zone" /etc/.localtime.agent &&
+        mv -f /etc/.localtime.agent /etc/localtime &&
+        echo "$zone" >/etc/.timezone.agent &&
+        mv -f /etc/.timezone.agent /etc/timezone; then
+        echo "done $id changed $old"
+    else
+        rm -f /etc/.localtime.agent /etc/.timezone.agent
+        echo "error $id zone write-failed"
+    fi
+}
+
+# reclaim <id> <MiB>
+reclaim() {
+    id="$1"
+    case "${2:-}" in
+        "" | *[!0-9]*)
+            echo "error $id reclaim bad-budget"
+            return
+            ;;
+    esac
+
+    started="$(uptime_ms)"
+    before="$(file_cache_mib)"
+    excess=$((before - $2))
+
+    # Fails with EAGAIN when it reclaimed less than asked, which is still as far
+    # as it could go; the answer says how far that was. swappiness=0 keeps it to
+    # the file cache even if the guest has swap.
+    if [ "$excess" -gt 0 ]; then
+        echo "${excess}M swappiness=0" >/sys/fs/cgroup/memory.reclaim 2>/dev/null
+    fi
+
+    echo "done $id $before $(file_cache_mib) $(($(uptime_ms) - started))"
 }
 
 # Linux makes a port before QEMU has named it, so a look early in the boot can
@@ -79,11 +196,19 @@ echo "hello $BOOT_ID" >&3
 trap 'echo "bye $BOOT_ID" >&3; exit 0' TERM
 
 while :; do
-    while read -r request argument <&3; do
+    while read -r request id arguments <&3; do
+        # The arguments as words; none contains a space.
+        # shellcheck disable=SC2086
+        set -- $arguments
+
         case "$request" in
-            ping) echo "pong $argument $BOOT_ID" >&3 ;;
-            *) echo "error $request" >&3 ;;
-        esac
+            ping) echo "pong $id $BOOT_ID" ;;
+            time) set_time "$id" "${1:-}" ;;
+            zone) set_zone "$id" "${1:-}" ;;
+            sync) if sync; then echo "done $id"; else echo "error $id sync failed"; fi ;;
+            reclaim) reclaim "$id" "${1:-}" ;;
+            *) echo "error ${id:--} $request unknown" ;;
+        esac >&3
     done
 
     # Reads end at once while nothing on the host is connected, which is what

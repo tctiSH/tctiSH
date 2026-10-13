@@ -6,13 +6,15 @@
 //  Copyright © 2022 Kate Temkin.
 //
 
-import Atomics
-import Foundation
-import Socket
+import UIKit
 
 /// Structure that describes a simple configuration message, as exchanged across
 /// our configuration channel.
 struct ConfigurationMessage: Codable {
+
+    /// Which request this is, or answers. `tctictl` makes one up for each
+    /// request, and only takes an answer with it: see `ConfigServer`.
+    var id: String?
 
     /// The command being executed.
     var command: String
@@ -24,201 +26,260 @@ struct ConfigurationMessage: Codable {
     var value: String?
 }
 
-/// Small server that provides a configuration backend to the tctiSH client.
-class ConfigServer {
-    typealias Client = Socket
+/// Answers `tctictl`, which runs in the guest and talks to the app over the
+/// virtio-serial port `io.ara.tctish.control`, one JSON message per line.
+///
+/// Each request carries an id, and its answer repeats it. The port isn't a
+/// connection: anything sent while no `tctictl` has it open goes to the next
+/// one to open it, which ignores answers with another id.
+///
+/// Requests are handled in order on a separate queue, since some wait on a
+/// picker for as long as the user takes. `still_waiting` is answered at once,
+/// on the main thread: a waiting `tctictl` sends it every few seconds, and
+/// `unknown` tells it the request is lost, as when the guest is restored from a
+/// snapshot taken while it waited.
+final class ConfigServer {
 
-    /// The port on which we listen for configuration messages.
-    private static let configurationPort: Int = 10050
+    /// Who an answer is for: the id of the request it answers.
+    typealias Client = String?
 
-    /// Maximum length we'll allow in a message payload.
-    private static let maxMessageLength = 4096
+    /// The longest line from the guest that is kept. A bookmark, the longest
+    /// thing `tctictl` sends, is a few KiB as base64.
+    private static let maxMessageLength = 64 * 1024
 
-    /// The sockets on which we'll receive commands from the tctiSH instance.
-    var connectedClients = [Int32: Socket]()
-
-    /// A queue used to synchronize access to our sockets.
-    let clientLockQueue = DispatchQueue(label: "io.ara.tctiSH.configserver")
-
-    /// Our interface to our QEMU kernel. Should only be accessed from our
-    /// command loop, with one exception: Settings First replaces it from the
-    /// main thread before the boot (`AppDelegate.releaseBootHeldForSettings`),
-    /// when there is no guest yet to send the loop something.
+    /// Our interface to our QEMU kernel. Should only be accessed from
+    /// `handlers`, with one exception: Settings First replaces it from the main
+    /// thread before the boot (`AppDelegate.releaseBootHeldForSettings`), when
+    /// there is no guest yet to send anything.
     var qemu: QEMUInterface
 
-    /// The thread that's running our command-loop.
-    private var thread: Thread?
+    private let socket = ChardevSocket(path: QEMUInterface.controlSocketPath, name: "control")
 
-    /// Flag that's used to indicate when we should stop.
-    private var stopping: ManagedAtomic<Bool>
-    private var stopped: ManagedAtomic<Bool>
+    /// Where requests are handled, one at a time.
+    private let handlers = DispatchQueue(label: "io.ara.tctish.configserver", qos: .userInitiated)
 
-    /// Brings up a server and starts it listening.
-    init(qemuInterface: QEMUInterface, listenImmediately: Bool = false) {
+    /// The line arriving. Main thread.
+    private var line: [UInt8] = []
+
+    /// Whether the line arriving has run past `maxMessageLength`, and is being
+    /// cut short. Main thread.
+    private var lineTooLong = false
+
+    /// The ids of the requests being handled, until they are answered. Main
+    /// thread.
+    private var handling: Set<String> = []
+
+    /// Starts connecting to the control port. Main thread.
+    init(qemuInterface: QEMUInterface) {
         self.qemu = qemuInterface
-        self.stopping = ManagedAtomic<Bool>(false)
-        self.stopped = ManagedAtomic<Bool>(false)
-
-        if (listenImmediately) {
-            listen()
-        }
+        socket.onReceive = { [unowned self] bytes in received(bytes) }
+        socket.start()
     }
 
-    /// Starts a thread that listens and handles any requests from our client.
-    func listen() {
-        self.stopped.store(false, ordering: .relaxed)
-
-        let queue = DispatchQueue.global(qos: .userInteractive)
-        queue.async { [unowned self] in
-
-            // Wait for a new connection from our guest...
-            let socket = try! Socket.create()
-            try! socket.listen(on: ConfigServer.configurationPort)
-
-            // Ensure that we mark ourselves as stopped once we're done.
-            defer {
-                socket.close()
-                self.stopped.store(true, ordering: .relaxed)
+    private func received(_ bytes: ArraySlice<UInt8>) {
+        for byte in bytes {
+            guard byte != UInt8(ascii: "\n") else {
+                lineArrived(Data(line), tooLong: lineTooLong)
+                line.removeAll(keepingCapacity: true)
+                lineTooLong = false
+                continue
             }
 
-            // Try to get a new connection.
-            while !self.stopping.load(ordering: .relaxed) {
-                do {
-                    let newClient = try socket.acceptClientConnection()
-                    self.handleClient(client: newClient)
-                } catch {}
+            if line.count < Self.maxMessageLength {
+                line.append(byte)
+            } else {
+                lineTooLong = true
             }
         }
     }
 
-    /// Stops execution of the server.
-    public func stop(completion: @escaping () -> ()) {
-
-        // Mark ourselves as stopping...
-        self.stopping.store(true, ordering: .relaxed)
-
-        DispatchQueue.main.async {
-
-            // Wait for "stopped" to be set to true, and then call our callback.
-            while true {
-                if self.stopped.load(ordering: .relaxed) {
-                    completion()
-                }
-            }
+    /// Takes in one line from the guest. Main thread.
+    ///
+    /// `tctictl` starts each request on a new line, so a request cut off part
+    /// way stays on a line by itself. A line that can't be read is answered
+    /// with an error if its id can be found, so that its sender isn't left
+    /// waiting.
+    private func lineArrived(_ line: Data, tooLong: Bool) {
+        guard !line.allSatisfy({ $0 == UInt8(ascii: " ") || $0 == UInt8(ascii: "\r") }) else {
+            return
         }
+
+        guard !tooLong,
+            let message = try? JSONDecoder().decode(ConfigurationMessage.self, from: line)
+        else {
+            let reason = tooLong ? "the request is too long" : "the request couldn't be read"
+            Log.network.warn("control: \(reason)")
+            if let id = Self.leadingID(in: line) {
+                sendErrorResponse(reason, to: id)
+            }
+            return
+        }
+
+        if message.command == "still_waiting" {
+            let status = message.id.map { handling.contains($0) } == true ? "waiting" : "unknown"
+            sendMessage(
+                ConfigurationMessage(
+                    command: "still_waiting.response", key: "status", value: status),
+                to: message.id, answering: false)
+            return
+        }
+
+        if let id = message.id {
+            handling.insert(id)
+        }
+        handlers.async { [weak self] in self?.handleMessage(message) }
     }
 
-    /// Stops execution of the server. Blocking.
-    public func stop(blocking: Bool = false) {
-        // Mark ourselves as stopping...
-        self.stopping.store(true, ordering: .relaxed)
-
-        // ... and wait for the stopping to complete.
-        if blocking {
-            while !self.stopped.load(ordering: .relaxed) {}
+    /// The id from the start of a request that can't be parsed. `tctictl`
+    /// writes the id first.
+    private static func leadingID(in line: Data) -> String? {
+        let text = String(decoding: line.prefix(256), as: UTF8.self)
+        guard
+            let range = text.range(of: #"^\s*\{"id":"[^"\\]{1,128}""#, options: .regularExpression)
+        else {
+            return nil
         }
-    }
-
-    /// Reconnects the configuration server.
-    public func reconnect() {
-        self.stop()
-        self.listen()
-    }
-
-    /// Handles any communications with a connected client.
-    private func handleClient(client: Socket) {
-        var clientAlive = true
-        var buffer = Data(capacity: ConfigServer.maxMessageLength)
-
-        // TODO: possibly bump this up from background?
-        let queue = DispatchQueue.global(qos: .background)
-
-        // Mark the new socket as connected...
-        clientLockQueue.sync { [unowned self, client] in
-            self.connectedClients[client.socketfd] = client
-        }
-
-        // ... and handle requests from it.
-        queue.async { [unowned self, client] in
-
-            // ... and then go into a simple command loop.
-            do {
-                while clientAlive {
-
-                    // Get the data that was captured.
-                    let length = try client.read(into: &buffer)
-
-                    // If we didn't get any data, the other side has closed the connection. This
-                    // communication is complete.
-                    if length == 0 {
-                        clientAlive = false
-                    }
-                    // Otherwise, process the client request.
-                    else {
-                        self.handleMessage(rawMessage: buffer, from: client)
-                    }
-                }
-            } catch {
-                // On any error, disconnect our socket.
-                clientAlive = false
-            }
-
-            // Now that we're disconnected, we can erase our knowledge of this client.
-            self.clientLockQueue.sync { [unowned self, client] in
-                self.connectedClients[client.socketfd] = nil
-            }
-        }
+        return String(text[range].drop(while: { $0 != ":" }).dropFirst().dropFirst().dropLast())
     }
 
     /// Handles an incoming message from our client.
-    private func handleMessage(rawMessage: Data, from: Client) {
-        let client = from
+    private func handleMessage(_ message: ConfigurationMessage) {
+        let client = message.id
 
-        do {
-            let message = try JSONDecoder().decode(ConfigurationMessage.self, from: rawMessage)
+        switch message.command {
 
-            switch message.command {
+        // Simple echo command.
+        case "echo":
+            let response = ConfigurationMessage(command: "response", value: message.value)
+            sendMessage(response, to: client)
 
-            // Simple echo command.
-            case "echo":
-                let response = ConfigurationMessage(command: "response", value: message.value)
-                sendMessage(response, to: client)
+        // Requests that we pop up a file picker to choose a path.
+        case "choose_folder":
+            handleChoosePath(message: message, from: client)
 
-            // Requests that we pop up a file picker to choose a path.
-            case "choose_folder":
-                handleChoosePath(message: message, from: client)
+        // Requests that we pop up a filer picker to choose a path, and then ensure that path is
+        // accessible to QEMU.
+        case "open_folder":
+            handleOpenPath(message: message, from: client)
 
-            // Requests that we pop up a filer picker to choose a path, and then ensure that path is
-            // accessible to QEMU.
-            case "open_folder":
-                handleOpenPath(message: message, from: client)
+        // Requests that we share a folder for mounting. Responds with its name under /ios_host,
+        // which `tctictl` bind-mounts. {"command": "prepare_mount", "key": "", "value": "/tmp"}
+        case "prepare_mount":
+            handlePrepareMountCommand(message: message, from: client)
 
-            // Requests that we prepare a given device for mounting. Responds with the 'tag' used to
-            // mount the device with a `mount -t 9p`
-            // command. {"command": "prepare_mount", "value": "/tmp"}
-            case "prepare_mount":
-                handlePrepareMountCommand(message: message, from: client)
+        // Font configuration command.
+        case "font":
+            handleFontConfig(message: message, from: client)
 
-            // Font configuration command.
-            case "font":
-                handleFontConfig(message: message, from: client)
+        // Handle requests for the CWD.
+        case "getcwd":
+            handleGetCWD(message: message, from: client)
 
-            // Handle requests for the CWD.
-            case "getcwd":
-                handleGetCWD(message: message, from: client)
+        // Requests that we pop up a file picker to import a pairing file, used by the JIT server to
+        // reach the device.
+        case "import_pairing_file":
+            handleImportPairingFile(message: message, from: client)
 
-            // Requests that we pop up a file picker to import a pairing file, used by the JIT
-            // server to reach the device.
-            case "import_pairing_file":
-                handleImportPairingFile(message: message, from: client)
+        // Snapshots of the machine, saved, loaded, deleted and listed from inside it.
+        case "snapshot_save", "snapshot_load", "snapshot_delete", "snapshot_list":
+            handleSnapshot(message: message, from: client)
 
-            // Respond to all other commands with, basically, "idk".
-            default:
-                sendErrorResponse("command not recognized", to: client)
-            }
+        // A command for QEMU's monitor, within limits; see `runMonitorCommandForGuest`.
+        case "monitor":
+            handleMonitor(message: message, from: client)
 
-        } catch let err {
-            sendErrorResponse("error processing command: \(err)", to: client)
+        // Which cache mode to mount the shared folder with.
+        case "share_cache":
+            handleShareCache(message: message, from: client)
+
+        // Respond to all other commands with, basically, "idk".
+        default:
+            sendErrorResponse("command not recognized", to: client)
+        }
+    }
+
+    /// Why the machine can't take a snapshot request right now, if it can't:
+    /// it's being saved, is parked or coming back, or is changing vCPUs.
+    /// Checked again under the lock; see `QEMUInterface.machineAway`.
+    private func machineBusy() -> String? {
+        let busy = DispatchQueue.main.sync {
+            (UIApplication.shared.delegate as? AppDelegate)?.machineIsAway == true
+                || Vcpus.isChanging
+        }
+        return busy ? "tctiSH is busy saving your session or changing vCPUs; try again" : nil
+    }
+
+    /// Saves, loads, deletes or lists snapshots for the guest.
+    private func handleSnapshot(message: ConfigurationMessage, from client: Client) {
+        let command = message.command
+
+        if command == "snapshot_list" {
+            respond(command, with: qemu.runMonitorCommandForGuest("info snapshots"), to: client)
+            return
+        }
+
+        guard let tag = message.value else {
+            sendErrorResponse("\(command) needs a snapshot's name", to: client)
+            return
+        }
+        if let busy = machineBusy() {
+            sendErrorResponse(busy, to: client)
+            return
+        }
+
+        switch command {
+        case "snapshot_save":
+            respond(command, with: qemu.saveSnapshotForGuest(tag: tag), to: client)
+
+        case "snapshot_load":
+            let vcpus = DispatchQueue.main.sync { Vcpus.present }
+            let loaded = qemu.loadSnapshotForGuest(tag: tag, vcpus: vcpus)
+
+            // Answered either way. After a successful load, the `tctictl` that asked no longer
+            // exists, so nobody reads it, but it marks the request done. If the snapshot was taken
+            // by `tctictl snapshot save`, that `tctictl` is waiting again, and learns it was
+            // restored from `still_waiting`, since this app has no record of its request.
+            respond(command, with: loaded, to: client)
+            guard case .success = loaded else { return }
+
+            // Ask again whether Linux is up, since the snapshot may be from another boot. The
+            // answer also sends the time and zone.
+            DispatchQueue.main.async { GuestAgent.shared.linuxRestarting() }
+
+        default:
+            respond(command, with: qemu.deleteSnapshotForGuest(tag: tag), to: client)
+        }
+    }
+
+    /// Runs a monitor command for the guest.
+    private func handleMonitor(message: ConfigurationMessage, from client: Client) {
+        guard let command = message.value else {
+            sendErrorResponse("monitor needs a command", to: client)
+            return
+        }
+        respond("monitor", with: qemu.runMonitorCommandForGuest(command), to: client)
+    }
+
+    /// Answers which 9p cache mode to mount the shared folder with: `mmap`,
+    /// which writes back, if Write-Back Caching is on in Settings, otherwise
+    /// `readahead`, which writes straight through. Write-back is safe because
+    /// the guest writes out dirty data before every background save; see
+    /// `GuestPreparation`.
+    private func handleShareCache(message: ConfigurationMessage, from client: Client) {
+        let mode = AppSetting.sharedFolderWriteBack.bool ? "mmap" : "readahead"
+        sendResponse(command: "share_cache", key: "cache", value: mode, to: client)
+    }
+
+    /// Answers with what the host did, or why it didn't.
+    private func respond(
+        _ command: String, with result: Result<String, QEMUInterface.GuestRefusal>,
+        to client: Client
+    ) {
+        switch result {
+        case .success(let output):
+            sendResponse(command: command, key: "output", value: output, to: client)
+        case .failure(let refusal):
+            sendErrorResponse(refusal.reason, to: client)
         }
     }
 
@@ -320,52 +381,44 @@ class ConfigServer {
         }
     }
 
-    /// Command that sets up the QEMU side of a host-side mount.
-    private func handlePrepareMountCommand(message: ConfigurationMessage, from: Client) {
-        let client = from
-
-        if let hostPath = message.value {
-            var tag = ""
-            var isBookmark = false
-
-            // If we have a type, check to see if this is actually an encoded bookmark.
-            if let type = message.key {
-                isBookmark = (type != "")
-            }
-
-            // If we have a bookmark, decode it to a URL, and then use that to mount.
-            if isBookmark {
-                // Rehydrate the bookmark back into a URL...
-                let bookmarkData = Data(base64Encoded: hostPath)
-                if let bookmarkData = bookmarkData {
-
-                    // ... and use it to re-mount the image.
-                    let mount_result = qemu.mount(
-                        bookmarkData: bookmarkData, predefinedTag: message.key!)
-                    if let mount_result = mount_result {
-                        tag = mount_result
-                    } else {
-                        sendErrorResponse("bookmark no longer valid", to: client)
-                    }
-
-                } else {
-                    sendErrorResponse("invalid encoded bookmark", to: client)
-                }
-
-            }
-            // Otherwise, use the host path directly.
-            else {
-                tag = qemu.mount(hostPath: hostPath)
-            }
-
-            // ... and send the generated tag back to the host.
-            let response = ConfigurationMessage(
-                command: "prepare_mount.response", key: "tag", value: tag)
-            sendMessage(response, to: client)
-        } else {
+    /// Shares a folder for `tctictl` to mount, and answers with its name under
+    /// `/ios_host`. The folder is a bookmark from `open_folder`, with the name
+    /// to use in `key`, or a host path, with an empty `key`.
+    private func handlePrepareMountCommand(message: ConfigurationMessage, from client: Client) {
+        guard let value = message.value else {
             sendErrorResponse("invalid argument to a mount command", to: client)
+            return
         }
 
+        let mounted: Result<String, QEMUInterface.GuestRefusal>
+        if let name = message.key, !name.isEmpty {
+            // The name becomes a link in the shared folder, so it must be a single path component.
+            guard Self.isShareName(name) else {
+                sendErrorResponse("'\(name)' isn't a name for a shared folder", to: client)
+                return
+            }
+            guard let bookmarkData = Data(base64Encoded: value) else {
+                sendErrorResponse("invalid encoded bookmark", to: client)
+                return
+            }
+            mounted = qemu.mount(bookmarkData: bookmarkData, predefinedTag: name)
+        } else {
+            mounted = qemu.mount(hostPath: value)
+        }
+
+        switch mounted {
+        case .success(let tag):
+            sendResponse(command: "prepare_mount", key: "tag", value: tag, to: client)
+        case .failure(let refusal):
+            sendErrorResponse(refusal.reason, to: client)
+        }
+    }
+
+    /// Whether `name` can be a name in the shared folder: letters, digits, `.`,
+    /// `_` and `-`, but not `.` or `..`.
+    static func isShareName(_ name: String) -> Bool {
+        name.range(of: "^[A-Za-z0-9._-]{1,64}$", options: .regularExpression) != nil
+            && name != "." && name != ".."
     }
 
     /// Command that adjusts our font size.
@@ -404,6 +457,7 @@ class ConfigServer {
         if let term = ConsoleTransport.shared.terminal {
             if let cwd = term.cwd {
                 sendResponse(command: "getcwd", key: "cwd", value: cwd, to: client)
+                return
             }
         }
 
@@ -434,14 +488,23 @@ class ConfigServer {
         sendMessage(ConfigurationMessage(command: command, key: key, value: value), to: to)
     }
 
-    /// Sends a simple message across our communications channel.
-    private func sendMessage(_ message: ConfigurationMessage, to: Client) {
-        do {
-            let rawMessage = try JSONEncoder().encode(message)
-            try to.write(from: rawMessage)
-            try to.write(from: "\n")
-        } catch {
-            Log.network.fail("config server: failed to send a message")
+    /// Sends a message to the guest, as the answer to the request `id`, or only
+    /// about it, without `answering`.
+    private func sendMessage(_ message: ConfigurationMessage, to id: Client, answering: Bool = true)
+    {
+        var message = message
+        message.id = id
+
+        guard let encoded = try? JSONEncoder().encode(message) else {
+            Log.network.fail("control: couldn't encode a '\(message.command)' message")
+            return
+        }
+        DispatchQueue.main.async { [self] in
+            // Answered, so no longer waited for.
+            if answering, let id {
+                handling.remove(id)
+            }
+            socket.send(encoded + [UInt8(ascii: "\n")])
         }
     }
 

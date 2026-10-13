@@ -50,6 +50,7 @@ struct qemu_args {
     char *monitor_channel_args;
     char *console_channel_args;
     char *agent_channel_args;
+    char *control_channel_args;
     char *serial_channel_args;
     char *management_channel_args;
     char *boot_image_name;
@@ -80,6 +81,7 @@ static void free_qemu_args(struct qemu_args *args) {
     free(args->monitor_channel_args);
     free(args->console_channel_args);
     free(args->agent_channel_args);
+    free(args->control_channel_args);
     free(args->serial_channel_args);
     free(args->management_channel_args);
     free(args->memory_value);
@@ -372,7 +374,7 @@ static const char *qemu_disk_device(void) {
     "-device", "virtio-net-pci,id=net1,netdev=net0",                                               \
     "-netdev", "user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100",                      \
                                                                                                    \
-    /* The terminal, and the agent the app asks whether Linux is up.                               \
+    /* The terminal, the agent the app asks things of, and tctictl's port.                         \
                                                                                                    \
        hvc0 is the terminal: a virtconsole, which Linux makes /dev/hvc0, with a getty on it. Its   \
        programs belong to the tty, not to a connection, so they carry on through suspends and      \
@@ -380,13 +382,16 @@ static const char *qemu_disk_device(void) {
        app set the tty's size with the monitor's console_resize, which Linux turns into SIGWINCH.  \
                                                                                                    \
        The agent's port is a plain virtserialport, which Linux makes /dev/vportNpM and names in    \
-       sysfs; see tctish-agent in the guest.                                                       \
+       sysfs; see tctish-agent in the guest. tctictl gets a second one, because Linux lets a port  \
+       be open only once and the agent keeps the first open for good.                              \
                                                                                                    \
        Each consumes a -chardev that qemu_thread passes separately, which carries a socket path. */ \
     "-device", "virtio-serial-pci,id=vser0,console-size=on",                                       \
     "-device", "virtconsole,id=hvc0,chardev=hvc0-socket,bus=vser0.0",                              \
     "-device", "virtserialport,id=agent,chardev=agent-socket,bus=vser0.0,"                         \
                "name=io.ara.tctish.agent",                                                         \
+    "-device", "virtserialport,id=control,chardev=control-socket,bus=vser0.0,"                     \
+               "name=io.ara.tctish.control",                                                       \
                                                                                                    \
     /* Provide our host RNG to our guest; to speed up entropy generation. */                       \
     "-device", "virtio-rng-pci",                                                                   \
@@ -424,9 +429,6 @@ static const char *qemu_disk_device(void) {
        vCPU on every boot, so they are dropped here instead. None is visible to user space: pcid   \
        and invpcid are TLB tagging, tsc-deadline a timer mode, spec-ctrl a mitigation MSR. */      \
     "-cpu", "Haswell-v4,-pcid,-tsc-deadline,-invpcid,-spec-ctrl",                                  \
-                                                                                                   \
-    /* Monitor connection for in-guest tools. */                                                   \
-    "-monitor", "tcp:localhost:10045,server=on,wait=off",                                          \
                                                                                                    \
     /* Consumes the -fsdev qemu_thread passes separately, which carries the host path. */          \
     "-device", "virtio-9p-pci,fsdev=fsdev0,mount_tag=shared"
@@ -520,10 +522,11 @@ static void *qemu_thread(void *raw_args) {
         // Monitor connection for tctiSH. A socket path, so install-specific.
         "-monitor", args->monitor_channel_args,
 
-        // The sockets the app reaches the terminal and the agent through. Paths again; the devices
-        // that consume them are in TCTISH_MACHINE_ARGS.
+        // The sockets the app uses for the terminal, the agent and tctictl. Paths again; the
+        // devices that consume them are in TCTISH_MACHINE_ARGS.
         "-chardev", args->console_channel_args,
         "-chardev", args->agent_channel_args,
+        "-chardev", args->control_channel_args,
 
         // The serial port, ttyS0: the kernel's log, and a login for when hvc0 can't be reached.
         // The app shows it as Kernel Log. The port is the machine's either way, otherwise
@@ -599,10 +602,10 @@ void run_background_qemu(const char *qemu_path, const char *kernel_path, const c
                          const char *shared_folder_path, const char *boot_image_name,
                          const char *memory_value, const char *monitor_socket_path,
                          const char *console_socket_path, const char *agent_socket_path,
-                         const char *serial_socket_path, const char *serial_log_path,
-                         const char *management_socket_path, bool start_native,
-                         bool bless_jit_regions, unsigned int tb_size_mib, unsigned int chunk_mib,
-                         unsigned int vcpus) {
+                         const char *control_socket_path, const char *serial_socket_path,
+                         const char *serial_log_path, const char *management_socket_path,
+                         bool start_native, bool bless_jit_regions, unsigned int tb_size_mib,
+                         unsigned int chunk_mib, unsigned int vcpus) {
     pthread_t thread;
     pthread_attr_t qosAttribute;
 
@@ -645,14 +648,17 @@ void run_background_qemu(const char *qemu_path, const char *kernel_path, const c
     snprintf(args->monitor_channel_args, ARGUMENT_MAX, "unix:%s,server=on,wait=off",
              monitor_socket_path);
 
-    // And the terminal's and the agent's. QEMU listens, and the app connects whenever it likes:
-    // output while it isn't connected is thrown away rather than holding the guest up.
+    // And the terminal's, the agent's and tctictl's. QEMU listens, and the app connects whenever it
+    // likes: output while it isn't connected is thrown away rather than holding the guest up.
     args->console_channel_args = calloc(ARGUMENT_MAX, sizeof(char));
     snprintf(args->console_channel_args, ARGUMENT_MAX,
              "socket,id=hvc0-socket,path=%s,server=on,wait=off", console_socket_path);
     args->agent_channel_args = calloc(ARGUMENT_MAX, sizeof(char));
     snprintf(args->agent_channel_args, ARGUMENT_MAX,
              "socket,id=agent-socket,path=%s,server=on,wait=off", agent_socket_path);
+    args->control_channel_args = calloc(ARGUMENT_MAX, sizeof(char));
+    snprintf(args->control_channel_args, ARGUMENT_MAX,
+             "socket,id=control-socket,path=%s,server=on,wait=off", control_socket_path);
 
     // The serial port's and the user's monitor's, the same way. QEMU also keeps everything the
     // serial port sends in a file, connected or not, which is where the app reads it from: what the

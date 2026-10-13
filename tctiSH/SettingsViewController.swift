@@ -406,7 +406,7 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
         let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
             elementKind: UICollectionView.elementKindSectionHeader
         ) { [weak self] view, _, indexPath in
-            var content = UIListContentConfiguration.groupedHeader()
+            var content = UIListContentConfiguration.header()
             content.text = self?.sections[safe: indexPath.section]?.header
             view.contentConfiguration = content
         }
@@ -414,7 +414,7 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
         let footer = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
             elementKind: UICollectionView.elementKindSectionFooter
         ) { [weak self] view, _, indexPath in
-            var content = UIListContentConfiguration.groupedFooter()
+            var content = UIListContentConfiguration.footer()
             content.text = self?.sections[safe: indexPath.section]?.footer
             view.contentConfiguration = content
         }
@@ -1231,6 +1231,15 @@ final class SettingsViewController: SettingsListViewController,
         return Vcpus.isChanging ? "\(wanted) (changing)" : "\(wanted) (Linux has \(present))"
     }
 
+    /// A file cache budget, as Settings shows it.
+    fileprivate static func fileCacheTitle(_ budget: Int) -> String {
+        switch budget {
+        case 0: "Keep All"
+        case 1024...: "\(budget / 1024) GB"
+        default: "\(budget) MB"
+        }
+    }
+
     /// A background share, and the count it comes to now.
     fileprivate static func shareTitle(_ share: BackgroundShare) -> String {
         let count = share.count(of: Vcpus.foreground)
@@ -1397,7 +1406,7 @@ private final class VirtualMachineSettingsViewController: SettingsListViewContro
             SettingsSection(
                 header: "In the Background",
                 footer:
-                    "Release Memory gives Linux's memory back to iOS once your session is saved, so other apps are less likely to be closed to make room. Coming back takes a moment longer. Release Code Cache gives back all of the translated code as well. It's prepared again on return, which means a pause under JIT.\n\nvCPUs and vCPU Cores here apply once your session is saved, while the app runs in the background. With Release Memory on, Linux stops instead, so they don't apply.",
+                    "File Cache sets how much recently read file data Linux keeps in memory when your session is saved. Less makes the save smaller and faster and leaves more memory for other apps, but files are slower to read the first time after you come back.\n\nRelease Memory gives Linux's memory back to iOS once your session is saved, so other apps are less likely to be closed to make room. Coming back takes a moment longer. Release Code Cache gives back all of the translated code as well. It's prepared again on return, which means a pause under JIT.\n\nvCPUs and vCPU Cores here apply once your session is saved, while the app runs in the background. With Release Memory on, Linux stops instead, so they don't apply.",
                 rows: [
                     SettingsRow(
                         id: "background-vcpus",
@@ -1413,6 +1422,14 @@ private final class VirtualMachineSettingsViewController: SettingsListViewContro
                         symbol: "square.grid.2x2",
                         accessory: .disclosure,
                         select: { [weak self] in self?.pushBackgroundVcpuCores() }),
+                    SettingsRow(
+                        id: "file-cache-budget",
+                        title: "File Cache",
+                        detail: SettingsViewController.fileCacheTitle(
+                            AppSetting.fileCacheBudget.integer),
+                        symbol: "doc.on.doc",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.pushFileCacheBudget() }),
                     SettingsRow(
                         id: "park",
                         title: "Release Memory",
@@ -1472,6 +1489,20 @@ private final class VirtualMachineSettingsViewController: SettingsListViewContro
                 },
                 selected: { Vcpus.backgroundShare },
                 choose: { Vcpus.backgroundShare = $0 }))
+    }
+
+    private func pushFileCacheBudget() {
+        push(
+            OptionListViewController(
+                title: "File Cache",
+                footer: "How much recently read file data Linux keeps in memory when your "
+                    + "session is saved. The most used is kept; the rest is read from the disk "
+                    + "again when it's next needed. Keep All keeps everything.",
+                options: GuestPreparation.fileCacheBudgets.map {
+                    SettingsOption(title: SettingsViewController.fileCacheTitle($0), value: $0)
+                },
+                selected: { AppSetting.fileCacheBudget.integer },
+                choose: { AppSetting.fileCacheBudget.set($0) }))
     }
 
     private func pushBackgroundVcpuCores() {
@@ -1535,7 +1566,21 @@ private final class StorageSettingsViewController: SettingsListViewController {
                             placeholder: "none",
                             commit: { AppSetting.bootSnapshot.set($0) })),
                     Self.compactionRow(on: self),
-                ])
+                ]),
+
+            SettingsSection(
+                header: "Shared Folders",
+                footer:
+                    "Write-Back Caching holds Linux's writes to shared folders briefly and writes them out in larger pieces, which is much faster. While tctiSH is open, a file written in Linux can take up to 30 seconds to appear in the Files app; everything is written out before tctiSH goes into the background. A change applies to /ios_host at the next boot.",
+                rows: [
+                    SettingsRow(
+                        id: "shared-folder-write-back",
+                        title: "Write-Back Caching",
+                        symbol: "folder.badge.gearshape",
+                        toggle: ToggleValue(
+                            isOn: AppSetting.sharedFolderWriteBack.bool,
+                            commit: { AppSetting.sharedFolderWriteBack.set($0) }))
+                ]),
         ]
     }
 }
@@ -2228,7 +2273,7 @@ private final class DebugToolsViewController: SettingsListViewController {
 
         // The fallback for reporting, if nobody is on a Debug Tools screen by the time this
         // finishes but the settings sheet is still up.
-        weak var sheet = navigationController
+        weak let sheet = navigationController
 
         DispatchQueue.global(qos: .userInitiated).async {
             let outcome = DdiPreparation.removeAll(pairingData: pairingData)
@@ -3139,7 +3184,6 @@ private final class CodeCacheSizeViewController: SettingsListViewController {
             return opening + stopping + tcti
 
         case .fixed:
-            let largest: String = Mebibytes.describe(CodeCache.sizes.last ?? 2048)
             return "Prepared in full before Linux starts, every time."
         }
     }

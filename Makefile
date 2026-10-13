@@ -23,7 +23,6 @@ STIKJIT_BUILD     := build-StikJIT
 STIKJIT_FRAMEWORK := $(STIKJIT_BUILD)/StikJIT.xcframework/Info.plist
 IDEVICE_BUILD     := build-idevice
 IDEVICE_LIBRARY   := $(IDEVICE_BUILD)/out/libidevice_ffi.a
-PODS_MANIFEST     := Pods/Manifest.lock
 TCTICTL_TARGET    := x86_64-unknown-linux-musl
 TCTICTL_BINARY    := utils/tctictl/target/$(TCTICTL_TARGET)/release/tctictl
 GUEST_INITRD      := assets/initrd.img
@@ -122,13 +121,6 @@ $(IDEVICE_LIBRARY): build_idevice.sh
 $(STIKJIT_FRAMEWORK): build_stikjit.sh $(wildcard patches/*.patch) $(IDEVICE_LIBRARY)
 	$(SHELL_WRAPPER) ./build_stikjit.sh
 
-# The touch is because pod install leaves Manifest.lock alone when its content would not change, and
-# for a Podfile that is any edit the parsed file cannot see, a comment for example. Without it the
-# manifest stays older than its input and every `make build` runs pod install again.
-$(PODS_MANIFEST): Podfile
-	$(SHELL_WRAPPER) pod install
-	touch $@
-
 # -- The guest ------------------------------------------------------------------------------------
 
 # initrd.img and empty.qcow stay checked in, because they are what the app bundles and because the
@@ -180,12 +172,6 @@ idevice: $(IDEVICE_LIBRARY) ## Build idevice's FFI library for iOS from source
 .PHONY: stikjit
 stikjit: $(STIKJIT_FRAMEWORK) ## Build build-StikJIT/StikJIT.xcframework from the patched submodule copy
 
-.PHONY: pods
-pods: $(PODS_MANIFEST) ## Install the CocoaPods dependencies
-
-# Always the workspace, never the bare project: tctiSH.xcodeproj on its own cannot build the Pods
-# targets, and fails with "Unable to resolve module dependency: 'Socket'" -- which looks like a
-# project-format problem and isn't.
 .PHONY: guest
 guest: $(GUEST_INITRD) $(GUEST_DISK) $(GUEST_KERNEL) ## Build the whole guest image: kernel, rootfs and blank disk (needs `container`)
 
@@ -221,8 +207,8 @@ endif
 # once someone has trusted it in the IDE. A command-line build has nobody to ask, so skips the check
 # instead.
 .PHONY: build
-build: $(QEMU_LIBRARY) $(STIKJIT_FRAMEWORK) $(PODS_MANIFEST) $(GUEST_IMAGES) ## Build the app for a generic iOS device (GUEST=prebuilt to skip rebuilding the guest images)
-	xcodebuild -workspace tctiSH.xcworkspace -scheme tctiSH -destination 'generic/platform=iOS' \
+build: $(QEMU_LIBRARY) $(STIKJIT_FRAMEWORK) $(GUEST_IMAGES) ## Build the app for a generic iOS device (GUEST=prebuilt to skip rebuilding the guest images)
+	xcodebuild -project tctiSH.xcodeproj -scheme tctiSH -destination 'generic/platform=iOS' \
 		-skipPackagePluginValidation build
 
 .PHONY: tctictl
@@ -247,12 +233,11 @@ endef
 # Not ours to reformat, and excluded everywhere.
 #
 #   third-party             submodules and vendored sources, including QEMU
-#   Pods                    vendored by CocoaPods, rewritten by `pod install`
 #   assets                  guest-side build scripts, a world apart
 #   patches                 context lines are literal, so reformatting silently breaks them
 #
 # Everything is found through `git ls-files`, which also keeps build output out by construction.
-NOT_OURS := ^(third-party|Pods|assets|patches)/
+NOT_OURS := ^(third-party|assets|patches)/
 
 SWIFT_SOURCES  := $(shell git ls-files '*.swift' | grep -Ev '$(NOT_OURS)')
 C_SOURCES      := $(shell git ls-files '*.c' '*.h' '*.m' '*.mm' | grep -Ev '$(NOT_OURS)')
@@ -263,10 +248,9 @@ PYTHON_SOURCES := $(shell git ls-files '*.py' | grep -Ev '$(NOT_OURS)')
 # assets/kernel/flake.nix pins the kernel toolchain. The wildcard is there as well as `git ls-files`
 # so that a flake is formatted before its first commit rather than after it -- $(sort) dedupes the
 # two sources once it is tracked.
-NOT_OURS_NIX   := ^(third-party|Pods|patches)/
+NOT_OURS_NIX   := ^(third-party|patches)/
 NIX_SOURCES    := $(sort $(shell git ls-files '*.nix' | grep -Ev '$(NOT_OURS_NIX)') \
                          $(wildcard assets/kernel/*.nix))
-RUBY_SOURCES   := $(shell git ls-files 'Podfile' '*.rb' | grep -Ev '$(NOT_OURS)')
 RUST_SOURCES   := $(shell git ls-files '*.rs' | grep -Ev '$(NOT_OURS)')
 
 # tctictl only ever runs inside the guest, so it is linted for the guest's target. Without this,
@@ -321,16 +305,12 @@ format-python: ## Format the Python sources
 format-nix: ## Format the Nix sources
 	$(SHELL_WRAPPER) nixfmt $(NIX_SOURCES)
 
-.PHONY: format-ruby
-format-ruby: ## Format the Podfile
-	$(SHELL_WRAPPER) rufo --simple-exit $(RUBY_SOURCES)
-
 .PHONY: format-docs
 format-docs: ## Format the docs and configs (Markdown, JSON, TOML, YAML)
 	$(SHELL_WRAPPER) dprint fmt
 
 .PHONY: format
-format: format-swift format-c format-rust format-shell format-python format-nix format-ruby format-docs ## Format everything
+format: format-swift format-c format-rust format-shell format-python format-nix format-docs ## Format everything
 
 # -- Checking -------------------------------------------------------------------------------------
 
@@ -366,16 +346,12 @@ format-check-python: ## Check Python formatting without changing files
 format-check-nix: ## Check Nix formatting without changing files
 	$(SHELL_WRAPPER) nixfmt --check $(NIX_SOURCES)
 
-.PHONY: format-check-ruby
-format-check-ruby: ## Check the Podfile's formatting without changing it
-	$(SHELL_WRAPPER) rufo --check --simple-exit $(RUBY_SOURCES)
-
 .PHONY: format-check-docs
 format-check-docs: ## Check docs and config formatting without changing files
 	$(SHELL_WRAPPER) dprint check
 
 .PHONY: format-check
-format-check: format-check-swift format-check-c format-check-rust format-check-shell format-check-python format-check-nix format-check-ruby format-check-docs ## Check all formatting without changing files
+format-check: format-check-swift format-check-c format-check-rust format-check-shell format-check-python format-check-nix format-check-docs ## Check all formatting without changing files
 
 .PHONY: clippy
 clippy: ## Lint the Rust sources with clippy
@@ -387,12 +363,9 @@ lint: format-check clippy ## Run all the linting tasks
 
 # -- Cleaning -------------------------------------------------------------------------------------
 
-# There is deliberately no clean-pods: Pods/ is checked in, so removing it would show up as a page of
-# deleted tracked files rather than as a clean slate. `make pods` regenerates it in place.
-
 .PHONY: clean-app
 clean-app: ## Remove the app's build output
-	xcodebuild -workspace tctiSH.xcworkspace -scheme tctiSH clean
+	xcodebuild -project tctiSH.xcodeproj -scheme tctiSH clean
 
 .PHONY: clean-rust
 clean-rust: ## Remove tctictl's build output

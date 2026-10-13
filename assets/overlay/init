@@ -163,7 +163,7 @@ chmod 700 /var/tcti-rootfs/rw-ios/userroot/root
 # And once per disk, so that someone who installs dropbear again on purpose
 # keeps it:
 #
-#   apk's world      loses dropbear, if the disk has its own copy of the file,
+#   apk's world      loses dropbear, if the disk has a copy of the file,
 #                    so that the next apk run takes dropbear and the libraries
 #                    it brought away, rather than putting them back.
 #   authorized_keys  init used to copy the repo's placeholder key in on every
@@ -230,6 +230,91 @@ if [ ! -e "$CONSOLE_STAMP" ]; then
 
 	[ -n "$MIGRATED" ] && touch "$CONSOLE_STAMP"
 fi
+
+# The image has /bin, /sbin and /lib merged into /usr: each is a link to its
+# /usr counterpart. A disk that still has them as real directories (it predates
+# the merge, or something has written to /bin since) would hide those links,
+# and everything behind them, /bin/sh included. So the disk is merged the same
+# way, with the same tool, before the overlay is mounted.
+#
+# merge-usr moves every entry across, whiteouts included, so files the disk
+# deleted stay deleted. Where the disk had a file under both names, the /usr
+# copy is kept and the other is set aside beside the root, as
+# userrootbin.unmerged; that is moved onto the disk as /bin.unmerged, and the
+# next login says so. If the merge fails, the directories are set aside whole,
+# so that the image's links work.
+#
+# This and the clean-up below run outside the guest's root, where an absolute
+# link on the disk would point into this initramfs, so they could move or
+# delete the image's files. A disk whose /usr, or a directory in it, is a link
+# is therefore not merged or cleaned; its directories are set aside as if the
+# merge had failed.
+USRLINKED=
+for dir in usr usr/bin usr/sbin usr/lib; do
+	[ -L "$USERROOT/$dir" ] && USRLINKED=1
+done
+
+UNMERGED=
+for dir in bin sbin lib; do
+	if [ -d "$USERROOT/$dir" ] && [ ! -L "$USERROOT/$dir" ]; then
+		UNMERGED="$UNMERGED /$dir"
+	fi
+done
+if [ -n "$UNMERGED" ]; then
+	mkdir -p "$USERROOT/var/log"
+	MERGELOG="$USERROOT/var/log/tctish-merge-usr.log"
+	[ -n "$USRLINKED" ] && echo "not merged: the disk's /usr, or a directory in it, is a link" >"$MERGELOG"
+	if [ -z "$USRLINKED" ] && /usr/bin/merge-usr --root "$USERROOT" >"$MERGELOG" 2>&1; then
+		echo "tctish: merged the disk's$UNMERGED into /usr, as the image is" >/dev/kmsg
+		NOTICE="merged$UNMERGED on your disk into /usr, as Alpine now has them"
+	else
+		echo "tctish: couldn't merge the disk's$UNMERGED into /usr; setting them aside" >/dev/kmsg
+		NOTICE="couldn't merge$UNMERGED on your disk into /usr, so set them aside"
+		for dir in $UNMERGED; do
+			if [ -d "$USERROOT$dir" ] && [ ! -L "$USERROOT$dir" ]; then
+				mv "$USERROOT$dir" "$USERROOT$dir.unmerged-failed"
+			fi
+		done
+	fi
+
+	ASIDE=
+	for dir in bin sbin lib; do
+		if [ -e "${USERROOT}$dir.unmerged" ]; then
+			TO="/$dir.unmerged"
+			n=1
+			while [ -e "$USERROOT$TO" ]; do
+				TO="/$dir.unmerged.$n"
+				n=$((n + 1))
+			done
+			mv "${USERROOT}$dir.unmerged" "$USERROOT$TO"
+			ASIDE="$ASIDE $TO"
+		fi
+	done
+	[ -n "$ASIDE" ] && NOTICE="$NOTICE. Files that were there twice are in$ASIDE"
+
+	# Said once, at the next login, by a script that then removes itself.
+	mkdir -p "$USERROOT/etc/profile.d"
+	cat >"$USERROOT/etc/profile.d/tctish-merge-notice.sh" <<-EOF
+		echo "tctiSH: $NOTICE. The details are in /var/log/tctish-merge-usr.log."
+		echo
+		rm -f /etc/profile.d/tctish-merge-notice.sh
+	EOF
+fi
+
+# tctiSH's guest tools talk to the app and must match it. A copy of one on the
+# disk, left by an older image or installed by hand, hides the image's: a
+# tctictl from 2022 that doesn't know what the app asks of it now, or a script
+# that still drives the monitor over TCP. These names are tctiSH's, so every
+# boot removes any copy from the disk, edited or not, and any whiteout, which
+# hides the image's copy just as well, and logs each to the kernel log. Only
+# /usr/bin is checked: the merge above has left /bin a link to it.
+for tool in "$USERROOT"/usr/bin/tctictl "$USERROOT"/usr/bin/tctish-* "$USERROOT"/usr/bin/mount.ios; do
+	[ -z "$USRLINKED" ] || break
+	if [ -e "$tool" ] || [ -L "$tool" ]; then
+		rm -f "$tool" &&
+			echo "tctish: removed the disk's copy of ${tool#"$USERROOT"}, which hid tctiSH's" >/dev/kmsg
+	fi
+done
 
 
 # ... and finally, mount together our union.

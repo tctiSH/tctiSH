@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		81B605AD3C0955DC2C31EBCC /* Pods_tctiSH.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C9FFBC130DA1A3B7A450025B /* Pods_tctiSH.framework */; };
 		8D2AC18E28C7EF2D005DB7D4 /* Atomics in Frameworks */ = {isa = PBXBuildFile; productRef = 8D2AC18D28C7EF2D005DB7D4 /* Atomics */; };
 		8D4939E428C33B0300F57421 /* empty.qcow in Resources */ = {isa = PBXBuildFile; fileRef = 8D4939E328C33B0300F57421 /* empty.qcow */; };
 		8DA7A63728C19A4900FDBD78 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 4959FFDA2447F971001F42C0 /* SwiftTerm */; };
@@ -123,10 +122,7 @@
 		8DF5F04E28C1C16000FB1F1C /* kvmvapic.bin */ = {isa = PBXFileReference; lastKnownFileType = archive.macbinary; name = kvmvapic.bin; path = "sysroot-iOS-arm64/share/qemu/kvmvapic.bin"; sourceTree = "<group>"; };
 		8DF5F04F28C1C16000FB1F1C /* vgabios-stdvga.bin */ = {isa = PBXFileReference; lastKnownFileType = archive.macbinary; name = "vgabios-stdvga.bin"; path = "sysroot-iOS-arm64/share/qemu/vgabios-stdvga.bin"; sourceTree = "<group>"; };
 		8DF5F05328C1C18200FB1F1C /* efi-virtio.rom */ = {isa = PBXFileReference; lastKnownFileType = file; name = "efi-virtio.rom"; path = "sysroot-iOS-arm64/share/qemu/efi-virtio.rom"; sourceTree = "<group>"; };
-		9A05E33B868D09494792FFFD /* Pods-tctiSH.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-tctiSH.debug.xcconfig"; path = "Target Support Files/Pods-tctiSH/Pods-tctiSH.debug.xcconfig"; sourceTree = "<group>"; };
 		AD7C1A0800000008005A2252 /* StikJIT.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = StikJIT.xcframework; path = "build-StikJIT/StikJIT.xcframework"; sourceTree = SOURCE_ROOT; };
-		B59ED421CAD9966D0A97855E /* Pods-tctiSH.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-tctiSH.release.xcconfig"; path = "Target Support Files/Pods-tctiSH/Pods-tctiSH.release.xcconfig"; sourceTree = "<group>"; };
-		C9FFBC130DA1A3B7A450025B /* Pods_tctiSH.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_tctiSH.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		DCF690C3305583AC0091B7D0 /* JITHelper.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = JITHelper.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -203,7 +199,6 @@
 				8DF5F03B28C1BCEC00FB1F1C /* gthread-2.0.0.framework in Frameworks */,
 				8DF5F04528C1BCEF00FB1F1C /* charset.1.framework in Frameworks */,
 				8DF5F04128C1BCED00FB1F1C /* pixman-1.0.framework in Frameworks */,
-				81B605AD3C0955DC2C31EBCC /* Pods_tctiSH.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -233,7 +228,6 @@
 				8DF5F03128C1BCEA00FB1F1C /* intl.8.framework */,
 				8DF5F03228C1BCEB00FB1F1C /* pixman-1.0.framework */,
 				8DF5F02828C1BCC800FB1F1C /* qemu-x86_64-softmmu.framework */,
-				C9FFBC130DA1A3B7A450025B /* Pods_tctiSH.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -255,7 +249,6 @@
 				AD7C1A2000000020005A2252 /* JITHelperProtocol */,
 				49BD1A5B224207B5005A2252 /* Products */,
 				49AE019F2410AB0A0051E902 /* Frameworks */,
-				8DEEF6D2645E52F7349738A7 /* Pods */,
 			);
 			indentWidth = 4;
 			sourceTree = "<group>";
@@ -278,15 +271,6 @@
 			name = Packages;
 			sourceTree = "<group>";
 		};
-		8DEEF6D2645E52F7349738A7 /* Pods */ = {
-			isa = PBXGroup;
-			children = (
-				9A05E33B868D09494792FFFD /* Pods-tctiSH.debug.xcconfig */,
-				B59ED421CAD9966D0A97855E /* Pods-tctiSH.release.xcconfig */,
-			);
-			path = Pods;
-			sourceTree = "<group>";
-		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -294,11 +278,9 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 49BD1A77224207B7005A2252 /* Build configuration list for PBXNativeTarget "tctiSH" */;
 			buildPhases = (
-				55899EBA7CE230C419DDBE7A /* [CP] Check Pods Manifest.lock */,
 				49BD1A56224207B5005A2252 /* Sources */,
 				8DE8209528C199FB0035686B /* Frameworks */,
 				49BD1A58224207B5005A2252 /* Resources */,
-				67CB01EBDF83BB584F06E42D /* [CP] Embed Pods Frameworks */,
 				8DF5F02B28C1BCC900FB1F1C /* Embed Frameworks */,
 				DCF690CB305583AC0091B7D0 /* Embed Foundation Extensions */,
 			);
@@ -410,45 +392,6 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		55899EBA7CE230C419DDBE7A /* [CP] Check Pods Manifest.lock */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
-				"${PODS_ROOT}/Manifest.lock",
-			);
-			name = "[CP] Check Pods Manifest.lock";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(DERIVED_FILE_DIR)/Pods-tctiSH-checkManifestLockResult.txt",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
-			showEnvVarsInLog = 0;
-		};
-		67CB01EBDF83BB584F06E42D /* [CP] Embed Pods Frameworks */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-tctiSH/Pods-tctiSH-frameworks-${CONFIGURATION}-input-files.xcfilelist",
-			);
-			name = "[CP] Embed Pods Frameworks";
-			outputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-tctiSH/Pods-tctiSH-frameworks-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-tctiSH/Pods-tctiSH-frameworks.sh\"\n";
-			showEnvVarsInLog = 0;
-		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -602,7 +545,6 @@
 		};
 		49BD1A78224207B7005A2252 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 9A05E33B868D09494792FFFD /* Pods-tctiSH.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = tctiSH;
 				CLANG_ENABLE_MODULES = YES;
@@ -642,7 +584,6 @@
 		};
 		49BD1A79224207B7005A2252 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = B59ED421CAD9966D0A97855E /* Pods-tctiSH.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = tctiSH;
 				CLANG_ENABLE_MODULES = YES;

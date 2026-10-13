@@ -61,8 +61,8 @@ final class PairingKeepAlive {
 
     /// Starts holding the app alive. Callable from any thread.
     func begin(subtitle: String) {
-        DispatchQueue.main.async {
-            guard !self.isRunning else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.isRunning else { return }
             self.isRunning = true
 
             self.assertion = UIApplication.shared.beginBackgroundTask(withName: "Pairing") {

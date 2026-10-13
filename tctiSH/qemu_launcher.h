@@ -58,8 +58,9 @@ unsigned int qemu_max_vcpus(void);
 /// `qemu_max_vcpus()`. A snapshot loaded at launch brings the machine to the
 /// vCPUs it was taken with, so its count only saves that work.
 ///
-/// `console_socket_path` and `agent_socket_path` are where QEMU listens for the
-/// app's connections to `hvc0`, the terminal, and to the guest agent;
+/// `console_socket_path`, `agent_socket_path` and `control_socket_path` are
+/// where QEMU listens for the app's connections to `hvc0`, the terminal, to the
+/// guest agent, and to `tctictl`'s port;
 /// `serial_socket_path` and `management_socket_path` for its connections to the
 /// serial port, which carries the kernel's log, and to the user's monitor.
 /// `serial_log_path` is where QEMU appends everything the serial port sends,
@@ -69,10 +70,10 @@ void run_background_qemu(const char *qemu_path, const char *kernel_path, const c
                          const char *shared_folder_path, const char *boot_image_name,
                          const char *memory_value, const char *monitor_socket_path,
                          const char *console_socket_path, const char *agent_socket_path,
-                         const char *serial_socket_path, const char *serial_log_path,
-                         const char *management_socket_path, bool start_native,
-                         bool bless_jit_regions, unsigned int tb_size_mib, unsigned int chunk_mib,
-                         unsigned int vcpus);
+                         const char *control_socket_path, const char *serial_socket_path,
+                         const char *serial_log_path, const char *management_socket_path,
+                         bool start_native, bool bless_jit_regions, unsigned int tb_size_mib,
+                         unsigned int chunk_mib, unsigned int vcpus);
 
 /// The running VM's code cache, in bytes. All report 0 before QEMU is up.
 ///

@@ -153,16 +153,6 @@
           # Generates StikJIT's Xcode project; see build_stikjit.sh.
           pkgs.xcodegen
 
-          # Both targets are synchronized root groups, so CocoaPods has to be
-          # new enough to know the PBXFileSystemSynchronizedRootGroup ISA.
-          # CocoaPods 1.13.0 on Xcodeproj 1.23.0 -- what the old 2023 pin shipped
-          # -- has no such ISA and aborts `pod install` with "attempted to
-          # initialize an object with unknown ISA
-          # `PBXFileSystemSynchronizedRootGroup`". It fails loudly rather than
-          # corrupting anything, but it does fail. 1.16.2 on Xcodeproj 1.27.0 was
-          # verified to round-trip both targets intact.
-          pkgs.cocoapods
-
           rustBinaries
           nightlyRustfmt
         ];
@@ -204,7 +194,6 @@
         dprint # Markdown, JSON, TOML, YAML
         nixfmt # Nix (RFC 166 style)
         ruff # Python
-        rufo # Ruby -- one file, the Podfile
         shfmt
       ];
     in

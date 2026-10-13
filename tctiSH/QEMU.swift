@@ -6,7 +6,7 @@
 //  Copyright ©2022 Kate Temkin. All rights reserved.
 //
 
-import Socket
+import Atomics
 import Foundation
 
 /// Structure that stores the metadata associated with a given mount.
@@ -32,7 +32,7 @@ public class QEMUInterface {
     ///
     /// Private, and touched only with `monitorLock` held: there is one of these
     /// and more than one thread that wants it.
-    private var monitorSocket: Socket?
+    private var monitorSocket: SocketConnection?
     private var monitorSocketPath: String?
 
     /// The disk this launch runs from, fixed when the interface is made.
@@ -129,7 +129,7 @@ public class QEMUInterface {
         run_background_qemu(
             qemuImage, kernelPath, initrdPath, bundlePrefix, diskPath, sharedFolder, bootImageName,
             memoryValue, monitorSocketPath, consoleSocketPath, Self.agentSocketPath,
-            ChardevTransport.kernelLog.socketPath, serialLogPath,
+            Self.controlSocketPath, ChardevTransport.kernelLog.socketPath, serialLogPath,
             ChardevTransport.vmManagement.socketPath, AppDelegate.startsNative,
             AppDelegate.blessJitRegions,
             UInt32(tbSize), UInt32(CodeCache.initialSize), UInt32(vcpus));
@@ -823,7 +823,9 @@ public class QEMUInterface {
         let terminated = "\(command)\n"
 
         guard ensureMonitorConnection(), let monitorSocket else { return false }
-        guard (try? monitorSocket.write(from: terminated.data(using: .utf8)!)) != nil else {
+        guard monitorSocket.write(Array(terminated.utf8)) == 0 else {
+            // Gone, most likely; the next command connects again.
+            self.monitorSocket = nil
             return false
         }
 
@@ -831,24 +833,39 @@ public class QEMUInterface {
         return true
     }
 
-    /// Waits up to `milliseconds` for the monitor to have something to say.
-    ///
-    /// `Socket.wait` rather than the socket's `isReadableOrWritable`, which
-    /// looks like the obvious call but isn't: it selects on the write set as
-    /// well as the read set, and a connected socket with an empty send buffer
-    /// is always writable.
-    ///
-    /// `Socket.wait` is the same `select` with the write set left out.
+    /// Waits up to `milliseconds` for the monitor to have something to say, or
+    /// to have closed, which a read then finds.
     private func monitorHasOutput(within milliseconds: UInt) -> Bool {
         guard let monitorSocket else { return false }
 
-        let ready = try? Socket.wait(for: [monitorSocket], timeout: milliseconds)
-        return ready?.isEmpty == false
+        var descriptor = pollfd(fd: monitorSocket.fd, events: Int16(POLLIN), revents: 0)
+        return poll(&descriptor, 1, Int32(min(milliseconds, UInt(Int32.max)))) > 0
+    }
+
+    /// Reads what the monitor has said: "" if it has said nothing after all,
+    /// nil if it has closed, in which case the next command connects again.
+    /// Call with the lock held.
+    private func readMonitorChunk() -> String? {
+        guard let monitorSocket else { return nil }
+
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        let count = buffer.withUnsafeMutableBytes {
+            read(monitorSocket.fd, $0.baseAddress, $0.count)
+        }
+        if count > 0 {
+            return String(decoding: buffer[..<count], as: UTF8.self)
+        }
+        if count < 0, errno == EAGAIN || errno == EINTR {
+            return ""
+        }
+
+        self.monitorSocket = nil
+        return nil
     }
 
     /// Reads until the monitor's prompt comes round. Call with the lock held.
     private func readUntilPrompt(timeout: TimeInterval) -> String? {
-        guard let monitorSocket else { return nil }
+        guard monitorSocket != nil else { return nil }
 
         let deadline = Date().addingTimeInterval(timeout)
         var response = ""
@@ -864,7 +881,7 @@ public class QEMUInterface {
             guard monitorHasOutput(within: slice) else { continue }
 
             // Readable with nothing to give means the far end has gone.
-            guard let chunk = try? monitorSocket.readString(), !chunk.isEmpty else {
+            guard let chunk = readMonitorChunk() else {
                 Log.qemu.warn("the monitor connection closed")
                 return nil
             }
@@ -913,12 +930,7 @@ public class QEMUInterface {
     /// Throws away whatever the monitor has already said. Call with the lock
     /// held.
     private func drainMonitor() {
-        guard let monitorSocket else { return }
-
-        while monitorHasOutput(within: 0),
-            let leftover = try? monitorSocket.readString(),
-            !leftover.isEmpty
-        {}
+        while monitorHasOutput(within: 0), let leftover = readMonitorChunk(), !leftover.isEmpty {}
     }
 
     /// Whether `tag` names a snapshot that could actually be loaded.
@@ -1192,6 +1204,9 @@ public class QEMUInterface {
     /// Where QEMU listens for the app's connection to the guest agent.
     static let agentSocketPath = socketPath("agent")
 
+    /// Where QEMU listens for the app's connection to `tctictl`'s port.
+    static let controlSocketPath = socketPath("ctl")
+
     /// Where QEMU keeps what a character device sends, by name. Beside the
     /// sockets, and made afresh at every launch, as they are.
     static func logPath(_ name: String) -> String {
@@ -1200,7 +1215,8 @@ public class QEMUInterface {
 
     /// Where QEMU listens for one of the app's connections to it, by name.
     ///
-    /// The names in use are `monitor`, `agent`, `hvc0`, `ttyS0` and `hmp`.
+    /// The names in use are `monitor`, `agent`, `ctl`, `hvc0`, `ttyS0` and
+    /// `hmp`.
     ///
     /// In the app's tmp folder, which the Files app doesn't show, rather than
     /// in Documents, which it does. A socket deleted there leaves QEMU unable
@@ -1298,21 +1314,27 @@ public class QEMUInterface {
         return hostPath
     }
 
-    /// Sets up a given host URL for mounting.
+    /// Sets up a given host URL for mounting, and returns its name in the
+    /// shared folder, or why it couldn't.
     func mount(
         bookmarkData: Data, interfaceId: String? = nil, predefinedTag: String? = nil,
         persistent: Bool = true
-    ) -> String? {
+    ) -> Result<String, GuestRefusal> {
         let tag = predefinedTag ?? generateMountTag(length: 6)
         let id = interfaceId ?? generateMountTag(length: 6)
 
-        let hostPath = setupMountPermissions(bookmarkData: bookmarkData)
+        guard let hostPath = setupMountPermissions(bookmarkData: bookmarkData) else {
+            return .failure(GuestRefusal("the folder can't be reached any more; pick it again"))
+        }
 
-        // ... and, finally, mount the target URL.
-        if persistent {
+        // ... and, finally, mount the target URL, remembering it once, and only if that worked.
+        let mounted = mount(hostPath: hostPath, interfaceId: id, predefinedTag: tag)
+        if case .success = mounted, persistent,
+            !getPersistentMounts().contains(where: { $0.mount_tag == tag })
+        {
             makeMountPersistent(bookmarkData: bookmarkData, interfaceId: id, tag: tag)
         }
-        return mount(hostPath: hostPath!, interfaceId: id, predefinedTag: tag)
+        return mounted
     }
 
     /// Saves mount data into our "VM" configuration, so we can automatically
@@ -1385,28 +1407,48 @@ public class QEMUInterface {
     }
 
     /// Sets up a given host URL for mounting.
-    func mount(hostPath: URL, interfaceId: String? = nil, predefinedTag: String? = nil) -> String {
+    func mount(
+        hostPath: URL, interfaceId: String? = nil, predefinedTag: String? = nil
+    ) -> Result<String, GuestRefusal> {
         return mount(
             hostPath: hostPath.path, interfaceId: interfaceId, predefinedTag: predefinedTag)
     }
 
-    /// Sets up a given host path for mounting.
-    func mount(hostPath: String, interfaceId: String? = nil, predefinedTag: String? = nil) -> String
-    {
+    /// Sets up a given host path for mounting: links it into the shared folder
+    /// as `predefinedTag` or a new name, which the guest sees under `/ios_host`
+    /// because QEMU's 9p follows the link. Returns the name, or why it
+    /// couldn't.
+    ///
+    /// Never replaces anything. A link to the same folder is reused. A link to
+    /// another folder is refused, since its mounts would start showing the new
+    /// one, and so is a real file or folder by that name, which is the
+    /// person's.
+    func mount(
+        hostPath: String, interfaceId: String? = nil, predefinedTag: String? = nil
+    ) -> Result<String, GuestRefusal> {
         let tag = predefinedTag ?? generateMountTag(length: 6)
+        let link = getSharedFolder().appendingPathComponent(tag, isDirectory: false).path
+        let files = FileManager.default
+        let target = URL(fileURLWithPath: hostPath).resolvingSymlinksInPath().path
 
-        // Use our tag to get a unique symlink path...
-        var symlinkDestination = getSharedFolder()
-        symlinkDestination.appendPathComponent(tag, isDirectory: true)
-
-        // ... and then create a symlink to the target.
-        if FileManager.default.fileExists(atPath: symlinkDestination.path) {
-            try? FileManager.default.removeItem(at: symlinkDestination)
+        // Not `fileExists`, which follows links: what matters is what's at the name itself.
+        if let existing = try? files.destinationOfSymbolicLink(atPath: link) {
+            guard URL(fileURLWithPath: existing).resolvingSymlinksInPath().path == target else {
+                return .failure(GuestRefusal("'\(tag)' already shares another folder"))
+            }
+            return .success(tag)
         }
-        try? FileManager.default.createSymbolicLink(
-            atPath: symlinkDestination.path, withDestinationPath: hostPath)
+        if (try? files.attributesOfItem(atPath: link)) != nil {
+            return .failure(GuestRefusal("/ios_host already has a file or folder called '\(tag)'"))
+        }
 
-        return tag
+        do {
+            try files.createSymbolicLink(atPath: link, withDestinationPath: hostPath)
+        } catch {
+            return .failure(
+                GuestRefusal("couldn't share it as '\(tag)': \(error.localizedDescription)"))
+        }
+        return .success(tag)
     }
 
     /// Generates a random tag suitable for use in mounting.
@@ -1724,24 +1766,16 @@ public class QEMUInterface {
     @discardableResult
     private func ensureMonitorConnection() -> Bool {
 
-        // If we already have a connection, we're done!
-        if let monitorSocket = monitorSocket {
-            if monitorSocket.isConnected {
-                return true
-            }
+        // If we already have a connection, we're done! One that has closed is forgotten as soon as
+        // that's found, so this one is still open as far as anyone knows.
+        if monitorSocket != nil {
+            return true
         }
 
         guard let monitorSocketPath else { return false }
 
-        // Create a connection to QEMU via QMP.
-        guard let socket = try? Socket.create(family: .unix, type: .stream, proto: .unix) else {
-            Log.qemu.fail("could not create a monitor socket")
-            return false
-        }
-
-        do {
-            try socket.connect(to: monitorSocketPath)
-        } catch {
+        // Connect to QEMU's HMP monitor.
+        guard case .connected(let socket) = SocketConnection.open(monitorSocketPath) else {
             Log.qemu.warn("monitor is not listening at \(monitorSocketPath)")
             return false
         }
@@ -1818,6 +1852,258 @@ public class QEMUInterface {
         // Harmless if it's already running, and necessary if it isn't.
         writeMonitorCommand("c")
         return true
+    }
+
+    // MARK: Asked for from inside the guest
+
+    /// Why something `tctictl` asked for wasn't done, as a line for the person
+    /// who ran it.
+    struct GuestRefusal: Error {
+        let reason: String
+
+        init(_ reason: String) {
+            self.reason = reason
+        }
+    }
+
+    /// The monitor commands `tctictl monitor` passes on, by name: the read-only
+    /// ones. Everything else is for the VM Management TTY, which refuses
+    /// nothing. An allowlist, because much of the monitor can break the app's
+    /// state or the app itself (`qemu-io` can make it abort), and each QEMU
+    /// release adds commands.
+    private static let monitorCommandsAllowedToGuest: Set<String> = [
+        "info", "help", "?", "x", "xp", "print", "p", "sum",
+    ]
+
+    /// How long a snapshot asked for by the guest may take. Longer than a
+    /// background save's, since it runs in the foreground.
+    private static let guestSnapshotDeadline: TimeInterval = 120
+
+    /// How long other monitor commands from the guest may take.
+    private static let guestMonitorDeadline: TimeInterval = 30
+
+    /// `AppDelegate.machineIsAway`, for other threads: whether the machine is
+    /// being saved, is parked, or is coming back from a park. The guest's
+    /// snapshot and monitor requests check it with `snapshotWorkLock` held,
+    /// which the session's save and park also take, so that a request can't
+    /// land between them.
+    static let machineAway = ManagedAtomic<Bool>(false)
+
+    /// The machine each guest snapshot was taken on, by disk and tag: its vCPU
+    /// count and the machine's `resumeStamp`, as "4|<stamp>". A snapshot loads
+    /// only into the machine that took it, and QEMU finds a mismatch only after
+    /// it has reverted the disk and reset the machine, so a load is refused
+    /// unless both match.
+    private static var guestSnapshots: [String: String] {
+        get {
+            UserDefaults.standard.dictionary(forKey: "guest_snapshots") as? [String: String]
+                ?? [:]
+        }
+        set { UserDefaults.standard.set(newValue, forKey: "guest_snapshots") }
+    }
+
+    private func guestSnapshotKey(_ tag: String) -> String {
+        "\(disk)/\(tag)"
+    }
+
+    /// The machine that is running, as `guestSnapshots` records it.
+    private static var runningMachineStamp: String {
+        VmMemory.bootedArgument.map { VmSnapshots.resumeStamp(memory: $0) } ?? ""
+    }
+
+    /// Why the guest's snapshot and monitor requests can't run right now, if
+    /// they can't. Call with `snapshotWorkLock` held.
+    private static var machineAwayRefusal: GuestRefusal? {
+        machineAway.load(ordering: .relaxed)
+            ? GuestRefusal("tctiSH is saving your session; try again") : nil
+    }
+
+    /// Posted on the main queue when a snapshot the guest asked for fails to
+    /// load and Linux is started afresh, with the tag as the object.
+    static let guestSnapshotLoadFailed = Notification.Name("io.ara.tctish.guestSnapshotLoadFailed")
+
+    /// Why `tag` can't be used from the guest, if it can't. It must start with
+    /// a letter: QEMU's load tries a tag as a snapshot id first, and an id
+    /// could be the session's snapshot.
+    private static func guestSnapshotRefusal(_ tag: String) -> GuestRefusal? {
+        guard tag.range(of: "^[A-Za-z][A-Za-z0-9._-]{0,63}$", options: .regularExpression) != nil
+        else {
+            return GuestRefusal(
+                "a snapshot's name starts with a letter, then up to 63 letters, digits, '.', "
+                    + "'_' and '-'")
+        }
+        guard !ownedSnapshotTags.contains(tag) else {
+            return GuestRefusal("'\(tag)' is tctiSH's, for your session; pick another name")
+        }
+        return nil
+    }
+
+    /// Saves a snapshot named `tag` for the guest, which keeps running
+    /// afterwards. Off the main thread, while vCPUs aren't changing, which the
+    /// caller checks.
+    func saveSnapshotForGuest(tag: String) -> Result<String, GuestRefusal> {
+        if let refusal = Self.guestSnapshotRefusal(tag) { return .failure(refusal) }
+
+        Self.snapshotWorkLock.lock()
+        defer { Self.snapshotWorkLock.unlock() }
+        if let refusal = Self.machineAwayRefusal { return .failure(refusal) }
+
+        let started = Date()
+        guard let reply = runMonitorCommand("savevm \(tag)", timeout: Self.guestSnapshotDeadline)
+        else {
+            return .failure(
+                GuestRefusal("no answer within \(Int(Self.guestSnapshotDeadline))s"))
+        }
+        if let failure = Self.monitorError(in: reply) { return .failure(GuestRefusal(failure)) }
+
+        // With no vCPU count, nothing is recorded, so `tctictl` can't load the snapshot.
+        let vcpus = vcpuSlots()?.plugged.count
+        Self.guestSnapshots[guestSnapshotKey(tag)] =
+            vcpus.map { "\($0)|\(Self.runningMachineStamp)" }
+        Log.qemu.note(
+            String(
+                format: "guest snapshot: saved '%@' in %.1fs, %@ vCPUs", tag,
+                -started.timeIntervalSinceNow, vcpus.map(String.init) ?? "?"))
+        return .success("saved \(tag)")
+    }
+
+    /// Loads the snapshot `tag` for the guest and starts it running. Off the
+    /// main thread, while vCPUs aren't changing.
+    ///
+    /// Once the load works, the `tctictl` that asked no longer exists, so the
+    /// answer matters only on failure. Only snapshots `saveSnapshotForGuest`
+    /// took on this machine, with the vCPUs Linux has now, are loaded: QEMU
+    /// reverts the disk and resets the machine before reading the snapshot's
+    /// RAM, so a mismatch fails with the machine already gone. If a load fails
+    /// anyway, Linux is started afresh, as for a recovery boot, so that the
+    /// next background save doesn't keep the broken machine as the session.
+    func loadSnapshotForGuest(tag: String, vcpus present: Int?) -> Result<String, GuestRefusal> {
+        if let refusal = Self.guestSnapshotRefusal(tag) { return .failure(refusal) }
+
+        let fields = Self.guestSnapshots[guestSnapshotKey(tag)]?.split(
+            separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let fields, fields.count == 2, let taken = Int(fields[0]) else {
+            return .failure(
+                GuestRefusal(
+                    "'\(tag)' wasn't saved with 'tctictl snapshot save'; VM Management can try "
+                        + "loading it"))
+        }
+        guard fields[1] == Self.runningMachineStamp else {
+            return .failure(
+                GuestRefusal(
+                    "'\(tag)' was saved by another version of tctiSH, or with other VM Memory, "
+                        + "and won't load into this machine"))
+        }
+        if let present, taken != present {
+            return .failure(
+                GuestRefusal(
+                    "'\(tag)' was taken with \(taken) vCPUs, and Linux has \(present) now"))
+        }
+
+        Self.snapshotWorkLock.lock()
+        defer { Self.snapshotWorkLock.unlock() }
+        if let refusal = Self.machineAwayRefusal { return .failure(refusal) }
+
+        guard let tags = snapshotTagsOnDisk() else {
+            return .failure(GuestRefusal("the monitor didn't list the snapshots"))
+        }
+        guard tags.contains(tag) else {
+            return .failure(GuestRefusal("there's no snapshot '\(tag)' on this disk"))
+        }
+
+        let reply = runMonitorCommand("loadvm \(tag)", timeout: Self.guestSnapshotDeadline)
+        let failure =
+            reply.map { Self.monitorError(in: $0) }
+            ?? "no answer within \(Int(Self.guestSnapshotDeadline))s"
+        if let failure {
+            // By now the disk is reverted and the machine reset, and what's left can't run. A
+            // reset, as for a recovery boot, starts Linux afresh on the reverted disk, and nothing
+            // is saved until it is up.
+            Log.qemu.warn("guest snapshot: 'loadvm \(tag)' failed: \(failure); starting afresh")
+            requestRecoveryBoot()
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: Self.guestSnapshotLoadFailed, object: tag)
+            }
+            return .failure(GuestRefusal(failure))
+        }
+
+        // HMP's loadvm starts the machine again if it was running, which it was.
+        if !machineIsRunning() {
+            runMonitorCommandCleanly("cont", purpose: "guest snapshot")
+        }
+        Log.qemu.note("guest snapshot: loaded '\(tag)'")
+        DispatchQueue.main.async { Vcpus.machineMayHaveChanged() }
+        return .success("loaded \(tag)")
+    }
+
+    /// Deletes the snapshot `tag` for the guest.
+    func deleteSnapshotForGuest(tag: String) -> Result<String, GuestRefusal> {
+        if let refusal = Self.guestSnapshotRefusal(tag) { return .failure(refusal) }
+
+        Self.snapshotWorkLock.lock()
+        defer { Self.snapshotWorkLock.unlock() }
+        if let refusal = Self.machineAwayRefusal { return .failure(refusal) }
+
+        guard let reply = runMonitorCommand("delvm \(tag)", timeout: Self.guestMonitorDeadline)
+        else {
+            return .failure(GuestRefusal("no answer within \(Int(Self.guestMonitorDeadline))s"))
+        }
+        if let failure = Self.monitorError(in: reply) { return .failure(GuestRefusal(failure)) }
+
+        Self.guestSnapshots[guestSnapshotKey(tag)] = nil
+        return .success("deleted \(tag)")
+    }
+
+    /// Runs a monitor command for `tctictl monitor`, if it's one of
+    /// `monitorCommandsAllowedToGuest`, and returns what the monitor printed.
+    /// `tctictl snapshot list` comes here too, as `info snapshots`.
+    ///
+    /// The command goes through the monitor's line editor, so it must be
+    /// printable ASCII: a control character or an escape could edit it into
+    /// another command, or recall one of the app's from history. A command's
+    /// name ends at a `/` as well as a space (`x/16x`). And it mustn't produce
+    /// the prompt, which is how the app knows a command has finished: not in
+    /// the command, which is echoed, nor through `x/s`, which prints strings
+    /// from guest memory.
+    func runMonitorCommandForGuest(_ command: String) -> Result<String, GuestRefusal> {
+        let line = command.trimmingCharacters(in: .whitespaces)
+        guard !line.isEmpty, line.unicodeScalars.allSatisfy({ (0x20...0x7E).contains($0.value) })
+        else {
+            return .failure(GuestRefusal("one command, on one line, in plain ASCII"))
+        }
+        guard !line.contains(Self.monitorPrompt) else {
+            return .failure(GuestRefusal("a command can't contain '\(Self.monitorPrompt)'"))
+        }
+
+        let word = String(line.prefix { $0 != " " && $0 != "/" })
+        guard Self.monitorCommandsAllowedToGuest.contains(word) else {
+            return .failure(
+                GuestRefusal(
+                    "'\(word)' isn't available from inside Linux, only commands that look "
+                        + "(info, x, xp, print, sum, help); VM Management has the rest"))
+        }
+        if line.range(of: "^xp?[ ]*/[0-9]*[a-z]*s", options: .regularExpression) != nil {
+            return .failure(GuestRefusal("x and xp can't print strings (/s) from inside Linux"))
+        }
+
+        // Under the lock, like the snapshot requests: not while the machine is being saved or
+        // parked.
+        Self.snapshotWorkLock.lock()
+        defer { Self.snapshotWorkLock.unlock() }
+        if let refusal = Self.machineAwayRefusal { return .failure(refusal) }
+
+        guard let reply = runMonitorCommand(line, timeout: Self.guestMonitorDeadline) else {
+            return .failure(GuestRefusal("no answer within \(Int(Self.guestMonitorDeadline))s"))
+        }
+        return .success(Self.forGuest(reply))
+    }
+
+    /// A monitor reply as the guest should see it: the lines it printed,
+    /// without its echo of the command or its prompt.
+    private static func forGuest(_ reply: String) -> String {
+        lines(of: reply)
+            .filter { !$0.unicodeScalars.contains("\u{1B}") && !$0.hasPrefix(monitorPrompt) }
+            .joined(separator: "\n")
     }
 }
 

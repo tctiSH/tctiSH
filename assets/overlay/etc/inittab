@@ -29,7 +29,7 @@ hvc0::respawn:/usr/bin/tctish-login
 # listens for it. Without it the request is received and ignored.
 kmsg::respawn:/usr/bin/tctish-powerbtn
 
-# Answer the app, which asks whether Linux is up. See tctish-agent.
+# Answer the app: whether Linux is up, and what it asks of the guest. See tctish-agent.
 kmsg::respawn:/usr/bin/tctish-agent
 
 kmsg::respawn:/sbin/syslogd -n -S -s 12 -b 8

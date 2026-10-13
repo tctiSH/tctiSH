@@ -1,6 +1,8 @@
 //! tctiSH configuration and control tool.
 
+mod clock;
 mod comms;
+mod machine;
 mod mount;
 mod simple;
 mod ui;
@@ -33,10 +35,29 @@ enum Commands {
         value: Option<String>,
     },
 
-    #[clap(about = "Mount an iOS path into tctiSH")]
+    #[clap(about = "Mount an iOS folder, picked on the device, into tctiSH")]
     Mount {
-        #[clap(help = "The linux path where the directory should be mounted")]
+        #[clap(help = "The linux path where the folder should be mounted")]
         mountpoint: String,
+
+        #[clap(
+            long,
+            help = "What to call it under /ios_host; the mountpoint's name if not given"
+        )]
+        name: Option<String>,
+    },
+
+    #[clap(about = "Save, load and list snapshots of the whole machine")]
+    Snapshot {
+        #[clap(subcommand)]
+        subcommand: SnapshotCommands,
+    },
+
+    #[clap(about = "Run commands on QEMU's monitor, or with none, read them from the input")]
+    Monitor {
+        #[clap(help = "The command, and its arguments")]
+        #[clap(allow_hyphen_values = true)]
+        command: Vec<String>,
     },
 
     // Low-level commands not used by typical users.
@@ -45,6 +66,23 @@ enum Commands {
         #[clap(subcommand)]
         subcommand: LowlevelCommands,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum SnapshotCommands {
+    #[clap(
+        about = "Save a snapshot of Linux and its disk. Each keeps Linux's memory, so delete old ones"
+    )]
+    Save { name: String },
+
+    #[clap(about = "Go back to a snapshot. Everything since is lost")]
+    Load { name: String },
+
+    #[clap(about = "Delete a snapshot")]
+    Delete { name: String },
+
+    #[clap(about = "List the snapshots on this disk")]
+    List {},
 }
 
 #[derive(Debug, Subcommand)]
@@ -68,8 +106,17 @@ enum LowlevelCommands {
     #[clap(about = "Directly map a host path into tctiSH")]
     Mount { ios_path: String, linux_path: String },
 
+    #[clap(about = "Prints the 9p cache mode tctiSH wants shared folders mounted with")]
+    ShareCache {},
+
     #[clap(about = "Fetches the host's perspective on our CWD.")]
     GetCWD {},
+
+    #[clap(about = "Sets the clock to the host's, if it is far enough out (for tctish-agent)")]
+    SetClock {
+        #[clap(help = "The host's time, as <seconds>.<fraction> since the epoch")]
+        time: String,
+    },
 }
 
 // CLI command dispatch.
@@ -86,14 +133,31 @@ fn main() {
         }
 
         // Mount a host folder into the guest.
-        Commands::Mount { mountpoint } => {
+        Commands::Mount { mountpoint, name } => {
+            let name = name.unwrap_or_else(|| mount::default_name(&mountpoint));
+
+            // Before the picker, so that a name the app won't take doesn't cost a trip through it.
+            if !mount::is_share_name(&name) {
+                eprintln!(
+                    "'{name}' isn't a name for a shared folder: up to 64 letters, digits, '.', \
+                     '_' and '-'"
+                );
+                std::process::exit(1);
+            }
+
+            if let Err(err) = mount::check_mountpoint(&mountpoint) {
+                eprintln!("Failed to mount: {err:#}");
+                std::process::exit(1);
+            }
+
             let folder = ui::select_folder_as_bookmark();
             match folder {
                 // If we got a path in response, mount it.
                 Ok(bookmark) => {
-                    let result = mount::mount_from_host(bookmark, mountpoint);
+                    let result = mount::mount_from_host(bookmark, name, mountpoint);
                     if let Err(result) = result {
-                        eprintln!("Failed to mount: {}\n", result);
+                        eprintln!("Failed to mount: {:#}", result);
+                        std::process::exit(1);
                     }
                 }
 
@@ -104,8 +168,28 @@ fn main() {
             }
         }
 
+        Commands::Snapshot { subcommand } => {
+            let result = match subcommand {
+                SnapshotCommands::Save { name } => machine::save(name),
+                SnapshotCommands::Load { name } => machine::load(name),
+                SnapshotCommands::Delete { name } => machine::delete(name),
+                SnapshotCommands::List {} => machine::list(),
+            };
+            exit_on_error(result);
+        }
+
+        Commands::Monitor { command } => exit_on_error(machine::monitor(command)),
+
         // General low-level subcommands.
         Commands::Lowlevel { subcommand } => lowlevel(subcommand),
+    }
+}
+
+/// Says what went wrong, and exits with a failure, if anything did.
+fn exit_on_error(result: anyhow::Result<()>) {
+    if let Err(err) = result {
+        eprintln!("{err:#}");
+        std::process::exit(1);
     }
 }
 
@@ -133,11 +217,14 @@ fn lowlevel(subcommand: LowlevelCommands) {
             ios_path,
             linux_path,
         } => {
-            let result = mount::mount_from_host(ios_path, linux_path);
+            let result = mount::mount_from_host_path(ios_path, linux_path);
             if let Err(result) = result {
-                eprintln!("Failed to mount: {}\n", result);
+                eprintln!("Failed to mount: {:#}", result);
+                std::process::exit(1);
             }
         }
+
+        LowlevelCommands::ShareCache {} => println!("{}", mount::share_cache()),
 
         LowlevelCommands::GetCWD {} => {
             let result = simple::handle_getcwd();
@@ -153,5 +240,14 @@ fn lowlevel(subcommand: LowlevelCommands) {
                 }
             }
         }
+
+        // One line, which tctish-agent passes on to the host as its answer.
+        LowlevelCommands::SetClock { time } => match clock::set_clock(&time) {
+            Ok(done) => println!("{done}"),
+            Err(err) => {
+                eprintln!("{err:#}");
+                std::process::exit(1);
+            }
+        },
     }
 }
