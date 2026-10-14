@@ -133,12 +133,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             "shared_folder_write_back": true,
             "pinned_keys": BarKey.defaultPinned.map(\.rawValue),
             "hide_key_bar_with_hardware_keyboard": false,
+            "send_shortcuts_to_linux": false,
             "arrow_repeat_delay": ArrowRepeat.defaultDelay,
             "allow_clipboard_read": false,
             "scrollback": TTY.defaultScrollback,
             "step_through_system_ttys": false,
             "show_kernel_log": false,
             "show_vm_management": false,
+            "keep_programs_when_closing_window": true,
         ])
 
         // Before anything reads it.
@@ -169,6 +171,32 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Connects to its port once QEMU is listening, whether or not the VM is up yet, so it lives
         // here, where the scene callbacks can rely on finding it.
         configServer = ConfigServer(qemuInterface: qemu!)
+
+        // The app's background and foreground: UIKit posts these as the last window leaves and the
+        // first comes back, so a window that is minimized while another is in use doesn't save or
+        // park the machine. Coming back is also when windows closed meanwhile without a word from
+        // the OS are found.
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.handleEnteredBackground()
+        }
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            WindowScenes.closeUnshown()
+            self?.handleWillEnterForeground()
+        }
+
+        // A window that closes takes its scene session with it.
+        NotificationCenter.default.addObserver(
+            forName: TTYs.windowDidClose, object: nil, queue: .main
+        ) { notification in
+            guard let window = notification.object as? TTYWindow else { return }
+            WindowScenes.destroySession(of: window)
+        }
+        // The menu bar lists the windows, so it rebuilds as their number changes.
+        MenuBar.watchWindows()
 
         // Settings First holds the boot until settings is closed.
         NotificationCenter.default.addObserver(
@@ -210,62 +238,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         AppDelegate.isFirstBoot = qemu.isFirstBoot()
 
         Log.ui.note("settings first: settings closed; booting")
-        (ViewController.getCurrent() as? ViewController)?.showBootMessage()
+        AppStatus.shared.showBootMessage()
         beginBoot()
     }
 
-    /// Puts Settings… in the app menu with ⌘, as on the Mac, so that a keyboard
-    /// reaches it without the accessory bar. In the menu bar so that it is
-    /// listed there and in the ⌘-hold overlay, and works whatever has focus.
-    /// iPhone, with no menu bar, gets the same shortcut from
+    /// The menu bar, which `MenuBar` fills in. It lists tctiSH's commands and
+    /// their shortcuts, in the ⌘-hold overlay as well, and they work whatever
+    /// has focus. iPhone, with no menu bar, gets the same shortcuts from
     /// `ViewController.keyCommands`.
     override func buildMenu(with builder: UIMenuBuilder) {
         super.buildMenu(with: builder)
         guard builder.system == .main else { return }
-
-        let settings = UIKeyCommand(
-            title: "Settings…",
-            action: #selector(ViewController.openSettings(_:)),
-            input: ",",
-            modifierFlags: .command)
-
-        // Where the system keeps its Settings item, if it offers one there; otherwise at the top of
-        // the app menu, which is where that item goes on the Mac.
-        if builder.menu(for: .preferences) != nil {
-            builder.replaceChildren(ofMenu: .preferences) { _ in [settings] }
-        } else {
-            builder.insertChild(
-                UIMenu(options: .displayInline, children: [settings]),
-                atStartOfMenu: .application)
-        }
-
-        // The key bar is tctiSH's toolbar.
-        let keyBar: [UIMenuElement] = [
-            UICommand(
-                title: "Show Key Bar With Hardware Keyboard",
-                action: #selector(ViewController.toggleKeyBarWithHardwareKeyboard(_:))),
-            UICommand(
-                title: "Customize Toolbar…",
-                action: #selector(ViewController.customizeKeyBar(_:))),
-        ]
-        if builder.menu(for: .toolbar) != nil {
-            builder.replaceChildren(ofMenu: .toolbar) { _ in keyBar }
-        } else {
-            builder.insertChild(
-                UIMenu(options: .displayInline, children: keyBar), atStartOfMenu: .view)
-        }
-
-        func insert(_ commands: [UIKeyCommand], atStartOf menu: UIMenu.Identifier) {
-            let group = UIMenu(options: .displayInline, children: commands)
-            if builder.menu(for: menu) != nil {
-                builder.insertChild(group, atStartOfMenu: menu)
-            } else {
-                builder.insertChild(group, atEndOfMenu: .view)
-            }
-        }
-        insert(ViewController.ttyFileCommands, atStartOf: .file)
-        insert(ViewController.ttyViewCommands, atStartOf: .view)
-        insert(ViewController.ttyWindowCommands, atStartOf: .window)
+        MenuBar.build(with: builder)
     }
 
     /// Takes whatever the scene brought with it.
@@ -335,10 +319,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         qemu!.startQemuThread(forceRecoveryBoot: AppDelegate.forceRecoveryBoot)
     }
 
-    /// Saves VM state as the app leaves the foreground.
-    ///
-    /// Called by `SceneDelegate`: under the scene life cycle UIKit delivers
-    /// background transitions to the scene, not to the application delegate.
+    /// Called as windows are closed while tctiSH is in front, from App Exposé
+    /// or the window controls. iOS reports windows closed at other times only
+    /// sometimes; `WindowScenes.closeUnshown` catches the rest.
+    func application(
+        _ application: UIApplication, didDiscardSceneSessions sceneSessions: Set<UISceneSession>
+    ) {
+        for session in sceneSessions {
+            Log.ui.note("windows: \(session.persistentIdentifier) was closed")
+            TTYs.shared.windowDiscarded(session: session.persistentIdentifier)
+        }
+    }
+
+    /// Saves VM state as the app leaves the foreground, once no window is left
+    /// in it.
     func handleEnteredBackground() {
         // Going back to the background cancels a wait for the save to finish. There is no
         // foreground left to tell, and `handleWillEnterForeground` will wait again.
@@ -694,7 +688,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     /// Attempts to background the app to Picture in Picture.
     func backgroundToPip() -> Bool {
         /*
-        if let term = ViewController.getCurrentTerminal() {
+        if let term = ViewController.active?.terminal {
 
             // Create a controller for Picture in Picture.
             pipController = AVPictureInPictureController(contentSource: term.getPiPSource())

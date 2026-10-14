@@ -147,13 +147,21 @@ private final class FixedWidthTextField: UITextField {
     }
 }
 
-/// The settings sheet's navigation controller, which says when the sheet has
-/// gone.
+/// The settings sheet's navigation controller, which says when the sheet comes
+/// and when it has gone.
 ///
 /// Here rather than on the root screen, because the sheet can be swiped away
 /// from a screen pushed over the root, and the root then has no
 /// `viewDidDisappear` to notice it by: it disappeared at the push.
 private final class SettingsNavigationController: UINavigationController {
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+
+        if isBeingPresented {
+            NotificationCenter.default.post(name: SettingsViewController.willOpen, object: nil)
+        }
+    }
+
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
 
@@ -969,6 +977,7 @@ final class SettingsViewController: SettingsListViewController,
     /// A screen within the sheet to open straight onto.
     enum Destination {
         case pinnedKeys
+        case storage
     }
 
     /// Puts the settings sheet up over whatever is on screen, open at
@@ -982,6 +991,8 @@ final class SettingsViewController: SettingsListViewController,
         case .pinnedKeys:
             navigation.pushViewController(KeyboardSettingsViewController(), animated: false)
             navigation.pushViewController(PinnedKeysViewController(), animated: false)
+        case .storage:
+            navigation.pushViewController(StorageSettingsViewController(), animated: false)
         case nil:
             break
         }
@@ -1039,7 +1050,7 @@ final class SettingsViewController: SettingsListViewController,
     /// Esc; see `TctiApplication`. Whether it did.
     static func closeForEscape() -> Bool {
         guard
-            let navigation = ViewController.getCurrent()?.presentedViewController
+            let navigation = ViewController.active?.presentedViewController
                 as? SettingsNavigationController,
             navigation.presentedViewController == nil,
             let root = navigation.viewControllers.first as? SettingsViewController
@@ -1052,6 +1063,14 @@ final class SettingsViewController: SettingsListViewController,
     /// Posted on the main queue when the settings sheet has gone, however it
     /// was closed; see `SettingsNavigationController`.
     static let didClose = Notification.Name("io.ara.tctish.settings.didClose")
+
+    /// Posted on the main queue as the settings sheet comes up.
+    static let willOpen = Notification.Name("io.ara.tctish.settings.willOpen")
+
+    /// Whether the settings sheet is up.
+    static var isOpen: Bool {
+        ViewController.active?.presentedViewController is SettingsNavigationController
+    }
 
     @objc private func revealDebugTools() {
         guard navigationController?.topViewController === self, !Self.debugToolsRevealed else {
@@ -1183,12 +1202,9 @@ final class SettingsViewController: SettingsListViewController,
         SettingsOption(title: "Reboot", value: "clean_boot"),
     ]
 
-    fileprivate static let jitOptions = [
-        SettingsOption(title: "Always JIT", value: ExecutionMode.always.rawValue),
-        SettingsOption(title: "Dynamic (Ask)", value: ExecutionMode.dynamicAsk.rawValue),
-        SettingsOption(title: "Dynamic (Auto)", value: ExecutionMode.dynamicAuto.rawValue),
-        SettingsOption(title: "Never JIT", value: ExecutionMode.never.rawValue),
-    ]
+    fileprivate static let jitOptions = ExecutionMode.allCases.map {
+        SettingsOption(title: $0.title, value: $0.rawValue)
+    }
 
     /// Which backend the VM is on, as a switch that moves it to the other.
     /// Grayed out before QEMU is up and while a switch is under way.
@@ -1610,7 +1626,7 @@ private final class TerminalsSettingsViewController: SettingsListViewController 
             SettingsSection(
                 header: "Defaults",
                 footer:
-                    "For every TTY. The TTY menu in the switcher allows changing these for a specific TTY.",
+                    "For every terminal. A terminal's menu in the switcher allows changing these for it alone.",
                 rows: [
                     SettingsRow(
                         id: "scrollback",
@@ -1629,9 +1645,9 @@ private final class TerminalsSettingsViewController: SettingsListViewController 
                 ]),
 
             SettingsSection(
-                header: "System TTYs",
+                header: "System Terminals",
                 footer:
-                    "Kernel Log streams the kernel log and also provides a recovery login when needed. VM Management is QEMU's monitor. Both run regardless of visibility. Closing the last TTY while both are hidden opens a new one.\n\nSwiping across the TTYs button, or pressing ⌘⇧[ and ⌘⇧], moves through open TTYs. The system TTYs shown can be included.",
+                    "Kernel Log streams the kernel log and also provides a recovery login when needed. VM Management is QEMU's monitor. Both run regardless of visibility. Closing the last terminal while both are hidden opens a new one.\n\nSwiping across the Show Terminals button, or pressing ⌘⇧[ and ⌘⇧], moves through open terminals. The system terminals shown can be included.",
                 rows: [
                     SettingsRow(
                         id: "show-kernel-log",
@@ -1640,7 +1656,10 @@ private final class TerminalsSettingsViewController: SettingsListViewController 
                         toggle: ToggleValue(
                             isOn: AppSetting.showKernelLog.bool,
                             commit: { [weak self] in
-                                TTYs.shared.setShown(.kernelLog, $0)
+                                TTYs.shared.setShown(
+                                    .kernelLog, $0,
+                                    in: (self?.presentingViewController as? ViewController)?
+                                        .ttyWindow)
                                 self?.reload()
                             })),
                     SettingsRow(
@@ -1650,7 +1669,10 @@ private final class TerminalsSettingsViewController: SettingsListViewController 
                         toggle: ToggleValue(
                             isOn: AppSetting.showVmManagement.bool,
                             commit: { [weak self] in
-                                TTYs.shared.setShown(.vmManagement, $0)
+                                TTYs.shared.setShown(
+                                    .vmManagement, $0,
+                                    in: (self?.presentingViewController as? ViewController)?
+                                        .ttyWindow)
                                 self?.reload()
                             })),
                     SettingsRow(
@@ -1662,6 +1684,31 @@ private final class TerminalsSettingsViewController: SettingsListViewController 
                             isEnabled: anyShown,
                             commit: { AppSetting.stepThroughSystemTTYs.set($0) })),
                 ]),
+        ] + windowSections
+    }
+
+    /// On iPad, which has windows: what closing one does to the programs in its
+    /// terminals.
+    private var windowSections: [SettingsSection] {
+        guard WindowScenes.areAvailable else { return [] }
+        return [
+            SettingsSection(
+                header: "Windows",
+                footer:
+                    "Closing a window closes its terminals. Programs running in them can keep running for the next terminals that open on their consoles, or end.\n\nA window closed from Show All Windows while tctiSH isn't in front, or one that iPadOS doesn't bring back when tctiSH is opened again, always keeps its programs running.\n\nClosing a window's last terminal closes the window unless it's the only window.",
+                rows: [
+                    SettingsRow(
+                        id: "keep-programs-when-closing-window",
+                        title: "Keep Programs Running When Closing a Window",
+                        symbol: "macwindow",
+                        toggle: ToggleValue(
+                            isOn: AppSetting.keepProgramsWhenClosingWindow.bool,
+                            commit: {
+                                AppSetting.keepProgramsWhenClosingWindow.set($0)
+                                // The menu names the item under Close Window for this.
+                                UIMenuSystem.main.setNeedsRebuild()
+                            }))
+                ])
         ]
     }
 
@@ -1670,7 +1717,7 @@ private final class TerminalsSettingsViewController: SettingsListViewController 
             OptionListViewController(
                 title: "Scrollback",
                 footer:
-                    "How much each TTY keeps once it has scrolled off the screen. Every 80 columns is counted as a line if the line is longer than that.",
+                    "How much each terminal keeps once it has scrolled off the screen. Every 80 columns is counted as a line if the line is longer than that.",
                 options: Self.scrollbacks.map {
                     SettingsOption(title: "\($0.formatted()) lines", value: $0)
                 },
@@ -1696,7 +1743,7 @@ private final class TTYNamesViewController: SettingsListViewController {
             SettingsSection(
                 header: nil,
                 footer:
-                    "What a TTY is called until it is renamed. Left empty, a TTY is called by its console's name.",
+                    "What a terminal is called until it is renamed. Left empty, a terminal is called by its console's name.",
                 rows: (0..<TTY.userLimit).map { number in
                     let device = "hvc\(number)"
                     return SettingsRow(
@@ -1714,7 +1761,7 @@ private final class TTYNamesViewController: SettingsListViewController {
 
 // MARK: - Keyboard
 
-/// The key bar above the software keyboard.
+/// The key bar above the software keyboard, and who gets ⌘ on a hardware one.
 private final class KeyboardSettingsViewController: SettingsListViewController {
 
     fileprivate override var isPage: Bool { true }
@@ -1759,7 +1806,24 @@ private final class KeyboardSettingsViewController: SettingsListViewController {
                             step: Float(ArrowRepeat.step),
                             label: { ArrowRepeat.label(TimeInterval($0)) },
                             commit: { ArrowRepeat.delay = TimeInterval($0) })),
-                ])
+                ]),
+
+            SettingsSection(
+                header: "Hardware Keyboard",
+                footer:
+                    "Send ⌘ Shortcuts to Linux gives ⌘ to programs as Super, the Meta or Windows key, in place of tctiSH's shortcuts. tctiSH keeps only ⌘T, ⌘W,\(WindowScenes.areAvailable ? " ⌘N, ⌘⇧W," : "") ⌘, and the shortcuts that move between terminals. Programs see Super only if they use the Kitty keyboard protocol; otherwise, ⌘ with a key sends nothing.",
+                rows: [
+                    SettingsRow(
+                        id: "send-shortcuts-to-linux",
+                        title: "Send ⌘ Shortcuts to Linux",
+                        symbol: "command",
+                        toggle: ToggleValue(
+                            isOn: AppSetting.sendShortcutsToLinux.bool,
+                            commit: {
+                                AppSetting.sendShortcutsToLinux.set($0)
+                                UIMenuSystem.main.setNeedsRebuild()
+                            }))
+                ]),
         ]
     }
 }
@@ -1818,7 +1882,7 @@ private final class AppearanceSettingsViewController: SettingsListViewController
             SettingsSection(
                 header: "Terminal",
                 footer:
-                    "The default for every TTY. The TTY menu in the switcher allows overriding it.",
+                    "The default for every terminal. A terminal's menu in the switcher allows overriding it.",
                 rows: [
                     SettingsRow(
                         id: "font-size",
@@ -1911,49 +1975,6 @@ extension SettingsListViewController {
                 self?.reload()
             })
     }
-
-    /// Says what compacting does and asks first: older saves go with the old
-    /// image, and there's no taking that back.
-    fileprivate func confirmCompaction() {
-        if let refusal = DiskCompaction.refusal {
-            showAlert(title: "Can't Compact Disk Now", message: refusal)
-            return
-        }
-
-        confirm(
-            title: "Compact Disk?",
-            message:
-                "Linux keeps running while what it's using is copied into a fresh disk image, which then replaces the old one. Your session is saved again afterwards, and older saves are discarded.",
-            action: "Compact"
-        ) {
-            DiskCompaction.start { outcome in
-                Self.report(outcome)
-            }
-        }
-    }
-
-    /// Says how it went, over whatever is on screen by then: the settings may
-    /// well have been closed while it ran.
-    private static func report(_ outcome: QEMUInterface.Compaction) {
-        guard let root = ViewController.getCurrent() else { return }
-
-        switch outcome {
-        case .compacted(let before, let beforeOnDisk, let after, let withSave):
-            let sizes =
-                "The disk image was \(QEMUInterface.bytes(before)) (\(QEMUInterface.bytes(beforeOnDisk)) on disk), and compacted to \(QEMUInterface.bytes(after))."
-            let session =
-                withSave.map {
-                    "Your session has been saved again, which brings it to \(QEMUInterface.bytes($0))."
-                }
-                ?? "Your session couldn't be saved again, so the next launch starts Linux afresh. Your files are kept."
-            root.showAlert(title: "Disk Compacted", message: "\(sizes) \(session)")
-
-        case .notDone(let reason):
-            root.showAlert(
-                title: "Couldn't Compact Disk",
-                message: reason.prefix(1).uppercased() + reason.dropFirst() + ".")
-        }
-    }
 }
 
 // MARK: - Switching backends
@@ -1987,30 +2008,18 @@ extension SettingsListViewController {
         }
     }
 
-    /// Asks before switching: a switch to JIT can mean a pause while it is
-    /// prepared, and either way everything is translated again. Canceling puts
-    /// the switch back where it was.
+    /// Asks before switching, as `askToSwitch(to:canceled:switched:)` does, and
+    /// puts the switch back where it was if that's canceled.
     fileprivate func confirmSwitch(to target: Backend.Kind) {
-        let message =
-            target == .native
-            ? "Linux carries on where it is. Preparing JIT can pause tctiSH for a moment, and it needs the loopback VPN."
-            : "Linux carries on where it is, more slowly."
-
-        let alert = UIAlertController(
-            title: "Switch to \(target.name)?", message: message, preferredStyle: .alert)
-        alert.addAction(
-            UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in self?.reload() })
-        alert.addAction(
-            UIAlertAction(title: "Switch", style: .default) { [weak self] _ in
-                Backend.switchTo(target, asked: true)
-
+        askToSwitch(
+            to: target, canceled: { [weak self] in self?.reload() },
+            switched: { [weak self] in
                 // Out of the way, so that what the switch says -- the pills, the banner -- is seen.
                 // Through the root's way out, which says if anything else changed needs a restart.
                 let root =
                     self?.navigationController?.viewControllers.first as? SettingsViewController
                 root?.done()
             })
-        present(alert, animated: true)
     }
 }
 
@@ -2020,7 +2029,7 @@ extension UIViewController {
 
     /// Shows an alert from this controller, or from whatever it is already
     /// showing.
-    fileprivate func showAlert(title: String, message: String) {
+    func showAlert(title: String, message: String) {
         var top: UIViewController = self
         while let presented = top.presentedViewController {
             top = presented
@@ -2032,12 +2041,76 @@ extension UIViewController {
     }
 
     /// Asks before doing something that can't be taken back.
-    fileprivate func confirm(
+    func confirm(
         title: String, message: String, action: String, _ perform: @escaping () -> Void
     ) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: action, style: .destructive) { _ in perform() })
+        present(alert, animated: true)
+    }
+
+    /// Says what compacting does and asks first: older saves go with the old
+    /// image, and there's no taking that back.
+    func confirmCompaction() {
+        if let refusal = DiskCompaction.refusal {
+            showAlert(title: "Can't Compact Disk Now", message: refusal)
+            return
+        }
+
+        confirm(
+            title: "Compact Disk?",
+            message:
+                "Linux keeps running while what it's using is copied into a fresh disk image, which then replaces the old one. Your session is saved again afterwards, and older saves are discarded.",
+            action: "Compact"
+        ) {
+            DiskCompaction.start { outcome in
+                Self.report(outcome)
+            }
+        }
+    }
+
+    /// Says how it went, over whatever is on screen by then: the settings may
+    /// well have been closed while it ran.
+    private static func report(_ outcome: QEMUInterface.Compaction) {
+        guard let root = ViewController.active else { return }
+
+        switch outcome {
+        case .compacted(let before, let beforeOnDisk, let after, let withSave):
+            let sizes =
+                "The disk image was \(QEMUInterface.bytes(before)) (\(QEMUInterface.bytes(beforeOnDisk)) on disk), and compacted to \(QEMUInterface.bytes(after))."
+            let session =
+                withSave.map {
+                    "Your session has been saved again, which brings it to \(QEMUInterface.bytes($0))."
+                }
+                ?? "Your session couldn't be saved again, so the next launch starts Linux afresh. Your files are kept."
+            root.showAlert(title: "Disk Compacted", message: "\(sizes) \(session)")
+
+        case .notDone(let reason):
+            root.showAlert(
+                title: "Couldn't Compact Disk",
+                message: reason.prefix(1).uppercased() + reason.dropFirst() + ".")
+        }
+    }
+
+    /// Asks before switching backends: a switch to JIT can mean a pause while
+    /// it is prepared, and either way everything is translated again.
+    func askToSwitch(
+        to target: Backend.Kind, canceled: (() -> Void)? = nil, switched: (() -> Void)? = nil
+    ) {
+        let message =
+            target == .native
+            ? "Linux carries on where it is. Preparing JIT can pause tctiSH for a moment, and it needs the loopback VPN."
+            : "Linux carries on where it is, more slowly."
+
+        let alert = UIAlertController(
+            title: "Switch to \(target.name)?", message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in canceled?() })
+        alert.addAction(
+            UIAlertAction(title: "Switch", style: .default) { _ in
+                Backend.switchTo(target, asked: true)
+                switched?()
+            })
         present(alert, animated: true)
     }
 

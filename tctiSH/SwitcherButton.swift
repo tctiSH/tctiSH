@@ -19,8 +19,8 @@ import UIKit
 /// Holding the button shows the selected TTY's menu, the same menu its card
 /// shows in the switcher.
 ///
-/// The button shows a dot while a TTY other than the selected one has rung its
-/// bell and not been looked at since.
+/// The button shows a dot while a TTY in its window other than the selected one
+/// has rung its bell and not been looked at since.
 final class SwitcherButton: UIButton {
 
     /// The button's resting symbol, the one used for a set of tabs.
@@ -61,6 +61,11 @@ final class SwitcherButton: UIButton {
     /// Returns the selected TTY's menu for the given interaction to show, or
     /// nil for no menu.
     var ttyMenu: (UIContextMenuInteraction) -> UIMenu? = { _ in nil }
+
+    /// The window whose TTYs the button's dot watches.
+    weak var ttyWindow: TTYWindow? {
+        didSet { refreshDot() }
+    }
 
     /// How far the finger must move for letting go to step or to add. A fast
     /// flick also steps, however short.
@@ -103,8 +108,8 @@ final class SwitcherButton: UIButton {
         face.isUserInteractionEnabled = false
         addSubview(face)
 
-        accessibilityLabel = "Show TTYs"
-        accessibilityHint = "Swipe left or right to switch to the next or previous TTY."
+        accessibilityLabel = "Show Terminals"
+        accessibilityHint = "Swipe left or right to switch to the next or previous terminal."
 
         addAction(UIAction { [weak self] _ in self?.open() }, for: .touchUpInside)
 
@@ -119,11 +124,11 @@ final class SwitcherButton: UIButton {
         addGestureRecognizer(pan)
 
         accessibilityCustomActions = [
-            UIAccessibilityCustomAction(name: "Next TTY") { [weak self] _ in
+            UIAccessibilityCustomAction(name: "Next Terminal") { [weak self] _ in
                 self?.step(1)
                 return true
             },
-            UIAccessibilityCustomAction(name: "Previous TTY") { [weak self] _ in
+            UIAccessibilityCustomAction(name: "Previous Terminal") { [weak self] _ in
                 self?.step(-1)
                 return true
             },
@@ -187,7 +192,7 @@ final class SwitcherButton: UIButton {
     }
 
     private func refreshDot() {
-        dot.show(TTYs.shared.needsAttention ? [.attention] : [])
+        dot.show(ttyWindow?.needsAttention == true ? [.attention] : [])
         accessibilityValue = dot.statuses.isEmpty ? nil : TTYStatus.attention.accessibilityLabel
         setNeedsLayout()
     }

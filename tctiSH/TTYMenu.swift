@@ -30,8 +30,9 @@ final class TTYMenu {
     }
 
     /// Returns the menu for `tty`, to be shown by `interaction`. Every TTY gets
-    /// Search, font size, scrollback and mute; only user TTYs also get Rename,
-    /// Pin or Unpin, Close, and Close All But This.
+    /// Search, font size, scrollback and mute, and on iPad, moving to another
+    /// window; only user TTYs also get Rename, Pin or Unpin, Close, and Close
+    /// All But This.
     func menu(for tty: TTY, in interaction: UIContextMenuInteraction?) -> UIMenu {
         self.interaction = interaction
         return menu(for: tty)
@@ -76,6 +77,9 @@ final class TTYMenu {
             UIMenu(options: .displayInline, children: actions),
             UIMenu(options: .displayInline, children: settings),
         ]
+        if let moves = moveMenu(for: tty) {
+            sections.append(moves)
+        }
 
         if !tty.isSystem {
             let others = store.othersClosed(by: tty).count
@@ -97,6 +101,32 @@ final class TTYMenu {
         }
 
         return UIMenu(title: tty.name, children: sections)
+    }
+
+    /// Move to New Window, off for a window's only TTY, and while there are
+    /// other windows, Move to, listing them. Nil where there's only ever one
+    /// window.
+    private func moveMenu(for tty: TTY) -> UIMenu? {
+        guard WindowScenes.areAvailable, let window = store.window(of: tty) else { return nil }
+
+        var moves: [UIMenuElement] = [
+            UIAction(
+                title: "Move to New Window", image: UIImage(systemName: "macwindow.badge.plus"),
+                attributes: window.ordered.count > 1 ? [] : .disabled
+            ) { _ in WindowScenes.openWindow(moving: tty) }
+        ]
+        let others = store.windows.filter { $0 !== window && WindowScenes.shows($0) }
+        if !others.isEmpty {
+            moves.append(
+                UIMenu(
+                    title: "Move to", image: UIImage(systemName: "macwindow.on.rectangle"),
+                    children: others.map { other in
+                        UIAction(title: other.title) { [weak self] _ in
+                            self?.store.move(tty, to: other)
+                        }
+                    }))
+        }
+        return UIMenu(options: .displayInline, children: moves)
     }
 
     /// The range of font sizes, in points, that Smaller and Larger step within,
@@ -194,20 +224,22 @@ final class TTYMenu {
         confirmClosing(
             title: "Close \(tty.name)?",
             message:
-                "Programs running on \(tty.device ?? tty.name) can keep running for the next TTY that opens on it, or end now."
+                "Programs running on \(tty.device ?? tty.name) can keep running for the next terminal that opens on it, or end now."
         ) { [weak self] endingPrograms in
             self?.store.close(tty, endingPrograms: endingPrograms)
         }
     }
 
-    private func confirmCloseOthers(_ tty: TTY) {
+    /// Asks whether to close every other unpinned TTY, and whether to end the
+    /// programs running on their consoles.
+    func confirmCloseOthers(_ tty: TTY) {
         let count = store.othersClosed(by: tty).count
         guard count > 0 else { return }
 
         confirmClosing(
-            title: count == 1 ? "Close 1 Other TTY?" : "Close \(count) Other TTYs?",
+            title: count == 1 ? "Close 1 Other Terminal?" : "Close \(count) Other Terminals?",
             message:
-                "Pinned TTYs stay open. Programs running in the others can keep running for the next TTYs that open on their consoles, or end now."
+                "Pinned terminals stay open. Programs running in the others can keep running for the next terminals that open on their consoles, or end now."
         ) { [weak self] endingPrograms in
             self?.store.closeAll(but: tty, endingPrograms: endingPrograms)
         }
@@ -228,7 +260,7 @@ final class TTYMenu {
         presenter?.present(alert, animated: true)
     }
 
-    private func rename(_ tty: TTY) {
+    func rename(_ tty: TTY) {
         let alert = UIAlertController(
             title: "Rename \(tty.name)",
             message: "Leave it empty to go back to \(tty.defaultName).",

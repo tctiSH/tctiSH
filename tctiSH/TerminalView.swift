@@ -177,10 +177,23 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         // explicitly, and a terminal is freed when its TTY is closed.
         NotificationCenter.default.addObserver(
             self, selector: #selector(accentChanged), name: Accent.didChange, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(sceneWillEnterForeground),
+            name: UIScene.willEnterForegroundNotification, object: nil)
     }
 
     @objc private func accentChanged() {
         selectionHandleColor = Accent.color
+    }
+
+    /// Restarts the cursor's blink as this terminal's window comes back from
+    /// the background as Core Animation may have stopped it.
+    @objc private func sceneWillEnterForeground(_ notification: Notification) {
+        guard let scene = notification.object as? UIScene, scene === window?.windowScene else {
+            return
+        }
+        // Setting this, even to what it was, has SwiftTerm restart the blink.
+        caretViewTracksFocus = caretViewTracksFocus
     }
 
     // MARK: Transport
@@ -282,6 +295,20 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
 
     public override var contentOffset: CGPoint {
         didSet { noteScroll() }
+    }
+
+    /// Scrolls to the oldest line kept, and stops following new output, as
+    /// scrolling there by hand would. A program on the alternate screen has no
+    /// scrollback to scroll through.
+    func scrollToTop() {
+        guard !getTerminal().isCurrentBufferAlternate, canScroll else { return }
+        settling?.cancel()
+        settling = nil
+        isFollowing = false
+
+        moving = true
+        scrollTo(row: 0)
+        moving = false
     }
 
     /// Scrolls to the bottom, and follows new output from there.
@@ -552,6 +579,37 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
                 return String(line)
             }
             .joined(separator: "\n")
+    }
+
+    /// All of the terminal's text, from the oldest line kept: each line as it
+    /// was written, however many rows it wrapped onto, without the blanks at
+    /// its end or the empty rows after the last.
+    var transcript: String {
+        let terminal = getTerminal()
+        var lines: [String] = []
+        var row = terminal.buffer.totalLinesTrimmed
+        while let line = terminal.getScrollInvariantLine(row: row) {
+            let text = line.translateToString(skipNullCellsFollowingWide: true)
+            if line.isWrapped, !lines.isEmpty {
+                lines[lines.count - 1] += text
+            } else {
+                lines.append(text)
+            }
+            row += 1
+        }
+
+        // Cells nothing was written to read as NUL.
+        var trimmed = lines.map { line in
+            var line = Substring(line.replacingOccurrences(of: "\0", with: " "))
+            while let last = line.last, last == " " || last == "\t" {
+                line.removeLast()
+            }
+            return String(line)
+        }
+        while trimmed.last?.isEmpty == true {
+            trimmed.removeLast()
+        }
+        return trimmed.map { $0 + "\n" }.joined()
     }
 
     /// What the right-click menu offers.

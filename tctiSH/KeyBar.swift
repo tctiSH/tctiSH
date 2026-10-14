@@ -33,8 +33,16 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
     /// Inside each capsule, either side of its buttons.
     private static let capsuleInset: CGFloat = 4
 
-    /// Between the capsules and the edges of the screen.
-    private static let margin: CGFloat = 8
+    /// Between the capsules and the edges of the window. Wider on iPad, where a
+    /// window's bottom corners are its resize handles and a capsule in the
+    /// corner is in the way of grabbing one.
+    private static var margin: CGFloat {
+        UIDevice.current.userInterfaceIdiom == .pad ? 16 : 8
+    }
+
+    /// How far the strip sits up off the bottom of an iPad's window, clear of
+    /// its resize handles.
+    private static let padLift: CGFloat = 6
 
     /// Above and below the capsules.
     private static let verticalMargin: CGFloat = 6
@@ -42,6 +50,21 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
     /// The narrowest the space between the two capsules may get before they
     /// merge into one.
     private static let mergeGap: CGFloat = 24
+
+    /// How close the strip's capsules come before their glass starts to reach
+    /// across and join them. Less than `mergeGap`, so that it only happens as
+    /// they merge, and never between two capsules at rest.
+    private static let joinReach: CGFloat = 16
+
+    /// The spring the strip changes shape with, as the capsules join or part
+    /// and as keys come and go.
+    private static let stripSpringDuration: TimeInterval = 0.5
+    private static let stripSpringBounce: CGFloat = 0.3
+
+    /// How keys the strip gains fade in: after a moment, so that More has begun
+    /// to slide out of their place, and over most of the spring.
+    private static let arrivalDelay: TimeInterval = 0.08
+    private static let arrivalDuration: TimeInterval = 0.35
 
     /// The number of buttons in the trailing capsule: Show TTYs and Hide
     /// Keyboard.
@@ -184,6 +207,30 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
         var dismissCapsule: CGRect?
     }
 
+    /// Holds the strip's capsules. From iOS 26 it's a glass container, so the
+    /// capsules flow together as they merge.
+    private let stripGlass: UIVisualEffectView = {
+        if #available(iOS 26.0, *) {
+            let effect = UIGlassContainerEffect()
+            effect.spacing = KeyBar.joinReach
+            return UIVisualEffectView(effect: effect)
+        }
+        return UIVisualEffectView(effect: nil)
+    }()
+
+    /// Whether the strip was merged when last laid out, or nil before its first
+    /// layout, which isn't animated.
+    private var stripMerged: Bool?
+
+    /// Whether the trailing capsule is flowing into the end of the leading one.
+    /// Show TTYs and Hide Keyboard move across once it arrives; see
+    /// `finishJoining`.
+    private var joining = false
+
+    /// Counts the strip's animations, so that only the latest one's completion
+    /// finishes a join.
+    private var stripAnimations = 0
+
     /// Whether Show TTYs and Hide Keyboard are moving, in the trailing capsule,
     /// to the top of the right rail, which they join on arrival.
     private var dismissArriving = false
@@ -218,7 +265,8 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
     /// Where the capsules are drawn, in the bar's coordinates. Everything else
     /// is see-through.
     var capsuleFrames: [CGRect] {
-        [leading, trailing].filter { $0.superview === self && !$0.isHidden }.map(\.frame)
+        [leading, trailing].filter { $0.superview === stripGlass.contentView && !$0.isHidden }
+            .map(\.frame)
     }
 
     /// Called whenever the bar may have moved on screen, or come or gone.
@@ -259,8 +307,9 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
         // the accent itself; the lit modifiers, the pad's arrows and the hovers all follow it.
         tintColor = Accent.custom
 
-        addSubview(leading)
-        addSubview(trailing)
+        addSubview(stripGlass)
+        stripGlass.contentView.addSubview(leading)
+        stripGlass.contentView.addSubview(trailing)
 
         Self.style(more, symbol: "ellipsis", label: "More Keys")
         more.showsMenuAsPrimaryAction = true
@@ -384,10 +433,11 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
     /// On iPhone, all of it: along the bottom of the screen, when a hardware
     /// keyboard stands in for the software one, the screen's well-rounded
     /// corners otherwise cut the capsules off. On iPad, none: its corners are
-    /// tight enough that a capsule's rounding nests into them, which is where
-    /// it looks right, over the home indicator's strip.
+    /// tight enough that a capsule's rounding nests into them, over the home
+    /// indicator's strip. It still sits up a little, by `padLift`, to stay
+    /// clear of a window's resize handles.
     private var bottomInset: CGFloat {
-        traitCollection.userInterfaceIdiom == .phone ? safeAreaInsets.bottom : 0
+        traitCollection.userInterfaceIdiom == .phone ? safeAreaInsets.bottom : Self.padLift
     }
 
     /// Taller by any safe area beneath it that the bar keeps clear of. Zero
@@ -405,6 +455,7 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        stripGlass.frame = bounds
 
         // The view controller lays out the rails, as it knows where the terminal is.
         guard !usesRails else {
@@ -422,36 +473,124 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
         // keyboard, changes it.
         let width = content.width + Self.margin * 2
         let wanted = Array(pinned.prefix(Self.capacity(forWidth: width)))
-        if wanted != shown {
+        let keysChanged = wanted != shown
+        let kept = shown.count
+        if keysChanged {
             shown = wanted
             rebuildPinned()
         }
 
         // Apart while there's comfortable room between them; merged into one, centered, once there
-        // isn't, rather than two capsules all but touching.
-        let merged = shown.count > Self.separateCapacity(forWidth: width)
+        // isn't, rather than two capsules all but touching. Decided by every pinned key rather than
+        // those shown so that a bar narrowed past merging stays merged and avoids ping-ponging.
+        let merged = pinned.count > Self.separateCapacity(forWidth: width)
         let places = Self.stripPlaces(pins: shown.count, merged: merged, in: content)
-        trailing.isHidden = merged
 
-        leading.frame = places.leading
-        var buttons = pinnedViews + [more]
-        var buttonPlaces = places.pins + [places.more]
-        if let capsule = places.trailing {
-            trailing.frame = capsule
-            lay(out: [switcher, dismiss], in: trailing)
-        } else {
-            buttons += [switcher, dismiss]
-            buttonPlaces += [places.switcher, places.dismiss]
+        // Springs when the strip changes shape: keys coming or going, or the capsules joining or
+        // parting. In between, as while a window is resized, it follows at once.
+        let wasMerged = stripMerged ?? merged
+        let animated =
+            stripMerged != nil && (keysChanged || merged != wasMerged) && window != nil
+            && !UIAccessibility.isReduceMotionEnabled
+        stripMerged = merged
+
+        if merged, !wasMerged {
+            joining = animated
         }
-        for (button, place) in zip(buttons, buttonPlaces) {
-            leading.contentView.addSubview(button)
-            button.frame = place.offsetBy(dx: -places.leading.minX, dy: -places.leading.minY)
+        if !merged {
+            part()
+        }
+        trailing.isHidden = merged && !joining
+
+        // A pinned key never moves within the capsule, so new ones start where they belong rather
+        // than flying in from the corner. Each is taken back into the capsule, as the left rail has
+        // the first of them in landscape.
+        UIView.performWithoutAnimation {
+            for (view, place) in zip(pinnedViews, places.pins) {
+                leading.contentView.addSubview(view)
+                view.frame = place.offsetBy(dx: -places.leading.minX, dy: -places.leading.minY)
+            }
+        }
+
+        let apply: () -> Void = { [self] in
+            leading.frame = places.leading
+            var buttons: [UIView] = [more]
+            var buttonPlaces = [places.more]
+            if joining {
+                // Into the end of the merged capsule, where its keys will be.
+                trailing.frame = CGRect(
+                    x: places.switcher.minX - Self.capsuleInset, y: places.leading.minY,
+                    width: Self.trailingWidth, height: Self.capsuleHeight)
+            } else if let capsule = places.trailing {
+                trailing.frame = capsule
+                lay(out: [switcher, dismiss], in: trailing)
+            } else {
+                buttons += [switcher, dismiss]
+                buttonPlaces += [places.switcher, places.dismiss]
+            }
+            for (button, place) in zip(buttons, buttonPlaces) {
+                leading.contentView.addSubview(button)
+                button.frame = place.offsetBy(dx: -places.leading.minX, dy: -places.leading.minY)
+            }
+        }
+
+        if animated {
+            stripAnimations += 1
+            let animation = stripAnimations
+            UIView.animate(
+                springDuration: Self.stripSpringDuration, bounce: Self.stripSpringBounce,
+                options: [.beginFromCurrentState, .allowUserInteraction], animations: apply
+            ) { [weak self] _ in
+                self?.finishJoining(after: animation)
+            }
+
+            // Keys the strip gains start where More was, so they fade in as it slides away rather
+            // than showing beneath it. They're the buttons past those it already had, as the keys
+            // are always a prefix of the pinned ones.
+            let arriving = pinnedViews.dropFirst(kept)
+            arriving.forEach { $0.alpha = 0 }
+            UIView.animate(
+                withDuration: Self.arrivalDuration, delay: Self.arrivalDelay,
+                options: [.curveEaseOut, .allowUserInteraction]
+            ) {
+                arriving.forEach { $0.alpha = 1 }
+            }
+        } else {
+            apply()
         }
 
         more.sideways = nil
         roundCapsules()
         switcher.capsuleLaidOut()
         didMove?()
+    }
+
+    /// Hands Show TTYs and Hide Keyboard to the merged capsule, once the
+    /// trailing capsule has flowed into it and the latest of the strip's
+    /// animations has finished.
+    private func finishJoining(after animation: Int) {
+        guard animation == stripAnimations, joining else { return }
+        joining = false
+        UIView.performWithoutAnimation {
+            setNeedsLayout()
+            layoutIfNeeded()
+        }
+    }
+
+    /// Starts the capsules parting, if they're joined or joining: Show TTYs and
+    /// Hide Keyboard go back into the trailing capsule, which starts from the
+    /// end of the merged one.
+    private func part() {
+        joining = false
+        guard trailing.isHidden else { return }
+
+        UIView.performWithoutAnimation {
+            trailing.frame = CGRect(
+                x: leading.frame.maxX - Self.trailingWidth, y: leading.frame.minY,
+                width: Self.trailingWidth, height: Self.capsuleHeight)
+            lay(out: [switcher, dismiss], in: trailing)
+            trailing.isHidden = false
+        }
     }
 
     /// The strip's capsule and key frames within `content`. Pinned keys and
@@ -681,7 +820,7 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
             x: Self.margin, y: barTop + Self.verticalMargin, width: width - Self.margin * 2,
             height: Self.capsuleHeight)
         let count = min(pinned.count, Self.capacity(forWidth: width))
-        let merged = count > Self.separateCapacity(forWidth: width)
+        let merged = pinned.count > Self.separateCapacity(forWidth: width)
         let places = Self.stripPlaces(pins: count, merged: merged, in: content)
 
         // A key without room on the strip goes to More's place.
@@ -845,7 +984,11 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
         dismissArriving = false
         morphing = false
 
-        let host = usesRails ? railGlass.contentView : self
+        // The strip's first layout in its new host isn't animated: the rails flow into it instead.
+        stripMerged = nil
+        joining = false
+
+        let host = usesRails ? railGlass.contentView : stripGlass.contentView
         host.addSubview(leading)
         host.addSubview(trailing)
 
@@ -954,7 +1097,8 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
         return pad
     }
 
-    /// More: Settings, then every key that isn't on the bar, by group.
+    /// More: Settings, then every key that isn't on the bar, by group, then the
+    /// menu bar's menus where there's no menu bar.
     private func rebuildMenu() {
         let state = MenuState(
             shown: shown, tabIsShifted: tabIsShifted,
@@ -1009,6 +1153,15 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
             } else {
                 elements.append(UIMenu(options: .displayInline, children: children))
             }
+        }
+
+        // Last, so furthest from the finger: they're reached for less often than keys. Built each
+        // time the list opens, since File's Move Terminal to lists the windows open at that moment.
+        if !MenuBar.exists {
+            elements.append(
+                UIDeferredMenuElement.uncached { completion in
+                    completion([UIMenu(options: .displayInline, children: MenuBar.touchMenus)])
+                })
         }
 
         more.menu = UIMenu(children: elements)
@@ -1283,10 +1436,11 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
         for name in [Notification.Name.GCKeyboardDidConnect, .GCKeyboardDidDisconnect] {
             center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 self?.updateAttachment()
-                self?.watchHardwareModifiers()
+                Self.watchHardwareModifiers()
             }
         }
-        watchHardwareModifiers()
+        Self.bars.add(self)
+        Self.watchHardwareModifiers()
 
         // Every save of every setting lands here, from whatever thread made it, so only the two
         // this bar cares about are acted on, and only when they've actually changed.
@@ -1316,15 +1470,23 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
     /// between: a tap in progress, if it's let go next.
     private var tappingModifier: GCKeyCode?
 
+    /// Every window's bar, for `watchHardwareModifiers`.
+    private static let bars = NSHashTable<KeyBar>.weakObjects()
+
     /// Watches a hardware keyboard's modifiers, from GameController, as they
     /// happen rather than when the bar next happens to look: to light the bar's
     /// while they're held, and so that tapping one turns off the same modifier
     /// where the bar has it armed. A modifier held while another key is pressed
     /// is being used with it, not tapped, and leaves the bar alone.
-    private func watchHardwareModifiers() {
-        GCKeyboard.coalesced?.keyboardInput?.keyChangedHandler = {
-            [weak self] _, _, code, pressed in
-            DispatchQueue.main.async { self?.hardwareKeyChanged(code, pressed: pressed) }
+    ///
+    /// One handler for the whole app.
+    private static func watchHardwareModifiers() {
+        GCKeyboard.coalesced?.keyboardInput?.keyChangedHandler = { _, _, code, pressed in
+            DispatchQueue.main.async {
+                for bar in bars.allObjects {
+                    bar.hardwareKeyChanged(code, pressed: pressed)
+                }
+            }
         }
     }
 
@@ -1338,7 +1500,10 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
             tappingModifier = code
         } else if tappingModifier == code {
             tappingModifier = nil
-            disarm(Self.modifier(for: code))
+            // Only in the window being typed in; the others light up and go out with it.
+            if window?.windowScene?.activationState == .foregroundActive {
+                disarm(Self.modifier(for: code))
+            }
         }
         refreshModifiers()
     }

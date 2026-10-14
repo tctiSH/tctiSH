@@ -622,6 +622,7 @@ enum AppSetting: String {
     case keepScreenAwake = "keep_screen_awake"
     case pinnedKeys = "pinned_keys"
     case hideKeyBarWithHardwareKeyboard = "hide_key_bar_with_hardware_keyboard"
+    case sendShortcutsToLinux = "send_shortcuts_to_linux"
     case arrowRepeatDelay = "arrow_repeat_delay"
     case accentColor = "accent_color"
     case allowClipboardRead = "allow_clipboard_read"
@@ -631,6 +632,7 @@ enum AppSetting: String {
     case showKernelLog = "show_kernel_log"
     case showVmManagement = "show_vm_management"
     case ttyDefaultNames = "tty_default_names"
+    case keepProgramsWhenClosingWindow = "keep_programs_when_closing_window"
 
     var string: String {
         UserDefaults.standard.string(forKey: rawValue) ?? ""

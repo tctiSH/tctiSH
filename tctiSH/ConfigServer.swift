@@ -489,18 +489,20 @@ final class ConfigServer {
     ) -> Result<TTY, QEMUInterface.GuestRefusal> {
         guard let device = message.tty else {
             return .failure(
-                .init("tctictl isn't running in a terminal, so it can't tell which TTY to use"))
+                .init(
+                    "tctictl isn't running in a terminal, so it can't tell which of tctiSH's terminals to use"
+                ))
         }
         if let tty = TTYs.shared.tty(onDevice: device) {
             return .success(tty)
         }
         if device.hasPrefix("hvc") {
-            return .failure(.init("no TTY in tctiSH shows \(device)"))
+            return .failure(.init("no terminal in tctiSH shows \(device)"))
         }
         return .failure(
             .init(
-                "tctictl's terminal isn't one of tctiSH's TTYs (as under tmux or screen), "
-                    + "so it can't tell which TTY to use"))
+                "tctictl's terminal isn't one of tctiSH's (as under tmux or screen), "
+                    + "so it can't tell which one to use"))
     }
 
     /// Indicates something was wrong with a received command.

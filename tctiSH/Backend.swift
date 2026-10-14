@@ -48,6 +48,16 @@ enum ExecutionMode: String, CaseIterable {
     var switchesToNativeAlone: Bool {
         self == .always || self == .dynamicAuto
     }
+
+    /// The mode's name, in Settings and the Machine menu.
+    var title: String {
+        switch self {
+        case .always: "Always JIT"
+        case .dynamicAsk: "Dynamic (Ask)"
+        case .dynamicAuto: "Dynamic (Auto)"
+        case .never: "Never JIT"
+        }
+    }
 }
 
 /// The VM's backend: TCTI, which needs no JIT, or native code, which does.

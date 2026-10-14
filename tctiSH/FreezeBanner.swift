@@ -30,8 +30,9 @@ final class FreezeBanner: UIView {
     /// it is not worth holding up the boot indefinitely for.
     private static let drawDeadline: TimeInterval = 2
 
-    /// The banner on screen, if there is one. Main thread only.
-    private static var current: FreezeBanner?
+    /// The banners on screen, one over each window, since a freeze stops them
+    /// all. Main thread only.
+    private static var banners: [FreezeBanner] = []
 
     /// A raise that hasn't appeared yet, so `lower()` can call it off.
     private static var pendingRaise: DispatchWorkItem?
@@ -53,8 +54,8 @@ final class FreezeBanner: UIView {
     /// Puts the banner up, after `appearanceDelay`. Safe from any thread.
     static func raise(_ message: String) {
         onMain {
-            if let current {
-                current.message = message
+            if !banners.isEmpty {
+                banners.forEach { $0.message = message }
                 return
             }
 
@@ -80,7 +81,7 @@ final class FreezeBanner: UIView {
             // Opaque at once. A fade would still be running when the process stops, and the caller
             // is about to stop it.
             present(message, fading: false)
-            current?.superview?.layoutIfNeeded()
+            banners.forEach { $0.superview?.layoutIfNeeded() }
 
             // Hands this turn's layer changes to the render server *now*.
             //
@@ -97,15 +98,16 @@ final class FreezeBanner: UIView {
         }
     }
 
-    /// Takes the banner down, and calls off one that hasn't appeared yet. Safe
-    /// from any thread.
+    /// Takes the banners down, and calls off a raise that hasn't appeared yet.
+    /// Safe from any thread.
     static func lower() {
         onMain {
             pendingRaise?.cancel()
             pendingRaise = nil
 
-            guard let banner = current else { return }
-            current = nil
+            guard !banners.isEmpty else { return }
+            let lowering = banners
+            banners = []
 
             let shade = accessoryShade
             accessoryShade = nil
@@ -114,11 +116,11 @@ final class FreezeBanner: UIView {
             UIView.animate(
                 withDuration: 0.2,
                 animations: {
-                    banner.alpha = 0
+                    lowering.forEach { $0.alpha = 0 }
                     shade?.alpha = 0
                 },
                 completion: { _ in
-                    banner.removeFromSuperview()
+                    lowering.forEach { $0.removeFromSuperview() }
                     shade?.removeFromSuperview()
                 })
         }
@@ -133,35 +135,38 @@ final class FreezeBanner: UIView {
         }
     }
 
-    /// Adds the banner to whatever is on screen. Main thread only.
+    /// Adds a banner to each window. Main thread only.
     private static func present(_ message: String, fading: Bool = true) {
         pendingRaise = nil
 
-        if let current {
-            current.message = message
+        if !banners.isEmpty {
+            banners.forEach { $0.message = message }
             return
         }
 
         // Over the window so that it covers a sheet when needed.
-        guard let view = ViewController.getCurrent()?.view else {
+        let hosts = UIApplication.shared.connectedScenes.compactMap {
+            ($0.delegate as? SceneDelegate)?.window
+        }
+        guard !hosts.isEmpty else {
             Log.ui.warn("freeze banner: nothing on screen to put it over")
             return
         }
-        let host: UIView = view.window ?? view
 
-        let banner = FreezeBanner(frame: host.bounds)
-        banner.message = message
-        banner.alpha = fading ? 0 : 1
+        for host in hosts {
+            let banner = FreezeBanner(frame: host.bounds)
+            banner.message = message
+            banner.alpha = fading ? 0 : 1
+            host.addSubview(banner)
+            banners.append(banner)
+        }
 
-        host.addSubview(banner)
-        current = banner
-
-        let shade = shadeAccessory(like: banner)
+        let shade = shadeAccessory(like: banners[0])
 
         guard fading else { return }
 
         UIView.animate(withDuration: 0.15) {
-            banner.alpha = 1
+            banners.forEach { $0.alpha = 1 }
             shade?.alpha = 1
         }
     }
@@ -169,7 +174,7 @@ final class FreezeBanner: UIView {
     /// Dims the keyboard's accessory bar to match the banner, and stops it
     /// taking touches, returning the shade so it can fade in alongside.
     private static func shadeAccessory(like banner: FreezeBanner) -> UIView? {
-        guard let bar = ViewController.getCurrentTerminal()?.inputAccessoryView else {
+        guard let bar = ViewController.active?.terminal.inputAccessoryView else {
             return nil
         }
 

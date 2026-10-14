@@ -322,7 +322,7 @@ enum MonitorGuard {
         case "stop", "s":
             return Risk(
                 title: "Pause Linux?",
-                message: "Linux and every TTY stop until `cont`, or `c`, is typed here.",
+                message: "Linux and every terminal stop until `cont`, or `c`, is typed here.",
                 action: "Pause")
 
         case "loadvm":

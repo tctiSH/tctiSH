@@ -15,8 +15,12 @@ import UIKit
 
 class ViewController: UIViewController {
 
+    /// The TTYs this view controller's window shows. Set by the scene delegate
+    /// before the view loads.
+    var ttyWindow: TTYWindow!
+
     /// The selected TTY's terminal, which is the one on screen.
-    var terminal: TctiTermView { TTYs.shared.selected.view }
+    var terminal: TctiTermView { ttyWindow.selected.view }
 
     /// The padding used around the current view's frame.
     let padding: CGFloat = 7
@@ -28,12 +32,17 @@ class ViewController: UIViewController {
     /// Where the keyboard last said it was, in screen coordinates.
     private var keyboardScreenFrame: CGRect = .zero
 
-    /// Shows system status: how we're running and what's happening alongside.
+    /// Shows the window's pills: the app's, from `AppStatus`, and those only
+    /// this window shows.
     private var status: StatusPresenter?
 
     /// Whether the pill about ttyS0's size is up, and so follows the
-    /// terminal's.
-    private var serialSizeShown = false
+    /// terminal's, in whichever window shows Kernel Log.
+    private static var serialSizeShown = false
+
+    /// Posted when the pill about ttyS0's size should be put up, updated or
+    /// taken away.
+    private static let serialSizeDidChange = Notification.Name("io.ara.tctish.serialSizeDidChange")
 
     /// The keys above the keyboard. Held here because the terminal lets go of
     /// it while a hardware keyboard has it hidden.
@@ -43,31 +52,52 @@ class ViewController: UIViewController {
     /// keyboard's top edge, or the screen's bottom with a hardware one.
     private var railsBottom: CGFloat?
 
-    /// The pairing session in progress, if any. Strong: nothing else holds it.
-    private var pairingSession: PairableHostPairing?
-
-    /// Whichever pairing alert is up, so it can be replaced or taken away.
-    private weak var pairingAlertOnScreen: UIAlertController?
-
-    private static let pairingStatusKey = "pairing"
-
-    /// Whether the pairing-file alert has already been put up this launch.
-    private var hasOfferedPairingFile = false
-
-    /// Whether the JIT verdict has been logged and shown.
-    private var hasReportedJitOutcome = false
-
-    /// Stores the most recently used terminal's view controller; for
-    /// singleton-style fetches.
-    private static var currentTerminalController: UIViewController?
-
-    /// The terminal on screen: the selected TTY's. Call only from the primary
-    /// UI thread.
+    /// The view controller to present app-wide alerts and sheets from: the
+    /// window most recently active, while it's still in front, or else one that
+    /// is, or else any. Main thread only.
     ///
-    /// For whether Linux is up, ask `GuestAgent`: the selected TTY is often not
-    /// `hvc0`.
-    public static func getCurrentTerminal() -> TctiTermView? {
-        TTYs.shared.selected.view
+    /// Its terminal is that window's selected TTY's. For whether Linux is up,
+    /// ask `GuestAgent`: the selected TTY is often not `hvc0`.
+    static var active: ViewController? {
+        get {
+            if let lastActive,
+                lastActive.viewIfLoaded?.window?.windowScene?.activationState == .foregroundActive
+            {
+                return lastActive
+            }
+            let scenes = UIApplication.shared.connectedScenes
+            func controller(of scene: UIScene) -> ViewController? {
+                (scene.delegate as? SceneDelegate)?.window?.rootViewController as? ViewController
+            }
+            return scenes.filter { $0.activationState == .foregroundActive }.lazy
+                .compactMap(controller(of:)).first
+                ?? lastActive ?? scenes.lazy.compactMap(controller(of:)).first
+        }
+        set { lastActive = newValue }
+    }
+    private static weak var lastActive: ViewController?
+
+    /// Whatever is on top of the view controller, to present from: itself, or
+    /// what it presents, or what that presents, and so on.
+    var topmost: UIViewController {
+        var top: UIViewController = self
+        while let next = top.presentedViewController {
+            top = next
+        }
+        return top
+    }
+
+    /// Whether the window has closed, while its scene goes; see
+    /// `windowDidClose`.
+    private var windowClosed = false
+
+    /// The block observers this window registered, removed as it goes. A
+    /// window's view controller is freed when the window closes, unlike the
+    /// TTYs it watches.
+    private var observers: [NSObjectProtocol] = []
+
+    deinit {
+        observers.forEach(NotificationCenter.default.removeObserver)
     }
 
     /// The TTY switcher, while it's open.
@@ -133,30 +163,17 @@ class ViewController: UIViewController {
     /// has finished.
     private var slidOut: [TctiTermView] = []
 
-    /// Fetches the root ViewController, which houses our TctiTermView. Call
-    /// only from the primary UI thread.
-    ///
-    /// In normal operation; this should always be the only term persented to
-    /// the user.
-    public static func getCurrent() -> UIViewController? {
-        return currentTerminalController
-    }
-
     override func viewDidLoad() {
         super.viewDidLoad()
 
         // Make every TTY's terminal at the same frame, and put the selected one on screen.
-        TTYs.shared.makeTerminals(frame: makeFrame(keyboardDelta: 0))
+        TTYs.shared.makeTerminals(in: ttyWindow, frame: makeFrame(keyboardDelta: 0))
         let currentTerminal = terminal
         view.addSubview(currentTerminal)
 
-        // Update our "most recent" singleton.
-        ViewController.currentTerminalController = self
-
-        // Held back while Settings First keeps the boot waiting, since what it says can change in
-        // there; see `AppDelegate.releaseBootHeldForSettings`.
-        if !AppDelegate.bootHeldForSettings {
-            showBootMessage()
+        // The first window is the active one until a scene says otherwise.
+        if Self.active == nil {
+            Self.active = self
         }
 
         setupKeyboardMonitor()
@@ -176,54 +193,13 @@ class ViewController: UIViewController {
         _ = currentTerminal.becomeFirstResponder()
 
         explainSerialSize()
-        guardMonitorCommands()
 
-        // Connect to the serial port and the user's monitor, which say something as soon as QEMU
-        // starts, and ask whether Linux is up. The consoles connect themselves once QEMU has
-        // started.
-        ChardevTransport.kernelLog.start()
-        ChardevTransport.vmManagement.start()
-        GuestAgent.shared.start()
-        GuestClock.shared.start()
-
-        // All of these need a window, which is exactly why the launch path couldn't do them itself.
-        status = StatusPresenter(over: view, backdrop: currentTerminal.nativeBackgroundColor)
-        status?.keepsClearOf = followButton
-
-        // These stack rather than take turns, so both are on screen together. Order here is
-        // stacking order: the JIT verdict on top, where it reads first and then leaves after a few
-        // seconds, and the boot spinner under it for as long as the VM takes -- so there's never a
-        // moment with nothing on screen, which is what made an ordinary wait read as a hang.
-        observeJitState()
-        reportBootProgress()
-        observeJitPreparation()
-        observeCodeCache()
-        observeBackend()
-        observeQuickActions()
-        observeGuestZone()
-        observeGuestSnapshotLoads()
-
-        // Every moment someone could be told. Becoming active covers a launch that follows the
-        // failed save and a return from the backgrounding that caused it, including the first
-        // activation of this launch.
-        //
-        // `didBecomeActive` rather than `willEnterForeground`, because showing this news spends it:
-        // the flag is the only copy, and a pill raised before the app is really in front of someone
-        // would run its few seconds out unwatched.
-        NotificationCenter.default.addObserver(
-            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            self?.reportFailedSaveIfNeeded()
-        }
-
-        // And a save that fails while the app is already in front of someone, which neither of
-        // those covers: coming back mid-save leaves the save running, so its failure arrives with
-        // nobody about to become active for it.
-        NotificationCenter.default.addObserver(
-            forName: QEMUInterface.saveDidFail, object: nil, queue: .main
-        ) { [weak self] _ in
-            self?.reportFailedSaveIfNeeded()
-        }
+        // The window's pills. The first presenter to attach also starts the app's reporting; see
+        // `AppStatus.attach`.
+        let status = StatusPresenter(over: view, backdrop: currentTerminal.nativeBackgroundColor)
+        status.keepsClearOf = followButton
+        self.status = status
+        AppStatus.shared.attach(status)
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -235,960 +211,13 @@ class ViewController: UIViewController {
         // Not in viewDidLoad. Presenting anything from there fails silently -- the view isn't in a
         // window yet, so there is nothing to present *from* -- and the symptom is simply that the
         // alert never appears.
-        offerPairingFileIfWanted()
+        AppStatus.shared.windowDidAppear()
+        updateTitle()
 
-        // Settings First: the boot waits for these to close.
-        if AppDelegate.bootHeldForSettings {
+        // Settings First: the boot waits for these to close. In one window, the active one.
+        if AppDelegate.bootHeldForSettings, Self.active === self {
             openSettings(nil)
         }
-    }
-
-    // MARK: - JIT status
-
-    /// Says that the VM is still coming up, until it isn't.
-    ///
-    /// Booting takes long enough -- tens of seconds from cold -- to look like a
-    /// hang, and the terminal stays empty throughout, so there is nothing else
-    /// on screen saying the app is alive.
-    ///
-    /// Open-ended on purpose: there's no way to know how far along a boot is,
-    /// so the dial spins rather than inventing a number.
-    private func reportBootProgress() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(linuxDidComeUp),
-            name: GuestAgent.linuxDidComeUp,
-            object: nil)
-
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(returnedDuringSave),
-            name: AppDelegate.returnedDuringSave,
-            object: nil)
-
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(machineIsBack),
-            name: AppDelegate.machineIsBack,
-            object: nil)
-
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(unparkStarted),
-            name: AppDelegate.unparkStarted,
-            object: nil)
-
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(unparkDidFail),
-            name: AppDelegate.unparkDidFail,
-            object: nil)
-
-        // Belt and braces: the observer goes on before Linux could possibly have answered, but a
-        // pill that never goes away is a worse bug than a pill that never appears.
-        guard !GuestAgent.shared.isUp else { return }
-
-        showBootProgress(message: "Starting Linux")
-        watchForMissingSnapshot()
-    }
-
-    @objc private func linuxDidComeUp() {
-        dismissBootProgress()
-        stopWatchingForMissingSnapshot()
-
-        // Asked for here, and only here: there is now a session that would be lost if saving it
-        // went wrong, which is the one thing this app ever posts a notification about. Asking at
-        // launch would put the prompt in front of someone before the app had done anything.
-        LocalAlert.requestPermission()
-
-        // Needs a machine that has finished booting, and does nothing at all unless the QEMU
-        // underneath the app has changed its migration format since the last run. Off the main
-        // thread, because `delvm` is not instant on a snapshot worth a hundred megabytes.
-        let qemu = (UIApplication.shared.delegate as? AppDelegate)?.qemu
-        DispatchQueue.global(qos: .utility).async {
-            qemu?.discardPreUpgradeSnapshots()
-        }
-
-        // Linux is up, so it can be handed the vCPUs wanted now.
-        Vcpus.linuxIsUp()
-    }
-
-    /// Says why the terminal isn't answering yet: the machine is stopped until
-    /// the save finishes.
-    ///
-    /// Shares the boot pill's key, so it inherits the stall watch: a save that
-    /// never finishes is as much of a dead end as a boot that never finishes,
-    /// and offers the same way out.
-    @objc private func returnedDuringSave() {
-        showBootProgress(message: "Finishing session save")
-    }
-
-    /// The machine is running again, after a save or a park that the app came
-    /// back during.
-    @objc private func machineIsBack() {
-        dismissBootProgress()
-    }
-
-    private func dismissBootProgress() {
-        bootStallWatch?.cancel()
-        bootStallWatch = nil
-        status?.dismiss(key: Self.bootStatusKey)
-    }
-
-    /// Says why the terminal isn't answering yet when the memory was given back
-    /// in the background and the session is being read back in.
-    @objc private func unparkStarted() {
-        // A return that tries again by itself makes the question moot, and answering it afterwards
-        // would act on a machine that is no longer parked.
-        unparkAlert?.dismiss(animated: true)
-        unparkAlert = nil
-
-        showBootProgress(message: "Restoring session")
-    }
-
-    /// The question `unparkDidFail` is asking, while it's up.
-    private weak var unparkAlert: UIAlertController?
-
-    /// Asks what to do about a session that wouldn't come back.
-    ///
-    /// No cancel: the machine is parked and can't run until one of these
-    /// happens, so there is nothing to go back to.
-    @objc private func unparkDidFail() {
-        // Asked once, however many times it fails before an answer.
-        if let unparkAlert, !unparkAlert.isBeingDismissed {
-            return
-        }
-
-        var presenter: UIViewController = self
-        while let next = presenter.presentedViewController {
-            presenter = next
-        }
-        guard !presenter.isBeingDismissed else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                self?.unparkDidFail()
-            }
-            return
-        }
-
-        bootStallWatch?.cancel()
-        bootStallWatch = nil
-        status?.dismiss(key: Self.bootStatusKey)
-
-        let appDelegate = UIApplication.shared.delegate as? AppDelegate
-
-        let alert = UIAlertController(
-            title: "Couldn't restore your session",
-            message: "tctiSH gave Linux's memory back to iOS while it was in the background, "
-                + "and reading your session back in has failed. It is still saved: quitting "
-                + "and reopening tctiSH tries again from the start. Starting Linux afresh "
-                + "gets you a shell now, but anything in the session is lost.",
-            preferredStyle: .alert)
-
-        alert.addAction(
-            UIAlertAction(title: "Try Again", style: .default) { _ in
-                appDelegate?.recoverFromFailedUnpark(.retry)
-            })
-
-        alert.addAction(
-            UIAlertAction(title: "Quit tctiSH", style: .default) { _ in
-                appDelegate?.recoverFromFailedUnpark(.quit)
-            })
-
-        alert.addAction(
-            UIAlertAction(title: "Start Linux Afresh", style: .destructive) { [weak self] _ in
-                // Only if it was taken up, or the pill would wait on a boot nobody started.
-                if appDelegate?.recoverFromFailedUnpark(.startAfresh) == true {
-                    self?.showBootProgress(message: "Starting Linux")
-                }
-            })
-
-        unparkAlert = alert
-        presenter.present(alert, animated: true)
-    }
-
-    /// Puts the boot pill up as a spinner, and starts the clock on it.
-    private func showBootProgress(message: String) {
-        status?.present(
-            .init(
-                key: Self.bootStatusKey,
-                message: message,
-                state: .indeterminate,
-                duration: nil))
-
-        bootStallCounted = 0
-        bootStallLastTick = ProcessInfo.processInfo.systemUptime
-        scheduleBootStallTick()
-    }
-
-    private func scheduleBootStallTick() {
-        bootStallWatch?.cancel()
-
-        let watch = DispatchWorkItem { [weak self] in self?.bootStallTicked() }
-        bootStallWatch = watch
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.bootStallTick, execute: watch)
-    }
-
-    /// Counts the time since the last tick toward the deadline, all but any of
-    /// it spent frozen; see `bootStallDeadline`.
-    private func bootStallTicked() {
-        let now = ProcessInfo.processInfo.systemUptime
-        bootStallCounted += min(now - bootStallLastTick, Self.bootStallTick * 2)
-        bootStallLastTick = now
-
-        guard bootStallCounted >= Self.bootStallDeadline else {
-            scheduleBootStallTick()
-            return
-        }
-
-        bootStallWatch = nil
-        bootLooksStalled()
-    }
-
-    /// Turns the boot pill into something you can act on.
-    ///
-    /// A spinner that has been going for half a minute has stopped being
-    /// information and started being scenery. The alternative to this was
-    /// finding the setting for a recovery boot, which is a lot to ask of
-    /// someone who has just been left looking at a blank terminal.
-    private func bootLooksStalled() {
-        Log.qemu.warn(
-            "nothing back after \(Int(Self.bootStallDeadline))s; offering a recovery boot")
-
-        status?.present(
-            .init(
-                key: Self.bootStatusKey,
-                message: "Tap to recover",
-                state: .failed,
-                duration: nil,
-                tint: .systemRed,
-                onTap: { [weak self] in self?.offerRecoveryBoot() }))
-    }
-
-    private func offerRecoveryBoot() {
-        let alert = UIAlertController(
-            title: "Recovery boot?",
-            message: "Linux hasn't come up. A recovery boot starts it again from "
-                + "scratch, which usually fixes it -- but anything in the "
-                + "resumed session is lost.",
-            preferredStyle: .alert)
-
-        alert.addAction(
-            UIAlertAction(title: "Yes", style: .destructive) { [weak self] _ in
-                self?.performRecoveryBoot()
-            })
-
-        alert.addAction(UIAlertAction(title: "No", style: .cancel))
-
-        present(alert, animated: true)
-    }
-
-    private func performRecoveryBoot() {
-        let qemu = (UIApplication.shared.delegate as? AppDelegate)?.qemu
-
-        guard qemu?.requestRecoveryBoot() == true else {
-            // QEMU itself isn't answering, so there's nothing further to try from in here.
-            // Relaunching will recovery-boot on its own.
-            status?.present(
-                .init(
-                    key: Self.bootStatusKey,
-                    message: "Reopen the app",
-                    state: .failed,
-                    duration: nil,
-                    tint: .systemRed))
-            return
-        }
-
-        // Back to waiting, with the clock restarted -- so a recovery boot that also stalls offers
-        // itself again rather than hanging silently.
-        showBootProgress(message: "Restarting Linux")
-    }
-
-    // MARK: - Quick actions
-
-    private static let quickActionStatusKey = "quick-action"
-
-    /// Listens for the quick actions that need somewhere to be shown.
-    private func observeQuickActions() {
-        NotificationCenter.default.addObserver(
-            forName: QuickActions.didArrive, object: nil, queue: .main
-        ) { [weak self] _ in
-            self?.showQuickActionArrival()
-        }
-
-        // It may well have arrived before this view existed, in which case the notification has
-        // already been and gone with nothing listening for it.
-        showQuickActionArrival()
-    }
-
-    private func showQuickActionArrival() {
-        guard let arrival = QuickActions.takeArrival() else { return }
-
-        switch arrival {
-        case .alreadySatisfied(let message, let symbol):
-            status?.present(
-                .init(
-                    key: Self.quickActionStatusKey,
-                    message: message,
-                    state: .symbol(symbol),
-                    duration: 4))
-
-        case .offersSwitch(let message, let kind):
-            // Open-ended, because this is a question rather than news: it waits either for the tap
-            // that answers it or for the swipe that declines it.
-            status?.present(
-                .init(
-                    key: Self.quickActionStatusKey,
-                    message: message,
-                    state: .symbol(kind == .native ? "hare.fill" : "tortoise.fill"),
-                    duration: nil,
-                    onTap: { [weak self] in
-                        self?.status?.dismiss(key: Self.quickActionStatusKey)
-                        Backend.switchTo(kind, asked: true)
-                    }))
-
-        case .recoverInPlace:
-            // The one action a running VM can honor by itself, so it is simply done. Resetting the
-            // machine is exactly what a recovery boot is; going out through the home screen for it
-            // would cost a relaunch and buy nothing.
-            status?.dismiss(key: Self.quickActionStatusKey)
-            performRecoveryBoot()
-
-        case .openSettings:
-            openSettings(nil)
-        }
-    }
-
-    /// Says so when the VM was told to resume from a snapshot that isn't there.
-    ///
-    /// Polled, because the answer isn't known until QEMU has opened the disk
-    /// and looked: a second or two into a launch that has already started.
-    private func watchForMissingSnapshot() {
-        guard snapshotWatch == nil else { return }
-
-        // QEMU settles this while it is opening the disk, a second or two in, so the answer is
-        // either given early or not at all. The deadline is what stops a boot that never finishes
-        // from leaving a timer asking the same question for the life of the app.
-        let deadline = Date().addingTimeInterval(Self.snapshotWatchDeadline)
-
-        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            guard qemu_snapshot_was_missing() else {
-                if Date() >= deadline {
-                    self?.stopWatchingForMissingSnapshot()
-                }
-                return
-            }
-
-            self?.stopWatchingForMissingSnapshot()
-
-            // Disowned as well as reported. The pointer is this app's bookkeeping and it is now
-            // known to be wrong, so leaving it in place would mean saying this again on every
-            // launch until a save happens to succeed.
-            (UIApplication.shared.delegate as? AppDelegate)?.qemu?.forgetMissingResumeImage()
-
-            self?.status?.present(
-                .init(
-                    key: Self.snapshotStatusKey,
-                    message: "Snapshot not found",
-                    state: .symbol("exclamationmark.triangle.fill"),
-                    duration: 6,
-                    tint: .systemOrange))
-        }
-
-        RunLoop.main.add(timer, forMode: .common)
-        snapshotWatch = timer
-    }
-
-    private func stopWatchingForMissingSnapshot() {
-        snapshotWatch?.invalidate()
-        snapshotWatch = nil
-    }
-
-    /// Watches for a snapshot that never turned up.
-    private var snapshotWatch: Timer?
-
-    /// How long to keep asking whether the snapshot was there.
-    ///
-    /// Comfortably past the point where QEMU has opened the disk and decided,
-    /// and well short of the boot-stall deadline, so a boot going wrong is
-    /// reported as the one thing it is rather than as two.
-    private static let snapshotWatchDeadline: TimeInterval = 20
-
-    private static let snapshotStatusKey = "snapshot"
-
-    // MARK: - Saving
-
-    /// Says so when the last attempt to save the session failed.
-    private func reportFailedSaveIfNeeded() {
-        // Only when there is someone to tell. A failure can land while the app is in the
-        // background, and putting the pill up there would let its few seconds expire on a screen
-        // nobody is looking at, taking the flag with it.
-        guard UIApplication.shared.applicationState == .active else { return }
-
-        guard QEMUInterface.lastSaveFailed else { return }
-        QEMUInterface.lastSaveFailed = false
-
-        status?.present(
-            .init(
-                key: Self.saveStatusKey,
-                message: "Couldn't save your session",
-                state: .symbol("exclamationmark.triangle.fill"),
-                duration: 6,
-                tint: .systemOrange))
-    }
-
-    private static let saveStatusKey = "session-save"
-
-    /// Says when Linux changes time zone to follow the device, because programs
-    /// already running keep the old one until restarted.
-    private func observeGuestZone() {
-        NotificationCenter.default.addObserver(
-            forName: GuestClock.zoneDidChange, object: nil, queue: .main
-        ) { [weak self] notification in
-            guard let zone = notification.object as? String else { return }
-
-            self?.status?.present(
-                .init(
-                    key: Self.zoneStatusKey,
-                    message: "Now on \(zone) time; restart programs to follow",
-                    state: .symbol("clock.fill"),
-                    duration: 6))
-        }
-    }
-
-    private static let zoneStatusKey = "guest-zone"
-
-    /// Says when `tctictl snapshot load` fails, which starts Linux afresh and
-    /// loses the session.
-    private func observeGuestSnapshotLoads() {
-        NotificationCenter.default.addObserver(
-            forName: QEMUInterface.guestSnapshotLoadFailed, object: nil, queue: .main
-        ) { [weak self] notification in
-            let tag = notification.object as? String ?? "the snapshot"
-
-            self?.status?.present(
-                .init(
-                    key: Self.guestSnapshotStatusKey,
-                    message: "Couldn't load '\(tag)'; Linux is starting afresh",
-                    state: .symbol("exclamationmark.triangle.fill"),
-                    duration: 8,
-                    tint: .systemOrange))
-        }
-    }
-
-    private static let guestSnapshotStatusKey = "guest-snapshot"
-
-    private static let bootStatusKey = "boot"
-
-    /// How long a boot may take before we assume it isn't going to finish.
-    ///
-    /// A cold boot is advertised to the user as taking about twenty seconds, so
-    /// this has to sit clear of that.
-    private static let bootStallDeadline: TimeInterval = 30
-
-    /// How often the watch counts. Any wait longer than this by more than
-    /// `bootStallTick` again was spent frozen or suspended, and the rest of it
-    /// isn't counted.
-    private static let bootStallTick: TimeInterval = 1
-
-    /// The watch's next count, so that it can be called off.
-    private var bootStallWatch: DispatchWorkItem?
-
-    /// How much of the deadline the boot has used so far, and when the watch
-    /// last counted.
-    private var bootStallCounted: TimeInterval = 0
-    private var bootStallLastTick: TimeInterval = 0
-
-    /// Follows JIT enablement, which now outlives this view being created.
-    ///
-    /// Two separate things come out of it. While it is still going the banner
-    /// is up, because the tail of enablement stops the process outright and a
-    /// silent freeze reads as a crash. Once it has settled the verdict goes in
-    /// a pill, which is worth knowing but not worth a permanent fixture.
-    private func observeJitState() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(jitStateChanged),
-            name: JitEnablement.stateDidChange,
-            object: nil)
-
-        // It may well have settled before this view existed, in which case the notification has
-        // already been and gone.
-        jitStateChanged()
-    }
-
-    @objc private func jitStateChanged() {
-        if let message = JitEnablement.bannerMessage {
-            FreezeBanner.raise(message)
-        } else {
-            FreezeBanner.lower()
-        }
-
-        // Fires for every change, and the verdict only arrives once.
-        guard let outcome = JitEnablement.outcome, !hasReportedJitOutcome else { return }
-        hasReportedJitOutcome = true
-
-        switch outcome {
-        case .blessed, .entitled:
-            Log.jit.note("running with JIT")
-        case .interpreted(let reason):
-            Log.jit.note("running without JIT: \(reason.logDescription)")
-        }
-
-        status?.present(
-            .init(
-                key: "jit",
-                message: outcome.status.message,
-                state: .symbol(outcome.status.symbol),
-                duration: 5))
-
-        offerPairingFileIfWanted()
-    }
-
-    /// Shows and updates the progress pill as background preparation runs.
-    private func observeJitPreparation() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(jitPreparationChanged),
-            name: JitEnablement.preparationDidChange,
-            object: nil)
-
-        // Preparation may well have started before this view existed.
-        jitPreparationChanged()
-    }
-
-    @objc private func jitPreparationChanged() {
-        switch JitEnablement.preparation {
-        case .idle:
-            break
-
-        case .running(let message, let fraction):
-            status?.present(
-                .init(
-                    key: "prepare",
-                    message: message,
-                    state: fraction.map { .progress($0) } ?? .indeterminate,
-                    duration: nil))
-
-        case .finished(let succeeded, let message):
-            // Held for a moment rather than vanishing the instant the work ends: whoever glanced
-            // away would otherwise never learn how it went.
-            status?.present(
-                .init(
-                    key: "prepare",
-                    message: message,
-                    state: succeeded ? .succeeded : .failed,
-                    duration: 3))
-        }
-    }
-
-    // MARK: - Backend
-
-    /// Follows the VM's backend: offers to switch, what a switch is doing, and
-    /// what came of it.
-    private func observeBackend() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(backendStateChanged),
-            name: Backend.stateDidChange,
-            object: nil)
-
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(backendEventOccurred),
-            name: Backend.eventDidOccur,
-            object: nil)
-
-        backendStateChanged()
-    }
-
-    @objc private func backendStateChanged() {
-        if let offer = Backend.offer {
-            // A question, so it waits to be answered or declined.
-            status?.present(
-                .init(
-                    key: Self.backendOfferKey,
-                    message: offer.message,
-                    state: .symbol(offer.symbol),
-                    duration: nil,
-                    onTap: { Backend.acceptOffer() },
-                    onSwipeAway: { Backend.declineOffer() }))
-        } else {
-            status?.dismiss(key: Self.backendOfferKey)
-        }
-
-        switch Backend.activity {
-        case .idle:
-            status?.dismiss(key: Self.backendActivityKey)
-
-        case .preparing:
-            // Finding and arming a debugger takes seconds during which the app is responsive. The
-            // freeze that follows has the banner.
-            status?.present(
-                .init(
-                    key: Self.backendActivityKey,
-                    message: JitEnablement.preparingMessage,
-                    state: .indeterminate,
-                    duration: nil))
-
-        case .switching(let kind):
-            status?.present(
-                .init(
-                    key: Self.backendActivityKey,
-                    message: "Switching to \(kind.name)…",
-                    state: .indeterminate,
-                    duration: nil))
-        }
-    }
-
-    @objc private func backendEventOccurred() {
-        guard let event = Backend.lastEvent else { return }
-        let warning = event.isWarning
-
-        status?.present(
-            .init(
-                key: Self.backendEventKey,
-                message: event.message,
-                state: .symbol(event.symbol),
-                duration: warning ? 6 : 4,
-                tint: warning ? .systemOrange : nil))
-    }
-
-    private static let backendOfferKey = "backend-offer"
-    private static let backendActivityKey = "backend-activity"
-    private static let backendEventKey = "backend-event"
-
-    // MARK: - Code cache
-
-    /// Follows the code cache, and offers to expand it when it fills up.
-    ///
-    /// Silent unless the cache was prepared in chunks, which only a blessed JIT
-    /// launch running Dynamic ever is. Everywhere else there is nothing held
-    /// back and nothing to offer.
-    private func observeCodeCache() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(codeCacheStateChanged),
-            name: CodeCacheMonitor.stateDidChange,
-            object: nil)
-
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(codeCacheEventOccurred),
-            name: CodeCacheMonitor.eventDidOccur,
-            object: nil)
-
-        CodeCacheMonitor.start()
-    }
-
-    /// Says what just happened to the cache, briefly.
-    ///
-    /// The notifications setting is applied at the source, in the monitor, so
-    /// there is nothing to check here, but "gated" is not the same as "off":
-    /// warnings come through whatever the setting says, which is why this picks
-    /// them out below rather than treating everything alike.
-    @objc private func codeCacheEventOccurred() {
-        guard let event = CodeCacheMonitor.lastEvent else { return }
-
-        // Warnings are picked out of the ordinary run of size changes, and given longer to be read:
-        // the others are news about something working, where these ask you to decide whether to do
-        // anything about it. Orange to match the other pill that reports a condition rather than
-        // progress, which is "Snapshot not found".
-        let warning = event.isWarning
-
-        status?.present(
-            .init(
-                key: Self.codeCacheEventKey,
-                message: event.message,
-                state: .symbol(event.symbol),
-                duration: warning ? 6 : 4,
-                tint: warning ? .systemOrange : nil))
-    }
-
-    private static let codeCacheEventKey = "code-cache-event"
-
-    @objc private func codeCacheStateChanged() {
-        switch CodeCacheMonitor.state {
-        case .quiet:
-            stopCountdownTicks()
-            status?.dismiss(key: Self.codeCacheStatusKey)
-
-        case .countingDown, .growing:
-            startCountdownTicks()
-        }
-    }
-
-    /// Drives whichever ring the cache is currently showing.
-    ///
-    /// Redrawn rather than animated in one go. The countdown has to reach zero
-    /// at the same moment the expansion starts, and the preparation ring is
-    /// tracking an estimate that may be overtaken at any point. Neither
-    /// survives being handed to a single animation and left alone.
-    private func startCountdownTicks() {
-        guard codeCacheTick == nil else {
-            renderCodeCache()
-            return
-        }
-
-        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
-            self?.renderCodeCache()
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        codeCacheTick = timer
-
-        renderCodeCache()
-    }
-
-    private func renderCodeCache() {
-        switch CodeCacheMonitor.state {
-        case .quiet:
-            stopCountdownTicks()
-
-        case .countingDown(let next):
-            let size = Mebibytes.describe(next / (1024 * 1024))
-
-            status?.present(
-                .init(
-                    key: Self.codeCacheStatusKey,
-                    message: "Code cache \u{2192} \(size)",
-                    state: .countdown(CodeCacheMonitor.countdownRemaining),
-                    duration: nil,
-                    animated: false,
-                    onTap: { CodeCacheMonitor.cancelGrowth() },
-                    onSwipeAway: { CodeCacheMonitor.cancelGrowth() }))
-
-        case .growing:
-            // Finding and arming a debugger takes several seconds during which the app is perfectly
-            // responsive, and saying nothing about it made the whole expansion read as one long
-            // hang. `.quiet` is what ends the ticking.
-            guard let progress = CodeCacheMonitor.preparationProgress else {
-                status?.present(
-                    .init(
-                        key: Self.codeCacheStatusKey,
-                        message: "Expanding",
-                        state: .indeterminate,
-                        duration: nil))
-                return
-            }
-
-            status?.present(
-                .init(
-                    key: Self.codeCacheStatusKey,
-                    message: JitEnablement.preparingMessage,
-                    state: .progress(progress),
-                    duration: nil,
-                    animated: false))
-        }
-    }
-
-    private func stopCountdownTicks() {
-        codeCacheTick?.invalidate()
-        codeCacheTick = nil
-    }
-
-    /// Redraws the countdown ring while one is running.
-    private var codeCacheTick: Timer?
-
-    private static let codeCacheStatusKey = "code-cache"
-
-    /// Offers to import a pairing file, if one was all that JIT was missing.
-    ///
-    /// Call only once the view is on screen. `viewDidAppear` runs again after
-    /// every dismissal so this also has to remember that it has already asked.
-    private func offerPairingFileIfWanted() {
-        // Called on the JIT verdict as well as from `viewDidAppear`, and the verdict can arrive
-        // before there is a window to present from. Defer to whichever call has one rather than
-        // failing silently.
-        guard view.window != nil else { return }
-
-        guard JitEnablement.needsPairingFile, !hasOfferedPairingFile else { return }
-        hasOfferedPairingFile = true
-
-        let alert = UIAlertController(
-            title: "Enable JIT?",
-            message: "tctiSH can run much faster with a debugger's help, but it "
-                + "needs a pairing file for this device. Setting one up now "
-                + "will speed up the next launch.",
-            preferredStyle: .alert)
-
-        // iOS 27 is where a device gained the ability to pair *with* a host.
-        if #available(iOS 27.0, *) {
-            alert.addAction(
-                // Deliberately the same words the device shows in Settings: the user taps "Pair
-                // with tctiSH" here and then goes looking for "Pair with tctiSH" there.
-                UIAlertAction(title: "Pair with tctiSH", style: .default) { _ in
-                    self.startPairing()
-                })
-        }
-
-        alert.addAction(
-            UIAlertAction(title: "Choose File", style: .default) { _ in
-                // `importInteractively()` blocks until the user picks, so it cannot run on the main
-                // thread as the picker it waits on is presented from there.
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let result = JitPairingFile.importInteractively()
-
-                    DispatchQueue.main.async {
-                        switch result {
-                        case .imported:
-                            // Preparation starts and puts up a pill within the second.
-                            JitEnablement.pairingFileArrived()
-
-                        case .cancelled:
-                            // Asking again this launch would just be nagging; the next one will
-                            // offer.
-                            break
-
-                        case .failed:
-                            self.status?.present(
-                                .init(
-                                    key: Self.pairingStatusKey,
-                                    message: "Couldn't read that file",
-                                    state: .symbol("exclamationmark.triangle.fill"),
-                                    duration: 5))
-                        }
-                    }
-                }
-            })
-
-        alert.addAction(UIAlertAction(title: "Not Now", style: .cancel))
-
-        present(alert, animated: true)
-    }
-
-    /// Advertises tctiSH and waits for this device to pair with it.
-    ///
-    /// Held as a property because the wait outlives the call: the user leaves
-    /// for Settings, and the advertisement has to still be up when they get
-    /// there.
-    private func startPairing() {
-        let session = PairableHostPairing(
-            onPIN: { [weak self] pin in self?.showPairingCode(pin) },
-            onOutcome: { [weak self] outcome in self?.finishPairing(outcome) })
-
-        pairingSession = session
-        showPairingInstructions()
-        session.start()
-    }
-
-    /// Tells the user where to go, because they cannot guess it.
-    ///
-    /// An alert rather than a pill as this is a path through Settings, it has
-    /// to survive being read twice, and it has to still be there when they come
-    /// back from looking. It is replaced by the code alert once the device
-    /// connects.
-    private func showPairingInstructions() {
-        // Developer Mode is not worth checking for: since iOS 16 a development-signed app carrying
-        // `get-task-allow` cannot launch without it, tctiSH claims that entitlement for JIT, and
-        // the deployment target is 18.
-        let alert = pairingAlert(
-            title: "Pair with tctiSH",
-            message: "On this device, open:\n\n"
-                + "Settings › Privacy & Security › Developer Mode\n\n"
-                + "Scroll down, tap \"Pair with tctiSH\", then come back here for the code.")
-
-        alert.addAction(
-            UIAlertAction(title: "Open Settings", style: .default) { _ in
-                Self.openSettings()
-            })
-
-        present(alert)
-    }
-
-    /// Shows the code the user has to type into the device.
-    ///
-    /// An alert rather than a pill: this is the one moment in the flow where
-    /// the user has something to read off and copy, and it should not be
-    /// dismissed by accident while they are typing.
-    private func showPairingCode(_ code: String) {
-        present(
-            pairingAlert(
-                title: "Pairing Code",
-                message: "Enter this code on your device to finish pairing:\n\n\(code)"))
-    }
-
-    /// Opens Settings where the user actually needs to be.
-    private static func openSettings() {
-        let application = UIApplication.shared
-
-        func openOwnPage() {
-            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-            application.open(url)
-        }
-
-        guard let root = URL(string: "App-Prefs:") else {
-            openOwnPage()
-            return
-        }
-
-        application.open(root) { opened in
-            Log.ui.note("settings: App-Prefs: \(opened ? "opened" : "was refused")")
-            if !opened { openOwnPage() }
-        }
-    }
-
-    /// Puts up one of the pairing alerts, replacing whichever is on screen.
-    private func pairingAlert(title: String, message: String) -> UIAlertController {
-        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(
-            UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in
-                self?.pairingSession?.cancel()
-            })
-        return alert
-    }
-
-    /// Shows `alert`, taking away the previous one first.
-    ///
-    /// Recorded as the one on screen *now*: the outcome can land while a
-    /// dismissal is still running, and `finishPairing` has to be able to take
-    /// away an alert that has not finished appearing. It does that by clearing
-    /// the property, which this then reads as "no longer wanted" and declines
-    /// to present.
-    private func present(_ alert: UIAlertController) {
-        let previous = pairingAlertOnScreen
-        pairingAlertOnScreen = alert
-
-        let show = { [weak self] in
-            guard self?.pairingAlertOnScreen === alert else { return }
-            self?.present(alert, animated: true)
-        }
-
-        if let previous {
-            previous.dismiss(animated: false, completion: show)
-        } else {
-            show()
-        }
-    }
-
-    private func finishPairing(_ outcome: PairableHostPairing.Outcome) {
-        pairingSession = nil
-        pairingAlertOnScreen?.dismiss(animated: true)
-        pairingAlertOnScreen = nil
-
-        switch outcome {
-        case .paired(let pairingData):
-            do {
-                try JitPairingFile.store(pairingData)
-                JitEnablement.pairingFileArrived()
-            } catch {
-                showPairingFailure(error.localizedDescription)
-            }
-
-        case .cancelled:
-            // Their decision, and the alert is already gone. No comment.
-            break
-
-        case .failed(let reason):
-            showPairingFailure(reason)
-        }
-    }
-
-    private func showPairingFailure(_ reason: String) {
-        status?.present(
-            .init(
-                key: Self.pairingStatusKey,
-                message: "Couldn't pair: \(reason)",
-                state: .symbol("exclamationmark.triangle.fill"),
-                duration: 8))
     }
 
     func makeFrame(keyboardDelta: CGFloat, _ fn: String = #function, _ ln: Int = #line) -> CGRect {
@@ -1200,12 +229,22 @@ class ViewController: UIViewController {
         // doesn't reflow each time the keyboard comes and goes.
         let side = padding + (wantsRails ? KeyBar.railWidth : 0)
 
+        let insets = terminalInsets
         return CGRect(
-            x: view.safeAreaInsets.left + side,
-            y: view.safeAreaInsets.top + padding,
-            width: view.frame.width - view.safeAreaInsets.left - view.safeAreaInsets.right
-                - (side * 2),
-            height: view.frame.height - view.safeAreaInsets.top - bottom - (padding * 2))
+            x: insets.left + side,
+            y: insets.top + padding,
+            width: view.frame.width - insets.left - insets.right - (side * 2),
+            height: view.frame.height - insets.top - bottom - (padding * 2))
+    }
+
+    /// The safe area, except that in a window it also starts below the window
+    /// controls in its top corner, so that no text is under them.
+    ///
+    /// Below rather than beside, which would push every line in by the width of
+    /// the controls when they only take up the first.
+    private var terminalInsets: UIEdgeInsets {
+        guard #available(iOS 26.0, *) else { return view.safeAreaInsets }
+        return view.edgeInsets(for: .safeArea(cornerAdaptation: .vertical))
     }
 
     /// Watches the keyboard, and the accessory bar that stands in for it when a
@@ -1252,15 +291,20 @@ class ViewController: UIViewController {
         // Mid-turn, the keyboard's frame is stale; see `expectKeyboardWhileTurning`.
         guard turningTo == nil else { return }
 
-        // Only what's docked: the keyboard along the bottom of the screen, and the bar along it or
-        // riding a docked keyboard. A floating keyboard, iPad's small one, is reported where it
-        // floats, over the middle of the terminal, which then stopped short above it; floating, it
-        // covers the terminal rather than pushing it up.
+        // Only what's docked: the keyboard along the bottom of the screen, and the bar along it,
+        // along the bottom of a window that doesn't fill the screen, where iPadOS puts it with a
+        // hardware keyboard, or riding a docked keyboard. A floating keyboard, iPad's small one, is
+        // reported where it floats, over the middle of the terminal, which then stopped short above
+        // it; floating, it covers the terminal rather than pushing it up.
         let bottom = screen.bounds.maxY
+        let windowBottom = view.window.map {
+            $0.convert($0.bounds, to: screen.coordinateSpace).maxY
+        }
         let keyboard = keyboardScreenFrame
         let keyboardDocked = keyboard.height > 0 && keyboard.maxY >= bottom - 1
         let bar = keyBar?.screenFrame.flatMap { bar in
-            bar.maxY >= bottom - 1 || (keyboardDocked && abs(bar.maxY - keyboard.minY) <= 1)
+            bar.maxY >= bottom - 1 || windowBottom.map { abs(bar.maxY - $0) <= 1 } == true
+                || (keyboardDocked && abs(bar.maxY - keyboard.minY) <= 1)
                 ? bar : nil
         }
 
@@ -1392,13 +436,13 @@ class ViewController: UIViewController {
         // A new view size, from the device turning, still resizes it, for the keyboard it will have
         // once the switcher closes, so the switcher's cards take the new shape.
         if switcher == nil {
-            TTYs.shared.terminalFrame = makeFrame(keyboardDelta: keyboardDelta)
+            ttyWindow.terminalFrame = makeFrame(keyboardDelta: keyboardDelta)
         } else if view.bounds.size != sizeUnderSwitcher {
             sizeUnderSwitcher = view.bounds.size
             let keyboard =
                 keyboardBeforeSwitcher
                 ? expectedKeyboard(rails: wantsRails, height: view.bounds.height) : 0
-            TTYs.shared.terminalFrame = makeFrame(keyboardDelta: keyboard)
+            ttyWindow.terminalFrame = makeFrame(keyboardDelta: keyboard)
         }
         layoutFindBar()
         scheduleFloatingSwitcherUpdate()
@@ -1447,119 +491,62 @@ extension ViewController {
         SettingsViewController.present(from: self, showing: .pinnedKeys)
     }
 
-    /// Ticks Show Key Bar With Hardware Keyboard while it's on.
+    /// Ticks the menu bar's settings that are on, names the commands that say
+    /// what they'll do to the selected TTY, or to Linux, and lists the TTYs
+    /// that ⌘1 to ⌘9 show.
     override func validate(_ command: UICommand) {
         super.validate(command)
 
-        if command.action == #selector(toggleKeyBarWithHardwareKeyboard(_:)) {
+        let tty = ttyWindow.selected
+        switch command.action {
+        case #selector(toggleKeyBarWithHardwareKeyboard(_:)):
             command.state = AppSetting.hideKeyBarWithHardwareKeyboard.bool ? .off : .on
+        case #selector(togglePinned(_:)):
+            command.title = tty.isPinned ? "Unpin Terminal" : "Pin Terminal"
+        case #selector(toggleMuted(_:)):
+            command.title = tty.isMuted ? "Unmute Terminal" : "Mute Terminal"
+        // Move Terminal to lists the other windows by name.
+        case #selector(moveTTYToWindow(_:)):
+            let target = otherWindow(command.propertyList as? Int)
+            command.title = target?.title ?? command.title
+            command.attributes = target != nil ? [] : .hidden
+        // Each TTY that ⌘1 to ⌘8 shows is listed by name, and those past the last are hidden. ⌘9,
+        // for the last, is listed only once there are nine or more: before then, the last TTY is
+        // already listed with its own number. A hidden shortcut still works.
+        case #selector(jumpToTTY(_:)):
+            let number = command.propertyList as? Int ?? 0
+            let target = jumpTarget(number)
+            let listed = number < 9 || ttyWindow.stepOrder.count >= 9
+            command.title = target?.name ?? command.title
+            command.attributes = target != nil && listed ? [] : .hidden
+        // A system TTY in this window's step order is listed with ⌘1 to ⌘9 instead.
+        case #selector(showKernelLog(_:)):
+            command.attributes = listsSystemTTY(.kernelLog) ? [] : .hidden
+        case #selector(showVMManagement(_:)):
+            command.attributes = listsSystemTTY(.vmManagement) ? [] : .hidden
+        case #selector(switchBackend(_:)):
+            command.title = Backend.current == .native ? "Switch to TCTI…" : "Switch to JIT…"
+        case #selector(setExecutionMode(_:)):
+            let mode = command.propertyList as? String
+            command.state = mode == ExecutionMode.setting.rawValue ? .on : .off
+        case #selector(setVcpus(_:)):
+            command.state = command.propertyList as? Int == Vcpus.foreground ? .on : .off
+        case #selector(toggleKeepScreenAwake(_:)):
+            command.state = AppSetting.keepScreenAwake.bool ? .on : .off
+        default:
+            break
         }
     }
 
-    /// On iPhone, which has no menu bar, the key commands that the menu bar
-    /// holds on iPad: Settings (⌘,), Find (⌘F) and the TTY commands. Not on
-    /// iPad, where the menu bar's commands already answer these keys and a
-    /// second set would only compete with them.
+    /// On iPhone, which has no menu bar, the shortcuts that the menu bar holds
+    /// on iPad; see `MenuBar`. Not on iPad, where the menu bar's commands
+    /// already answer these keys and a second set would only compete with them,
+    /// except for the alternates that a menu item can't show.
     override var keyCommands: [UIKeyCommand]? {
-        guard traitCollection.userInterfaceIdiom == .phone else { return super.keyCommands }
-
-        let settings = UIKeyCommand(
-            title: "Settings…", action: #selector(openSettings(_:)), input: ",",
-            modifierFlags: .command)
-        // On iPad, Find comes from Edit > Find in the menu bar.
-        let find = UIKeyCommand(
-            title: "Find…", action: #selector(find(_:)), input: "f", modifierFlags: .command)
-        return (super.keyCommands ?? []) + Self.ttyFileCommands + Self.ttyViewCommands
-            + Self.ttyWindowCommands + [find, settings]
-    }
-}
-
-// MARK: - Boot message
-
-extension ViewController {
-
-    /// What the terminal says before Linux starts. Called as the view loads, or
-    /// once settings close when Settings First held the boot.
-    func showBootMessage() {
-        // If we're doing a recovery boot by user choice provide a message letting the user know
-        // that this will take a moment.
-        //
-        // Ahead of the `forceRecoveryBoot` branch below, which would otherwise catch the quick
-        // action and apologize for a resume that never went wrong.
-        if QuickActions.request == .recovery
-            || UserDefaults.standard.string(forKey: "resume_behavior") == "recovery_boot"
-        {
-            say("(Recovery booting; startup will take a bit.)")
-        }
-
-        // If this is our first boot, create the image we'll use for resuming.
-        else if AppDelegate.isFirstBoot {
-            say(
-                "Welcome to tctiSH! This first boot will take just a bit longer, as we set up this "
-                    + "environment for later use. Future boots will be way faster!",
-                "This will take ~20 seconds or so.")
-        }
-
-        // If we're forcing a recovery boot by something other than user choice, provide a message
-        // letting the user know
-        else if AppDelegate.forceRecoveryBoot {
-            say(
-                "It seems like our last attempt at resuming might not have gone so well. We'll "
-                    + "recover by restarting things the slow way.",
-                "This will take ~20 seconds or so.")
-        }
-
-        // An updated app can mean an updated guest kernel, an updated QEMU, or a different machine
-        // shape while a snapshot is a whole machine, including a kernel already running in its RAM.
-        // None of those can be resumed into. Says "updated" rather than naming which, because the
-        // distinction is ours and not the user's.
-        else if AppDelegate.snapshotEpochChanged {
-            say(
-                "tctiSH has been updated, so we'll need to re-create our 'instant boot' "
-                    + "environment, just this once after the update.",
-                "This will take ~20 seconds or so.")
-        }
-
-        // If the user has just changed the amount of memory in the VM, they'll need a full boot to
-        // re-populate the environment. Let them know.
-        else if AppDelegate.memoryValueChanged {
-            say(
-                "The memory limit placed on tctiSH has changed. We'll need to re-create our "
-                    + "'instant boot' environment, just this once after the change.",
-                "This will take ~20 seconds or so.")
-        }
-
-        // A code cache change costs nothing at the guest's end so this says what changed without
-        // promising a slow boot the way the branches above have to.
-        else if AppDelegate.codeCacheChanged {
-            say("The code cache size has changed. tctiSH is now using \(CodeCache.summary).")
-        }
-    }
-
-    /// Prints paragraphs, each followed by a blank line, wrapped at word
-    /// boundaries to the terminal's width.
-    ///
-    /// Written as whole paragraphs rather than broken by hand at some fixed
-    /// width, which left a short line on an iPad's wide terminal running over
-    /// three. Wrapped here rather than by the terminal, which would break the
-    /// line in the middle of a word.
-    private func say(_ paragraphs: String...) {
-        // These messages are about Linux starting, so they go on `hvc0`'s TTY while it's open, and
-        // on the selected terminal otherwise.
-        let tv: TctiTermView = TTYs.shared.hvc0?.view ?? terminal
-        let width = max(20, tv.getTerminal().cols)
-
-        for paragraph in paragraphs {
-            var line = ""
-            for word in paragraph.split(separator: " ") {
-                if !line.isEmpty, line.count + 1 + word.count > width {
-                    tv.feed(text: line + "\r\n")
-                    line = ""
-                }
-                line += line.isEmpty ? String(word) : " " + word
-            }
-            tv.feed(text: line + "\r\n\r\n")
-        }
+        let commands =
+            traitCollection.userInterfaceIdiom == .phone
+            ? MenuBar.phoneKeyCommands : MenuBar.alternateKeyCommands
+        return (super.keyCommands ?? []) + commands
     }
 }
 
@@ -1575,18 +562,19 @@ extension ViewController {
             button.step = { [weak self] offset in self?.step(by: offset) }
             button.ttyMenu = { [weak self] interaction in
                 guard let self, switcher == nil, presentedViewController == nil else { return nil }
-                return ttyMenu.menu(for: TTYs.shared.selected, in: interaction)
+                return ttyMenu.menu(for: ttyWindow.selected, in: interaction)
             }
             button.add = { [weak self] in self?.stepToNew() }
-            button.pull = { offset in
-                let ttys = TTYs.shared
-                if ttys.neighbor(by: offset) != nil {
+            button.pull = { [weak self] offset in
+                guard let self else { return .none }
+                if ttyWindow.neighbor(by: offset) != nil {
                     return .step
                 }
                 guard offset > 0 else { return .none }
-                return ttys.canAdd ? .add : .full
+                return TTYs.shared.canAdd ? .add : .full
             }
             button.atLimit = { [weak self] in self?.explainTTYLimit() }
+            button.ttyWindow = ttyWindow
         }
 
         floatingSwitcher.alpha = 0
@@ -1598,141 +586,121 @@ extension ViewController {
         followButton.onTap = { [weak self] in self?.terminal.follow() }
         view.addSubview(followButton)
 
-        NotificationCenter.default.addObserver(
-            forName: TctiTermView.followingDidChange, object: nil, queue: .main
-        ) { [weak self] note in
-            guard let self, note.object as? TctiTermView === terminal else { return }
-            updateFollowButton()
-        }
+        observers.append(
+            NotificationCenter.default.addObserver(
+                forName: TctiTermView.followingDidChange, object: nil, queue: .main
+            ) { [weak self] note in
+                guard let self, note.object as? TctiTermView === terminal else { return }
+                updateFollowButton()
+            })
 
-        NotificationCenter.default.addObserver(
-            forName: TTYs.selectionDidChange, object: nil, queue: .main
-        ) { [weak self] note in
-            guard let self else { return }
-            showSelected(replacing: note.object as? TTY)
-            updateFollowButton()
-            if serialSizeShown {
-                let t = terminal.getTerminal()
-                showSerialSize(cols: t.cols, rows: t.rows)
-            }
-        }
+        observers.append(
+            NotificationCenter.default.addObserver(
+                forName: TTYs.selectionDidChange, object: ttyWindow, queue: .main
+            ) { [weak self] note in
+                guard let self else { return }
+                showSelected(replacing: note.userInfo?[TTYs.previousKey] as? TTY)
+                updateFollowButton()
+                updateSerialSize()
+                updateTitle()
+            })
+
+        // A window's title names its TTYs.
+        observers.append(
+            NotificationCenter.default.addObserver(
+                forName: TTYs.didChange, object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.updateTitle()
+            })
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(couldNotEndPrograms), name: TTYs.couldNotEndPrograms,
             object: nil)
+
+        observers.append(
+            NotificationCenter.default.addObserver(
+                forName: TTYs.windowDidClose, object: ttyWindow, queue: .main
+            ) { [weak self] _ in
+                self?.windowDidClose()
+            })
+
+        // A TTY dragged from another window's switcher onto the terminal moves here.
+        view.addInteraction(UIDropInteraction(delegate: self))
+    }
+
+    /// Names the window, in App Exposé and the window list, for its selected
+    /// TTY, and how many others it has.
+    func updateTitle() {
+        view.window?.windowScene?.title = ttyWindow.title
+    }
+
+    /// Detaches the key bar and Find from the terminal that was on screen when
+    /// the window closed. If that TTY moved to another window, that window
+    /// attaches its key bar as it shows it.
+    private func windowDidClose() {
+        windowClosed = true
+        closeFindBar(refocus: false)
+        if let keyBar, terminal.inputAccessoryView === keyBar {
+            terminal.inputAccessoryView = nil
+        }
+        keyBar?.terminal = nil
     }
 
     private static let serialSizeStatusKey = "serial-size"
-    private static let monitorGuardStatusKey = "monitor-guard"
 
     /// The serial port has no way to be told the terminal's size, so the first
     /// time something is typed into Kernel Log in each launch, say how to set
     /// it by hand, for the size the terminal has. Kept, and kept up to date,
-    /// until it is swiped away, but shown only while Kernel Log is.
+    /// until it is swiped away, but shown only in the window where Kernel Log
+    /// is selected.
     private func explainSerialSize() {
-        guard let view = TTYs.shared.system.first(where: { $0.kind == .kernelLog })?.view else {
+        observers.append(
+            NotificationCenter.default.addObserver(
+                forName: Self.serialSizeDidChange, object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.updateSerialSize()
+            })
+
+        // Set up only by the first window to get here: Kernel Log has one terminal, shared by every
+        // window.
+        guard let view = Self.kernelLog?.view, view.onTyping == nil, !Self.serialSizeShown else {
             return
         }
-        view.onTyping = { [weak self, weak view] in
-            guard let self, let view else { return }
-            view.onTyping = nil
-
-            serialSizeShown = true
-            let t = view.getTerminal()
-            showSerialSize(cols: t.cols, rows: t.rows)
+        view.onTyping = { [weak view] in
+            view?.onTyping = nil
+            Self.serialSizeShown = true
+            NotificationCenter.default.post(name: Self.serialSizeDidChange, object: nil)
         }
-        ChardevTransport.kernelLog.onResize = { [weak self] cols, rows in
-            guard let self, serialSizeShown else { return }
-            showSerialSize(cols: cols, rows: rows)
+        ChardevTransport.kernelLog.onResize = { _, _ in
+            guard Self.serialSizeShown else { return }
+            NotificationCenter.default.post(name: Self.serialSizeDidChange, object: nil)
         }
     }
 
-    /// Shows the pill if Kernel Log is selected, and takes it away otherwise.
-    private func showSerialSize(cols: Int, rows: Int) {
-        guard TTYs.shared.selected.kind == .kernelLog else {
+    private static var kernelLog: TTY? {
+        TTYs.shared.system.first { $0.kind == .kernelLog }
+    }
+
+    /// Shows the pill if it's up and Kernel Log is selected here, and takes it
+    /// away otherwise.
+    private func updateSerialSize() {
+        guard Self.serialSizeShown, ttyWindow.selected.kind == .kernelLog,
+            let t = Self.kernelLog?.view?.getTerminal()
+        else {
             status?.dismiss(key: Self.serialSizeStatusKey)
             return
         }
         status?.present(
             .init(
                 key: Self.serialSizeStatusKey,
-                message: "Size ttyS0 by hand: stty rows \(rows) cols \(cols)",
+                message: "Size ttyS0 by hand: stty rows \(t.rows) cols \(t.cols)",
                 state: .symbol("ruler"),
                 duration: nil,
                 animated: false,
-                onSwipeAway: { [weak self] in self?.serialSizeShown = false }))
-    }
-
-    /// Has VM Management ask before submitting a command that would end,
-    /// restart or rearrange the VM under the app; see `MonitorGuard`.
-    private func guardMonitorCommands() {
-        ChardevTransport.vmManagement.confirm = { [weak self] risk, answer in
-            guard let self else {
-                answer(false)
-                return
-            }
-            ask(about: risk, answer: answer)
-        }
-    }
-
-    /// Asks about a monitor command, from whatever is on top, and answers
-    /// exactly once. VM Management sends nothing until it has an answer, so one
-    /// that can't be asked is answered no, and said so.
-    private func ask(
-        about risk: MonitorGuard.Risk, answer: @escaping (Bool) -> Void, attempt: Int = 0
-    ) {
-        var presenter: UIViewController = self
-        while let next = presenter.presentedViewController {
-            presenter = next
-        }
-
-        // Not over something on its way out, or over another question, which is answered first.
-        if presenter.isBeingDismissed || presenter is UIAlertController {
-            askAgain(about: risk, answer: answer, attempt: attempt)
-            return
-        }
-
-        var answered = false
-        let reply = { (submit: Bool) in
-            guard !answered else { return }
-            answered = true
-            answer(submit)
-        }
-        let alert = UIAlertController(
-            title: risk.title, message: risk.message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in reply(false) })
-        alert.addAction(UIAlertAction(title: risk.action, style: .destructive) { _ in reply(true) })
-        presenter.present(alert, animated: true)
-
-        // A presentation UIKit refuses only logs, so look.
-        DispatchQueue.main.async { [weak self] in
-            guard alert.presentingViewController == nil, !answered else { return }
-            answered = true
-            self?.askAgain(about: risk, answer: answer, attempt: attempt)
-        }
-    }
-
-    private func askAgain(
-        about risk: MonitorGuard.Risk, answer: @escaping (Bool) -> Void, attempt: Int
-    ) {
-        guard attempt < 20 else {
-            Log.ui.warn("couldn't ask about a monitor command (\(risk.title)); not sending it")
-            answer(false)
-            status?.present(
-                .init(
-                    key: Self.monitorGuardStatusKey,
-                    message: "Not sent: tctiSH couldn't ask first",
-                    state: .symbol("exclamationmark.triangle"),
-                    duration: 4))
-            return
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            guard let self else {
-                answer(false)
-                return
-            }
-            ask(about: risk, answer: answer, attempt: attempt + 1)
-        }
+                onSwipeAway: {
+                    Self.serialSizeShown = false
+                    NotificationCenter.default.post(name: Self.serialSizeDidChange, object: nil)
+                }))
     }
 
     /// Puts the selected TTY's terminal on screen in place of `previous`'s, and
@@ -1752,7 +720,7 @@ extension ViewController {
         // Set by bounds and center rather than frame: the incoming terminal may still carry the
         // translation of an earlier slide, and setting the frame of a transformed view would fold
         // the translation in.
-        let frame = TTYs.shared.terminalFrame
+        let frame = ttyWindow.terminalFrame
         incoming.bounds.size = frame.size
         incoming.center = CGPoint(x: frame.midX, y: frame.midY)
         if let outgoing, outgoing.superview === view {
@@ -1808,9 +776,11 @@ extension ViewController {
 
             // Remove the slid-out terminals only once every slide has finished: a later slide may
             // be moving one of them out again, or back in, in which case it is now the selected
-            // terminal and stays.
+            // terminal and stays. One that moved to another window meanwhile is that window's now.
             for outgoing in slidOut where outgoing !== terminal {
-                outgoing.removeFromSuperview()
+                if outgoing.superview === view {
+                    outgoing.removeFromSuperview()
+                }
                 outgoing.transform = .identity
             }
             slidOut.removeAll()
@@ -1867,9 +837,8 @@ extension ViewController {
     /// switcher button or a key command, then shows the step pill. At either
     /// end of the order, only the pill shows.
     func step(by offset: Int) {
-        let ttys = TTYs.shared
-        if let next = ttys.neighbor(by: offset) {
-            slide(offset > 0 ? 1 : -1) { ttys.select(next) }
+        if let next = ttyWindow.neighbor(by: offset) {
+            slide(offset > 0 ? 1 : -1) { TTYs.shared.select(next) }
             UISelectionFeedbackGenerator().selectionChanged()
         }
         showStepPill()
@@ -1878,9 +847,8 @@ extension ViewController {
     /// Adds a TTY after the last and steps to it, for a pull on the switcher
     /// button past the last TTY.
     private func stepToNew() {
-        let ttys = TTYs.shared
-        guard let tty = ttys.add() else { return }
-        slide(1) { ttys.select(tty) }
+        guard let tty = TTYs.shared.add(to: ttyWindow) else { return }
+        slide(1) { TTYs.shared.select(tty) }
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         showStepPill()
     }
@@ -1896,15 +864,15 @@ extension ViewController {
     /// Briefly shows the selected TTY's name and its position in the step
     /// order, such as "hvc3 · 4/7", next to the switcher button.
     private func showStepPill() {
-        let ttys = TTYs.shared
-        let order = ttys.stepOrder
+        let order = ttyWindow.stepOrder
+        let selected = ttyWindow.selected
 
         // A system TTY outside the step order has no position in it, so only its name shows.
         let pill = stepPill ?? makeStepPill()
-        if let index = order.firstIndex(where: { $0 === ttys.selected }) {
-            pill.text = "\(ttys.selected.name) · \(index + 1)/\(order.count)"
+        if let index = order.firstIndex(where: { $0 === selected }) {
+            pill.text = "\(selected.name) · \(index + 1)/\(order.count)"
         } else {
-            pill.text = ttys.selected.name
+            pill.text = selected.name
         }
         UIAccessibility.post(notification: .announcement, argument: pill.text)
 
@@ -2036,7 +1004,7 @@ extension ViewController {
     /// The follow button's frame: at the top left of the terminal, or under the
     /// find bar while that is open.
     private func followButtonFrame() -> CGRect {
-        let terminal = TTYs.shared.terminalFrame
+        let terminal = ttyWindow.terminalFrame
         let size = FollowButton.size
         let top = terminal.minY + (findBar == nil ? 0 : FindBar.height) + 8
         return CGRect(x: terminal.minX + 8, y: top, width: size, height: size)
@@ -2086,7 +1054,7 @@ extension ViewController {
 
         sizeUnderSwitcher = view.bounds.size
 
-        let controller = TTYSwitcherViewController()
+        let controller = TTYSwitcherViewController(window: ttyWindow)
         controller.finish = { [weak self] find in self?.closeSwitcher(find: find) }
         switcher = controller
 
@@ -2142,7 +1110,7 @@ extension ViewController {
 
     /// Asks before closing the selected TTY, as the switcher's X does.
     private func confirmClosingSelected() {
-        let tty = TTYs.shared.selected
+        let tty = ttyWindow.selected
         guard !tty.isSystem, presentedViewController == nil else { return }
         ttyMenu.confirmClose(tty)
     }
@@ -2171,20 +1139,58 @@ extension ViewController {
     }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        // A closed window's scene can linger a moment, and its TTYs are now another window's.
+        guard !windowClosed else { return false }
+        let tty = ttyWindow.selected
+        let free = presentedViewController == nil
+
         switch action {
         case #selector(find(_:)):
-            return switcher == nil && presentedViewController == nil
+            return switcher == nil && free
+        case #selector(useSelectionForFind(_:)):
+            return switcher == nil && free && terminal.hasActiveSelection
         case #selector(findNext(_:)), #selector(findPrevious(_:)):
             return findBar != nil
-        // Close TTY stays on, and does nothing while an alert or a sheet is up. Turned off, it lets
-        // ⌘W through to the system's Close Window, which closes the app's only window.
-        case #selector(closeTTY(_:)):
+        // Off while this is the only window.
+        case #selector(closeWindow(_:)), #selector(closeWindowOtherwise(_:)),
+            #selector(moveTTYToWindow(_:)), #selector(mergeAllWindows(_:)):
+            return free && TTYs.shared.windows.count > 1
+        case #selector(openNewWindow(_:)):
+            return free && WindowScenes.areAvailable
+        // A window's only TTY would leave behind a window with none.
+        case #selector(moveTTYToNewWindow(_:)):
+            return free && WindowScenes.areAvailable && ttyWindow.ordered.count > 1
+                && TTYs.shared.canMove(tty)
+        // Close TTY and Close Other TTYs stay on, and do nothing while an alert or a sheet is up.
+        // Turned off, they would let ⌘W and ⌥⌘W through to whatever the system has for them.
+        case #selector(closeTTY(_:)), #selector(closeOtherTTYs(_:)):
             return true
-        // The other TTY commands are off while an alert or a sheet is up, such as one from the
+        // The other commands are off while an alert or a sheet is up, such as one from the
         // switcher.
         case #selector(newTTY(_:)), #selector(toggleSwitcher(_:)),
-            #selector(previousTTY(_:)), #selector(nextTTY(_:)), #selector(jumpToTTY(_:)):
-            return presentedViewController == nil
+            #selector(previousTTY(_:)), #selector(nextTTY(_:)), #selector(jumpToTTY(_:)),
+            #selector(toggleMuted(_:)), #selector(exportText(_:)), #selector(clearScrollback(_:)):
+            return free
+        case #selector(renameTTY(_:)), #selector(togglePinned(_:)):
+            return free && !tty.isSystem
+        case #selector(makeTextBigger(_:)):
+            return free && TTYMenu.fontSizes.contains(fontSize(of: tty) + 1)
+        case #selector(makeTextSmaller(_:)):
+            return free && TTYMenu.fontSizes.contains(fontSize(of: tty) - 1)
+        case #selector(useDefaultFontSize(_:)):
+            return free && tty.fontSize != nil
+        case #selector(scrollToTop(_:)), #selector(scrollToBottom(_:)):
+            return free && switcher == nil && !terminal.getTerminal().isCurrentBufferAlternate
+        case #selector(showKernelLog(_:)):
+            return free && TTYs.isShown(.kernelLog)
+        case #selector(showVMManagement(_:)):
+            return free && TTYs.isShown(.vmManagement)
+        case #selector(switchBackend(_:)):
+            return free && Backend.current != nil && !Backend.isBusy
+        case #selector(setExecutionMode(_:)), #selector(setVcpus(_:)),
+            #selector(toggleKeepScreenAwake(_:)), #selector(confirmRecoveryBoot(_:)),
+            #selector(compactDisk(_:)):
+            return free
         default:
             return super.canPerformAction(action, withSender: sender)
         }
@@ -2221,58 +1227,22 @@ extension ViewController {
     /// 520 points wide.
     private func layoutFindBar() {
         guard let findBar else { return }
-        let frame = TTYs.shared.terminalFrame
+        let frame = ttyWindow.terminalFrame
         let width = min(frame.width, 520)
         findBar.frame = CGRect(
             x: frame.midX - width / 2, y: frame.minY, width: width, height: FindBar.height)
     }
 
-    // MARK: Keyboard shortcuts
+    // MARK: Menu bar commands
 
-    // The TTY commands use Safari's shortcuts for tabs, in the menus where Safari puts them. They
-    // take these key combinations from the guest, which otherwise receives ⌘ as Super. Each list is
-    // made anew on every call, because a key command can be in only one place.
+    // The menu bar's commands, which `MenuBar` lists with their shortcuts.
 
-    /// For the File menu: New TTY and Close TTY.
-    static var ttyFileCommands: [UIKeyCommand] {
-        [
-            UIKeyCommand(
-                title: "New TTY", action: #selector(newTTY(_:)), input: "t",
-                modifierFlags: .command),
-            UIKeyCommand(
-                title: "Close TTY", action: #selector(closeTTY(_:)), input: "w",
-                modifierFlags: .command),
-        ]
-    }
-
-    /// For the View menu: the switcher.
-    static var ttyViewCommands: [UIKeyCommand] {
-        [
-            UIKeyCommand(
-                title: "Show All TTYs", action: #selector(toggleSwitcher(_:)), input: "\\",
-                modifierFlags: [.command, .shift])
-        ]
-    }
-
-    /// For the Window menu: the previous and next TTYs, ⌘1 to ⌘8 by position,
-    /// and ⌘9 for the last.
-    static var ttyWindowCommands: [UIKeyCommand] {
-        var commands = [
-            UIKeyCommand(
-                title: "Show Previous TTY", action: #selector(previousTTY(_:)), input: "[",
-                modifierFlags: [.command, .shift]),
-            UIKeyCommand(
-                title: "Show Next TTY", action: #selector(nextTTY(_:)), input: "]",
-                modifierFlags: [.command, .shift]),
-        ]
-        for number in 1...9 {
-            commands.append(
-                UIKeyCommand(
-                    title: number == 9 ? "Show Last TTY" : "Show TTY \(number)",
-                    action: #selector(jumpToTTY(_:)), input: "\(number)", modifierFlags: .command,
-                    propertyList: number))
-        }
-        return commands
+    /// Edit > Find > Use Selection for Find, or ⌘E: opens the find bar on the
+    /// selected text.
+    @objc override func useSelectionForFind(_ sender: Any?) {
+        let text = terminal.selection.getSelectedText()
+        guard switcher == nil, presentedViewController == nil, !text.isEmpty else { return }
+        openFindBar(term: text)
     }
 
     @objc func newTTY(_ sender: Any?) {
@@ -2281,7 +1251,7 @@ extension ViewController {
             switcher.add()
             return
         }
-        guard let tty = TTYs.shared.add() else {
+        guard let tty = TTYs.shared.add(to: ttyWindow) else {
             explainTTYLimit()
             return
         }
@@ -2306,9 +1276,64 @@ extension ViewController {
 
     /// Says that the programs on closed TTYs' consoles couldn't be ended.
     @objc private func couldNotEndPrograms(_ notification: Notification) {
-        guard let message = notification.object as? String else { return }
+        guard Self.active === self, let message = notification.object as? String else { return }
         presentOverSwitcher(
             .init(key: "end-programs", message: message, state: .failed, duration: 5))
+    }
+
+    /// Close Window, or ⌘⇧W: closes this window and its terminals, keeping
+    /// their programs running or ending them as Settings says. Off while it's
+    /// the only window.
+    @objc func closeWindow(_ sender: Any?) {
+        closeWindow(endingPrograms: !AppSetting.keepProgramsWhenClosingWindow.bool)
+    }
+
+    /// The item under Close Window, which does the other.
+    @objc func closeWindowOtherwise(_ sender: Any?) {
+        closeWindow(endingPrograms: AppSetting.keepProgramsWhenClosingWindow.bool)
+    }
+
+    private func closeWindow(endingPrograms: Bool) {
+        guard presentedViewController == nil, TTYs.shared.windows.count > 1 else { return }
+        TTYs.shared.closeWindow(ttyWindow, endingPrograms: endingPrograms)
+    }
+
+    /// File > New Window, or ⌘N: opens a window with a new TTY in it, or at the
+    /// limit, says so.
+    @objc func openNewWindow(_ sender: Any?) {
+        guard presentedViewController == nil, WindowScenes.areAvailable else { return }
+        WindowScenes.openNewWindow()
+    }
+
+    /// File > Move Terminal to New Window: opens a window, and moves the
+    /// selected TTY to it.
+    @objc func moveTTYToNewWindow(_ sender: Any?) {
+        guard presentedViewController == nil, ttyWindow.ordered.count > 1 else { return }
+        WindowScenes.openWindow(moving: ttyWindow.selected)
+    }
+
+    /// File > Move Terminal to, one item for each other window: moves the
+    /// selected TTY there.
+    @objc func moveTTYToWindow(_ sender: UICommand) {
+        guard presentedViewController == nil,
+            let target = otherWindow(sender.propertyList as? Int)
+        else { return }
+        TTYs.shared.move(ttyWindow.selected, to: target)
+    }
+
+    /// The window that Move Terminal to lists at `index`: the windows other
+    /// than this one that a scene shows, in the order they were made.
+    private func otherWindow(_ index: Int?) -> TTYWindow? {
+        let others = TTYs.shared.windows.filter { $0 !== ttyWindow && WindowScenes.shows($0) }
+        guard let index, others.indices.contains(index) else { return nil }
+        return others[index]
+    }
+
+    /// Window > Merge All Windows: moves every TTY here, after this window's,
+    /// and closes the other windows.
+    @objc func mergeAllWindows(_ sender: Any?) {
+        guard presentedViewController == nil else { return }
+        TTYs.shared.merge(into: ttyWindow)
     }
 
     @objc func closeTTY(_ sender: Any?) {
@@ -2324,10 +1349,203 @@ extension ViewController {
     }
 
     @objc func jumpToTTY(_ sender: UIKeyCommand) {
-        guard let number = sender.propertyList as? Int else { return }
-        let order = TTYs.shared.ordered
+        guard let tty = jumpTarget(sender.propertyList as? Int ?? 0) else { return }
+        TTYs.shared.select(tty)
+    }
+
+    /// The TTY that ⌘`number` shows: the one at that position in the step
+    /// order, or the last for ⌘9. Nil if there is none.
+    private func jumpTarget(_ number: Int) -> TTY? {
+        let order = ttyWindow.stepOrder
         let index = number == 9 ? order.count - 1 : number - 1
-        guard order.indices.contains(index) else { return }
-        TTYs.shared.select(order[index])
+        return order.indices.contains(index) ? order[index] : nil
+    }
+
+    /// Whether the Window menu lists a system TTY on its own: while Settings
+    /// shows it, and it is not in this window's step order.
+    private func listsSystemTTY(_ kind: TTY.Kind) -> Bool {
+        guard TTYs.isShown(kind), let tty = TTYs.shared.system.first(where: { $0.kind == kind })
+        else { return false }
+        return !AppSetting.stepThroughSystemTTYs.bool || !ttyWindow.contains(tty)
+    }
+
+    @objc func closeOtherTTYs(_ sender: Any?) {
+        let tty = ttyWindow.selected
+        guard !tty.isSystem, presentedViewController == nil else { return }
+        ttyMenu.confirmCloseOthers(tty)
+    }
+
+    @objc func renameTTY(_ sender: Any?) {
+        ttyMenu.rename(ttyWindow.selected)
+    }
+
+    @objc func togglePinned(_ sender: Any?) {
+        let tty = ttyWindow.selected
+        TTYs.shared.setPinned(tty, !tty.isPinned)
+    }
+
+    @objc func toggleMuted(_ sender: Any?) {
+        let tty = ttyWindow.selected
+        TTYs.shared.setMuted(tty, !tty.isMuted)
+    }
+
+    /// File > Export Text As…, or ⌘S: saves the selected TTY's text, its
+    /// scrollback included, to a file of the user's choosing.
+    @objc func exportText(_ sender: Any?) {
+        let tty = ttyWindow.selected
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "Export", isDirectory: true)
+        let name = tty.name.replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+        let file = folder.appendingPathComponent("\(name).txt")
+
+        // The picker copies the file, so the last one exported can go once the next is asked for.
+        do {
+            try? FileManager.default.removeItem(at: folder)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try tty.view.transcript.write(to: file, atomically: true, encoding: .utf8)
+        } catch {
+            Log.ui.warn("export: couldn't write \(file.lastPathComponent): \(error)")
+            showAlert(title: "Couldn't Export Text", message: error.localizedDescription)
+            return
+        }
+
+        present(UIDocumentPickerViewController(forExporting: [file], asCopy: true), animated: true)
+    }
+
+    /// Edit > Clear Scrollback, or ⌘K: forgets the selected TTY's lines above
+    /// the screen. Only tctiSH holds them, so Linux sees no change.
+    @objc func clearScrollback(_ sender: Any?) {
+        terminal.clearScrollback()
+        terminal.follow()
+    }
+
+    /// The font size the selected TTY has: its own, or the default.
+    private func fontSize(of tty: TTY) -> Int {
+        tty.fontSize ?? AppSetting.fontSize.integer
+    }
+
+    /// View > Bigger, or ⌘+, as the TTY menu's font size row.
+    @objc func makeTextBigger(_ sender: Any?) {
+        stepFontSize(by: 1)
+    }
+
+    /// View > Smaller, or ⌘−.
+    @objc func makeTextSmaller(_ sender: Any?) {
+        stepFontSize(by: -1)
+    }
+
+    private func stepFontSize(by step: Int) {
+        let tty = ttyWindow.selected
+        let size = fontSize(of: tty) + step
+        guard TTYMenu.fontSizes.contains(size) else { return }
+        TTYs.shared.setFontSize(tty, size)
+    }
+
+    /// View > Default Font Size, or ⌘0: back to the size Settings gives.
+    @objc func useDefaultFontSize(_ sender: Any?) {
+        TTYs.shared.setFontSize(ttyWindow.selected, nil)
+    }
+
+    /// View > Scroll to Top, or ⌘Home.
+    @objc func scrollToTop(_ sender: Any?) {
+        terminal.scrollToTop()
+    }
+
+    /// View > Scroll to Bottom, or ⌘End: back to following new output.
+    @objc func scrollToBottom(_ sender: Any?) {
+        terminal.follow()
+    }
+
+    /// Window > Kernel Log, while Settings shows it.
+    @objc func showKernelLog(_ sender: Any?) {
+        showSystemTTY(.kernelLog)
+    }
+
+    /// Window > VM Management, while Settings shows it.
+    @objc func showVMManagement(_ sender: Any?) {
+        showSystemTTY(.vmManagement)
+    }
+
+    /// Selects a system TTY here, moving it from the window it's in, if any.
+    private func showSystemTTY(_ kind: TTY.Kind) {
+        guard let tty = TTYs.shared.system.first(where: { $0.kind == kind }) else { return }
+        TTYs.shared.move(tty, to: ttyWindow)
+    }
+
+    /// Machine > Switch to JIT… or Switch to TCTI…, asking first as Settings
+    /// does.
+    @objc func switchBackend(_ sender: Any?) {
+        guard let running = Backend.current, !Backend.isBusy else { return }
+        askToSwitch(to: running == .native ? .tcti : .native)
+    }
+
+    /// Machine > Execution Mode, which applies straight away.
+    @objc func setExecutionMode(_ sender: UICommand) {
+        guard let value = sender.propertyList as? String, ExecutionMode(rawValue: value) != nil
+        else { return }
+        AppSetting.jitMode.set(value)
+        Backend.modeChanged()
+    }
+
+    /// Machine > vCPUs, which Linux is given or gives back while it runs.
+    @objc func setVcpus(_ sender: UICommand) {
+        guard let count = sender.propertyList as? Int else { return }
+        Vcpus.foreground = count
+    }
+
+    @objc func toggleKeepScreenAwake(_ sender: Any?) {
+        AppSetting.keepScreenAwake.set(!AppSetting.keepScreenAwake.bool)
+        ScreenAwake.apply()
+    }
+
+    /// Machine > Recovery Boot…: asks, then starts Linux again from nothing.
+    @objc func confirmRecoveryBoot(_ sender: Any?) {
+        confirm(
+            title: "Recovery Boot?",
+            message:
+                "Linux starts again from scratch. Programs running in every terminal end, and anything they haven't saved to the disk is lost.",
+            action: "Recovery Boot"
+        ) {
+            AppStatus.shared.performRecoveryBoot()
+        }
+    }
+
+    /// Machine > Compact Disk…, as in Settings > Storage.
+    @objc func compactDisk(_ sender: Any?) {
+        confirmCompaction()
+    }
+}
+
+// MARK: - Dropping a TTY from another window
+
+extension ViewController: UIDropInteractionDelegate {
+
+    /// The TTY a drag from a switcher carries, if it's in another window, or in
+    /// none.
+    private func foreignTTY(in session: UIDropSession) -> TTY? {
+        guard let items = session.localDragSession?.items, items.count == 1,
+            let id = items[0].localObject as? UUID, let tty = TTYs.shared.tty(id),
+            !ttyWindow.contains(tty), TTYs.shared.canMove(tty)
+        else { return nil }
+        return tty
+    }
+
+    func dropInteraction(_ interaction: UIDropInteraction, canHandle session: UIDropSession)
+        -> Bool
+    {
+        foreignTTY(in: session) != nil
+    }
+
+    func dropInteraction(
+        _ interaction: UIDropInteraction, sessionDidUpdate session: UIDropSession
+    ) -> UIDropProposal {
+        UIDropProposal(operation: foreignTTY(in: session) != nil ? .move : .forbidden)
+    }
+
+    /// Moves the TTY here and selects it.
+    func dropInteraction(_ interaction: UIDropInteraction, performDrop session: UIDropSession) {
+        guard let tty = foreignTTY(in: session) else { return }
+        TTYs.shared.move(tty, to: ttyWindow)
     }
 }

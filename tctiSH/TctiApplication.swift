@@ -35,7 +35,7 @@ final class TctiApplication: UIApplication {
         }
 
         if press.phase == .began {
-            let bar = (ViewController.getCurrent() as? ViewController)?.keyBar
+            let bar = ViewController.active?.keyBar
             if bar?.isMenuOpen == true {
                 bar?.closeMenu()
             } else if !SettingsViewController.closeForEscape() {

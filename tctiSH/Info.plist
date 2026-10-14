@@ -37,10 +37,15 @@
 	<string>TctiApplication</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>tctiSH advertises itself on your local network so this device can pair with it, which is what lets the VM run with JIT.</string>
+	<!-- A TTY moving to a new window, by menu or by dragging its card out. See WindowScenes. -->
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>io.ara.tctish.tty</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
-		<false/>
+		<true/>
 		<key>UISceneConfigurations</key>
 		<dict>
 			<key>UIWindowSceneSessionRoleApplication</key>

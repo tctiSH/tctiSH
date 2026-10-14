@@ -14,7 +14,10 @@ import UIKit
 /// along the top; the rest are cards, each with a regularly refreshed picture
 /// of its screen. Tapping a TTY selects it and closes the switcher.
 /// Long-pressing one opens its menu, and dragging a user TTY reorders it within
-/// its section.
+/// its section. On iPad, dragging any TTY into another window's switcher, or
+/// onto its terminal, moves it to that window, and dragging it out of every
+/// window opens a new window for unless it's its window's only TTY. A system
+/// TTY moves only while Settings shows it.
 ///
 /// The main view controller adds the switcher as a child laid over the
 /// terminal, so that the terminal stays in place underneath and keeps updating.
@@ -53,6 +56,9 @@ final class TTYSwitcherViewController: UIViewController {
     }
 
     private let store = TTYs.shared
+
+    /// The TTYs of the window the switcher is open in.
+    private let ttyWindow: TTYWindow
 
     private let background = UIVisualEffectView(effect: nil)
     private let content = UIView()
@@ -157,6 +163,15 @@ final class TTYSwitcherViewController: UIViewController {
 
     // MARK: Setup
 
+    init(window: TTYWindow) {
+        ttyWindow = window
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used; the switcher is built in code")
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
 
@@ -189,7 +204,7 @@ final class TTYSwitcherViewController: UIViewController {
     /// against.
     private var tint: UIColor {
         SwitcherBackground.color(
-            cards: store.selected.view?.nativeBackgroundColor ?? .black, accent: Accent.color)
+            cards: ttyWindow.selected.view?.nativeBackgroundColor ?? .black, accent: Accent.color)
     }
 
     /// The effect the switcher is drawn on: on iOS 26, glass with the tint at
@@ -230,7 +245,7 @@ final class TTYSwitcherViewController: UIViewController {
         let card = UICollectionView.CellRegistration<TTYCardCell, UUID> {
             [weak self] cell, _, id in
             guard let self, let tty = store.tty(id) else { return }
-            cell.show(tty, selected: tty === store.selected)
+            cell.show(tty, selected: tty === ttyWindow.selected)
             cell.close = { [weak self, weak tty] in
                 guard let tty else { return }
                 self?.ttyMenu.confirmClose(tty)
@@ -241,7 +256,7 @@ final class TTYSwitcherViewController: UIViewController {
             [weak self] cell, _, id in
             guard let self, let tty = store.tty(id) else { return }
             cell.surface = tint
-            cell.show(tty, selected: tty === store.selected)
+            cell.show(tty, selected: tty === ttyWindow.selected)
         }
 
         let result = UICollectionView.CellRegistration<UICollectionViewListCell, UUID> {
@@ -301,7 +316,7 @@ final class TTYSwitcherViewController: UIViewController {
             UITapGestureRecognizer(target: self, action: #selector(search)))
         searchCapsule.contentView.addSubview(searchField)
 
-        searchField.accessibilityLabel = "Search TTYs"
+        searchField.accessibilityLabel = "Search Terminals"
         searchField.font = .preferredFont(forTextStyle: .body)
         searchField.adjustsFontForContentSizeCategory = true
         searchField.borderStyle = .none
@@ -322,7 +337,7 @@ final class TTYSwitcherViewController: UIViewController {
         cancelSearchButton.addAction(
             UIAction { [weak self] _ in self?.endSearch() }, for: .touchUpInside)
 
-        style(addButton, "plus", "New TTY")
+        style(addButton, "plus", "New Terminal")
         addButton.addAction(UIAction { [weak self] _ in self?.add() }, for: .touchUpInside)
 
         style(doneButton, "checkmark", "Done", prominent: true)
@@ -339,6 +354,15 @@ final class TTYSwitcherViewController: UIViewController {
         .forEach(content.addSubview)
 
         let safe = content.safeAreaLayoutGuide
+
+        // The buttons along the top sit below the window controls in a window, rather than beside
+        // them, where the controls crowd Search.
+        let below: UILayoutGuide =
+            if #available(iOS 26.0, *) {
+                content.layoutGuide(for: .safeArea(cornerAdaptation: .vertical))
+            } else {
+                safe
+            }
         let inset = Self.margin - 6
         let button = Self.buttonSize
         let keyboard = view.keyboardLayoutGuide
@@ -347,7 +371,7 @@ final class TTYSwitcherViewController: UIViewController {
             equalTo: searchCapsule.contentView.leadingAnchor)
 
         NSLayoutConstraint.activate([
-            searchCapsule.topAnchor.constraint(equalTo: safe.topAnchor, constant: 8),
+            searchCapsule.topAnchor.constraint(equalTo: below.topAnchor, constant: 8),
             searchCapsule.leadingAnchor.constraint(equalTo: safe.leadingAnchor, constant: inset),
             searchCapsule.heightAnchor.constraint(equalToConstant: button),
 
@@ -467,10 +491,12 @@ final class TTYSwitcherViewController: UIViewController {
                 self?.reconfigure([tty])
             },
 
-            center.addObserver(forName: TTYs.selectionDidChange, object: nil, queue: .main) {
+            center.addObserver(forName: TTYs.selectionDidChange, object: ttyWindow, queue: .main) {
                 [weak self] note in
                 guard let self else { return }
-                reconfigure([note.object as? TTY, store.selected].compactMap { $0 })
+                reconfigure(
+                    [note.userInfo?[TTYs.previousKey] as? TTY, ttyWindow.selected].compactMap { $0 }
+                )
             },
 
             center.addObserver(forName: Accent.didChange, object: nil, queue: .main) {
@@ -578,7 +604,7 @@ final class TTYSwitcherViewController: UIViewController {
         let spacing: CGFloat = 16
         let cardWidth = (width - spacing * CGFloat(columns - 1)) / CGFloat(columns)
 
-        let frame = store.terminalFrame
+        let frame = ttyWindow.terminalFrame
         let aspect = frame.width > 0 ? frame.height / frame.width : 1
         let outset = TTYCardCell.ringOutset
         let height = (cardWidth * aspect).rounded() + outset + TTYCardCell.labelHeight
@@ -603,8 +629,8 @@ final class TTYSwitcherViewController: UIViewController {
         if query.isEmpty {
             snapshot.appendSections([.pinned, .cards])
             snapshot.appendItems(
-                (store.shownSystem + store.pinned).map { .pill($0.id) }, toSection: .pinned)
-            snapshot.appendItems(store.cards.map { .card($0.id) }, toSection: .cards)
+                (ttyWindow.system + ttyWindow.pinned).map { .pill($0.id) }, toSection: .pinned)
+            snapshot.appendItems(ttyWindow.cards.map { .card($0.id) }, toSection: .cards)
         } else {
             snapshot.appendSections([.results])
             snapshot.appendItems(matches.map { .result($0.id) }, toSection: .results)
@@ -636,8 +662,8 @@ final class TTYSwitcherViewController: UIViewController {
     }
 
     private func refreshBars() {
-        let count = store.users.count
-        countLabel.text = count == 1 ? "1 TTY" : "\(count) TTYs"
+        let count = ttyWindow.users.count
+        countLabel.text = count == 1 ? "1 Terminal" : "\(count) Terminals"
         // Dimmed at the limit, but still tappable, so that tapping it says why nothing opens.
         addButton.configuration?.baseForegroundColor = store.canAdd ? .label : .tertiaryLabel
         addButton.accessibilityHint = store.canAdd ? nil : TTYs.limitMessage
@@ -759,7 +785,7 @@ final class TTYSwitcherViewController: UIViewController {
     /// The selected TTY's card cell, or nil if that TTY is shown as a pill or
     /// its card is not on screen.
     private func selectedCard() -> TTYCardCell? {
-        guard let indexPath = dataSource.indexPath(for: item(for: store.selected)) else {
+        guard let indexPath = dataSource.indexPath(for: item(for: ttyWindow.selected)) else {
             return nil
         }
         return collectionView.cellForItem(at: indexPath) as? TTYCardCell
@@ -767,7 +793,9 @@ final class TTYSwitcherViewController: UIViewController {
 
     /// Scrolls the selected TTY into view.
     private func revealSelected() {
-        guard let indexPath = dataSource.indexPath(for: item(for: store.selected)) else { return }
+        guard let indexPath = dataSource.indexPath(for: item(for: ttyWindow.selected)) else {
+            return
+        }
         collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: false)
     }
 
@@ -798,7 +826,7 @@ final class TTYSwitcherViewController: UIViewController {
     // MARK: Actions
 
     func add() {
-        guard let tty = store.add() else {
+        guard let tty = store.add(to: ttyWindow) else {
             explainLimit()
             return
         }
@@ -833,7 +861,7 @@ final class TTYSwitcherViewController: UIViewController {
         guard !searching else { return }
         searching = true
 
-        searchField.placeholder = "Search TTYs"
+        searchField.placeholder = "Search Terminals"
         cancelSearchButton.isHidden = false
         cancelSearchButton.transform = CGAffineTransform(scaleX: 0.5, y: 0.5)
         stretchSearch(open: true)
@@ -899,7 +927,7 @@ final class TTYSwitcherViewController: UIViewController {
 
         matches = []
         if !query.isEmpty {
-            for tty in store.users {
+            for tty in ttyWindow.users {
                 let match = tty.view.map { ScrollbackMatch.find(query, in: $0) } ?? .none
                 let named =
                     tty.name.localizedCaseInsensitiveContains(query)
@@ -933,7 +961,7 @@ final class TTYSwitcherViewController: UIViewController {
             UIKeyCommand(
                 title: "Done", action: #selector(escape), input: UIKeyCommand.inputEscape),
             UIKeyCommand(
-                title: "Search TTYs", action: #selector(search), input: "f",
+                title: "Search Terminals", action: #selector(search), input: "f",
                 modifierFlags: .command),
         ]
     }
@@ -994,28 +1022,42 @@ extension TTYSwitcherViewController: UICollectionViewDelegate {
     }
 }
 
-// MARK: - Dragging to reorder
+// MARK: - Dragging to reorder, or to another window
 
 extension TTYSwitcherViewController: UICollectionViewDragDelegate, UICollectionViewDropDelegate {
 
+    /// The drag item carries the TTY's ID as its local object, which a switcher
+    /// or a terminal in another window reads, as every window is in this
+    /// process. Where there can be more windows, it also carries the activity
+    /// that opens one for the TTY, which iPadOS uses when the TTY is dropped
+    /// outside every window. A system TTY can't be reordered, so it's dragged
+    /// only where it can go to another window. A window's only TTY doesn't open
+    /// a new window, which would leave this one with none.
     func collectionView(
         _ collectionView: UICollectionView, itemsForBeginning session: UIDragSession,
         at indexPath: IndexPath
     ) -> [UIDragItem] {
+        let windows = WindowScenes.areAvailable
         guard query.isEmpty, let id = dataSource.itemIdentifier(for: indexPath)?.shown,
-            store.tty(id)?.isSystem == false
+            let tty = store.tty(id), !tty.isSystem || windows
         else { return [] }
 
-        let item = UIDragItem(itemProvider: NSItemProvider())
+        let provider = NSItemProvider()
+        if windows, ttyWindow.ordered.count > 1 {
+            provider.registerObject(WindowScenes.activity(moving: tty), visibility: .all)
+        }
+        let item = UIDragItem(itemProvider: provider)
         item.localObject = id
         return [item]
     }
 
+    /// Kept to tctiSH unless there can be more windows. Opening a window needs
+    /// the drag to be allowed outside tctiSH, so that iPadOS can take it.
     func collectionView(
         _ collectionView: UICollectionView,
         dragSessionIsRestrictedToDraggingApplication session: UIDragSession
     ) -> Bool {
-        true
+        !WindowScenes.areAvailable
     }
 
     // MARK: Lifting
@@ -1075,15 +1117,34 @@ extension TTYSwitcherViewController: UICollectionViewDragDelegate, UICollectionV
         menuPreview(for: configuration)
     }
 
-    /// Allows a drop only within the dragged TTY's section and, in the pinned
-    /// section, only after the system TTYs, which always come first.
+    /// The TTY being dragged, from this switcher or another window's.
+    private func draggedTTY(in session: UIDropSession) -> TTY? {
+        (session.localDragSession?.items.first?.localObject as? UUID).flatMap(store.tty)
+    }
+
+    /// Allows a drop of this window's user TTY only within its section and, in
+    /// the pinned section, only after the system TTYs, which always come first.
+    /// Allows a drop of another window's TTY anywhere, putting it where it was
+    /// dropped if that's in the section for its kind.
     func collectionView(
         _ collectionView: UICollectionView, dropSessionDidUpdate session: UIDropSession,
         withDestinationIndexPath destination: IndexPath?
     ) -> UICollectionViewDropProposal {
-        guard let id = session.localDragSession?.items.first?.localObject as? UUID,
-            let source = dataSource.indexPath(for: .pill(id))
-                ?? dataSource.indexPath(for: .card(id)),
+        guard let tty = draggedTTY(in: session) else {
+            return UICollectionViewDropProposal(operation: .forbidden)
+        }
+        guard ttyWindow.contains(tty) else {
+            guard store.canMove(tty) else {
+                return UICollectionViewDropProposal(operation: .forbidden)
+            }
+            return UICollectionViewDropProposal(
+                operation: .move,
+                intent: arrivalIndex(of: tty, at: destination) != nil
+                    ? .insertAtDestinationIndexPath : .unspecified)
+        }
+
+        guard !tty.isSystem,
+            let source = dataSource.indexPath(for: item(for: tty)),
             let destination,
             destination.section == source.section,
             destination.item >= firstMovable(inSection: source.section)
@@ -1092,12 +1153,29 @@ extension TTYSwitcherViewController: UICollectionViewDragDelegate, UICollectionV
         return UICollectionViewDropProposal(operation: .move, intent: .insertAtDestinationIndexPath)
     }
 
+    /// Where a TTY from another window goes when dropped at `destination`: its
+    /// index among this window's pinned TTYs or its cards, whichever it is
+    /// among. Nil if `destination` isn't in that section, or is among the
+    /// system TTYs, and for a system TTY, which has its own place.
+    private func arrivalIndex(of tty: TTY, at destination: IndexPath?) -> Int? {
+        guard !tty.isSystem, let destination,
+            let section = dataSource.sectionIdentifier(for: destination.section),
+            section == (tty.isPinned ? .pinned : .cards)
+        else { return nil }
+        let index = destination.item - firstMovable(inSection: destination.section)
+        return index >= 0 ? index : nil
+    }
+
     func collectionView(
         _ collectionView: UICollectionView,
         performDropWith coordinator: UICollectionViewDropCoordinator
     ) {
-        guard let item = coordinator.items.first, let source = item.sourceIndexPath,
-            let destination = coordinator.destinationIndexPath,
+        guard let dropped = coordinator.items.first else { return }
+        guard let source = dropped.sourceIndexPath else {
+            arrive(dropped, with: coordinator)
+            return
+        }
+        guard let destination = coordinator.destinationIndexPath,
             let section = dataSource.sectionIdentifier(for: source.section)
         else { return }
 
@@ -1119,7 +1197,28 @@ extension TTYSwitcherViewController: UICollectionViewDragDelegate, UICollectionV
 
         let ids = snapshot.itemIdentifiers(inSection: section).compactMap(\.shown)
         store.reorder(ids.filter { store.tty($0)?.isSystem == false })
-        coordinator.drop(item.dragItem, toItemAt: destination)
+        coordinator.drop(dropped.dragItem, toItemAt: destination)
+    }
+
+    /// Moves a TTY dropped from another window's switcher to this window, where
+    /// it was dropped, without selecting it.
+    private func arrive(
+        _ dropped: UICollectionViewDropItem, with coordinator: UICollectionViewDropCoordinator
+    ) {
+        guard let id = dropped.dragItem.localObject as? UUID, let tty = store.tty(id),
+            !ttyWindow.contains(tty)
+        else { return }
+
+        store.move(
+            tty, to: ttyWindow, at: arrivalIndex(of: tty, at: coordinator.destinationIndexPath),
+            selecting: false)
+
+        // The store's change notification arrives while the drop is still active, so its refresh
+        // waits for the drop to end; the TTY's item is needed now, to drop it onto.
+        applySnapshot(animated: false)
+        if let indexPath = dataSource.indexPath(for: item(for: tty)) {
+            coordinator.drop(dropped.dragItem, toItemAt: indexPath)
+        }
     }
 
     func collectionView(
@@ -1150,7 +1249,7 @@ extension TTYSwitcherViewController: UICollectionViewDragDelegate, UICollectionV
     }
 
     private func firstMovable(inSection index: Int) -> Int {
-        dataSource.sectionIdentifier(for: index) == .pinned ? store.shownSystem.count : 0
+        dataSource.sectionIdentifier(for: index) == .pinned ? ttyWindow.system.count : 0
     }
 }
 

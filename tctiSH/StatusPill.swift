@@ -440,11 +440,13 @@ private final class ProgressDial: UIView {
         mark.strokeEnd = 0
         mark.strokeColor = UIColor.label.cgColor
 
-        // Core Animation drops animations when the app is backgrounded and does not put them back;
-        // without this the spinner returns frozen.
+        // Core Animation drops animations when their window goes to the background and does not put
+        // them back; without this the spinner returns frozen. Any scene's return, not the app's:
+        // one window can go to the background and come back while another keeps the app in front. A
+        // spinner that kept its animation is left alone.
         NotificationCenter.default.addObserver(
             self, selector: #selector(restartSpinnerIfNeeded),
-            name: UIApplication.willEnterForegroundNotification, object: nil)
+            name: UIScene.willEnterForegroundNotification, object: nil)
 
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (dial: Self, _) in
             dial.refreshLayerColors()

@@ -54,7 +54,7 @@ class DirectoryPicker: NSObject, UIDocumentPickerDelegate {
             documentPicker.delegate = self
 
             // ... and pop up that picker, if there's anything to pop it up from.
-            guard let viewController = ViewController.getCurrent() else {
+            guard let viewController = ViewController.active else {
                 self.handleDocumentPickerResult(urls: [])
                 return
             }

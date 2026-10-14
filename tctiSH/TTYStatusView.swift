@@ -61,7 +61,7 @@ enum TTYStatus: Hashable {
         case .bell: "Rang the bell"
         case .bellAndOutput: "Rang the bell, and new output"
         case .muted: "Muted"
-        case .attention: "A TTY rang the bell"
+        case .attention: "A terminal rang the bell"
         }
     }
 }
