@@ -64,20 +64,20 @@ YELLOW=$'\033[0;33m'
 NC=$'\033[0m'
 
 die() {
-    echo "${RED}error:${NC} $*" >&2
-    exit 1
+  echo "${RED}error:${NC} $*" >&2
+  exit 1
 }
 
 note() {
-    echo "${GREEN}==>${NC} $*"
+  echo "${GREEN}==>${NC} $*"
 }
 
 warn() {
-    echo "${YELLOW}warning:${NC} $*" >&2
+  echo "${YELLOW}warning:${NC} $*" >&2
 }
 
 usage() {
-    cat <<'USAGE'
+  cat <<'USAGE'
 usage: boot_guest.sh [options]
 
   --backend NAME    jit (the default) or tcti: which build of our QEMU to run.
@@ -118,40 +118,40 @@ USAGE
 # harness build, say. Never whatever qemu-system-x86_64 is on $PATH: an upstream
 # QEMU boots the same image happily, and would quietly test the wrong emulator.
 resolve_qemu() {
-    if [ -n "${TCTISH_QEMU:-}" ]; then
-        [ -x "$TCTISH_QEMU" ] || die "TCTISH_QEMU is set but not executable: $TCTISH_QEMU"
-        QEMU="$TCTISH_QEMU"
-        return 0
-    fi
+  if [ -n "${TCTISH_QEMU:-}" ]; then
+    [ -x "$TCTISH_QEMU" ] || die "TCTISH_QEMU is set but not executable: $TCTISH_QEMU"
+    QEMU="$TCTISH_QEMU"
+    return 0
+  fi
 
-    case "$BACKEND" in
-        jit | tcti) ;;
-        *) die "--backend is jit or tcti, not '$BACKEND'" ;;
-    esac
+  case "$BACKEND" in
+    jit | tcti) ;;
+    *) die "--backend is jit or tcti, not '$BACKEND'" ;;
+  esac
 
-    QEMU="$REPO/build-macOS-arm64/qemu_$BACKEND/qemu-system-x86_64"
-    [ -x "$QEMU" ] || die "no $BACKEND build of our QEMU yet; run: make host-qemu BACKEND=$BACKEND
+  QEMU="$REPO/build-macOS-arm64/qemu_$BACKEND/qemu-system-x86_64"
+  [ -x "$QEMU" ] || die "no $BACKEND build of our QEMU yet; run: make host-qemu BACKEND=$BACKEND
 or boot through make, which builds it first: make boot-guest BACKEND=$BACKEND"
 }
 
 prepare_disk() {
-    if [ "$FRESH" -eq 1 ]; then
-        rm -f "$DISK"
-    fi
+  if [ "$FRESH" -eq 1 ]; then
+    rm -f "$DISK"
+  fi
 
-    if [ ! -f "$DISK" ]; then
-        [ -f "$ASSETS/empty.qcow" ] || die "missing $ASSETS/empty.qcow; run: make guest"
-        note "creating a working disk from empty.qcow"
-        cp "$ASSETS/empty.qcow" "$DISK"
-    fi
+  if [ ! -f "$DISK" ]; then
+    [ -f "$ASSETS/empty.qcow" ] || die "missing $ASSETS/empty.qcow; run: make guest"
+    note "creating a working disk from empty.qcow"
+    cp "$ASSETS/empty.qcow" "$DISK"
+  fi
 }
 
 # Tells hvc0 this terminal's size, as the app tells it its view's.
 send_console_size() {
-    local size
-    size="$(stty size </dev/tty 2>/dev/null)" || return 0
-    printf 'console_resize hvc0 %s %s\n' "${size#* }" "${size% *}" |
-        nc -w 1 127.0.0.1 "$MONITOR_PORT" >/dev/null 2>&1 || true
+  local size
+  size="$(stty size </dev/tty 2>/dev/null)" || return 0
+  printf 'console_resize hvc0 %s %s\n' "${size#* }" "${size% *}" |
+    nc -w 1 127.0.0.1 "$MONITOR_PORT" >/dev/null 2>&1 || true
 }
 
 # Ask the guest to power down, through the monitor.
@@ -169,171 +169,171 @@ send_console_size() {
 # generous rather than tight -- falling back to `quit` is a plug-pull, and doing
 # it one second early would make the journal recovery we are avoiding.
 shut_down() {
-    note "powering the guest down"
+  note "powering the guest down"
 
-    # -w matters: macOS nc does not close when stdin ends, it waits on the socket
-    # for a reply that a monitor command does not always produce -- so without a
-    # timeout this blocks for ever rather than sending and returning.
-    if ! printf 'system_powerdown\n' | nc -w 2 127.0.0.1 "$MONITOR_PORT" >/dev/null 2>&1; then
-        warn "could not reach the monitor; stopping QEMU outright"
+  # -w matters: macOS nc does not close when stdin ends, it waits on the socket
+  # for a reply that a monitor command does not always produce -- so without a
+  # timeout this blocks for ever rather than sending and returning.
+  if ! printf 'system_powerdown\n' | nc -w 2 127.0.0.1 "$MONITOR_PORT" >/dev/null 2>&1; then
+    warn "could not reach the monitor; stopping QEMU outright"
+  fi
+
+  local attempt=0
+  while kill -0 "$QEMU_PID" 2>/dev/null; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 20 ]; then
+      warn "the guest did not power down; stopping the emulator"
+      kill "$QEMU_PID" 2>/dev/null || true
+      break
     fi
+    sleep 1
+  done
 
-    local attempt=0
-    while kill -0 "$QEMU_PID" 2>/dev/null; do
-        attempt=$((attempt + 1))
-        if [ "$attempt" -ge 20 ]; then
-            warn "the guest did not power down; stopping the emulator"
-            kill "$QEMU_PID" 2>/dev/null || true
-            break
-        fi
-        sleep 1
-    done
-
-    wait "$QEMU_PID" 2>/dev/null || true
+  wait "$QEMU_PID" 2>/dev/null || true
 }
 
 main() {
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            --backend)
-                BACKEND="${2:-}"
-                shift
-                ;;
-            --serial) USE_SERIAL=1 ;;
-            --fresh) FRESH=1 ;;
-            --snapshot)
-                SNAPSHOT="${2:-}"
-                [ -n "$SNAPSHOT" ] || die "--snapshot needs a name"
-                shift
-                ;;
-            --share)
-                SHARE="${2:-}"
-                [ -d "$SHARE" ] || die "--share needs a directory that exists"
-                shift
-                ;;
-            --memory)
-                MEMORY="${2:-}"
-                shift
-                ;;
-            --cpus)
-                CPUS="${2:-}"
-                shift
-                ;;
-            --max-cpus)
-                MAX_CPUS="${2:-}"
-                shift
-                ;;
-            -h | --help)
-                usage
-                exit 0
-                ;;
-            *) die "unknown option: $1 (try --help)" ;;
-        esac
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --backend)
+        BACKEND="${2:-}"
         shift
-    done
+        ;;
+      --serial) USE_SERIAL=1 ;;
+      --fresh) FRESH=1 ;;
+      --snapshot)
+        SNAPSHOT="${2:-}"
+        [ -n "$SNAPSHOT" ] || die "--snapshot needs a name"
+        shift
+        ;;
+      --share)
+        SHARE="${2:-}"
+        [ -d "$SHARE" ] || die "--share needs a directory that exists"
+        shift
+        ;;
+      --memory)
+        MEMORY="${2:-}"
+        shift
+        ;;
+      --cpus)
+        CPUS="${2:-}"
+        shift
+        ;;
+      --max-cpus)
+        MAX_CPUS="${2:-}"
+        shift
+        ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      *) die "unknown option: $1 (try --help)" ;;
+    esac
+    shift
+  done
 
-    resolve_qemu
-    prepare_disk
+  resolve_qemu
+  prepare_disk
 
-    for image in bzImage initrd.img; do
-        [ -f "$ASSETS/$image" ] || die "missing $ASSETS/$image; run: make guest"
-    done
+  for image in bzImage initrd.img; do
+    [ -f "$ASSETS/$image" ] || die "missing $ASSETS/$image; run: make guest"
+  done
 
-    # The machine, spelled as qemu_launcher.c spells it.
-    local argv=(
-        "$QEMU"
-        -M "$MACHINE"
-        -m "$MEMORY"
-        -smp "cpus=$CPUS,maxcpus=$MAX_CPUS,sockets=1,cores=$MAX_CPUS,threads=1"
-        -cpu Haswell-v4,-pcid,-tsc-deadline,-invpcid,-spec-ctrl
-        -kernel "$ASSETS/bzImage"
-        -initrd "$ASSETS/initrd.img"
-        -device virtio-net-pci,id=net1,netdev=net0
-        -netdev "user,id=net0,net=192.168.100.0/24,dhcpstart=$GUEST_IP"
-        -device virtio-serial-pci,id=vser0,console-size=on
-        -device virtconsole,id=hvc0,chardev=hvc0-socket,bus=vser0.0
-        -device virtserialport,id=agent,chardev=agent-socket,bus=vser0.0,name=io.ara.tctish.agent
-        -device virtio-rng-pci
-        -device virtio-balloon-pci,free-page-reporting=on
-        -device "virtio-blk-pci,id=disk1,drive=drive1,num-queues=$MAX_CPUS"
-        -drive "file=$DISK,id=drive1,if=none,format=qcow2,discard=unmap,detect-zeroes=unmap"
-        -fsdev "local,path=$SHARE,security_model=none,id=fsdev0"
-        -device virtio-9p-pci,fsdev=fsdev0,mount_tag=shared
-        -monitor "tcp:localhost:$MONITOR_PORT,server=on,wait=off"
-        -no-reboot
-    )
+  # The machine, spelled as qemu_launcher.c spells it.
+  local argv=(
+    "$QEMU"
+    -M "$MACHINE"
+    -m "$MEMORY"
+    -smp "cpus=$CPUS,maxcpus=$MAX_CPUS,sockets=1,cores=$MAX_CPUS,threads=1"
+    -cpu Haswell-v4,-pcid,-tsc-deadline,-invpcid,-spec-ctrl
+    -kernel "$ASSETS/bzImage"
+    -initrd "$ASSETS/initrd.img"
+    -device virtio-net-pci,id=net1,netdev=net0
+    -netdev "user,id=net0,net=192.168.100.0/24,dhcpstart=$GUEST_IP"
+    -device virtio-serial-pci,id=vser0,console-size=on
+    -device virtconsole,id=hvc0,chardev=hvc0-socket,bus=vser0.0
+    -device virtserialport,id=agent,chardev=agent-socket,bus=vser0.0,name=io.ara.tctish.agent
+    -device virtio-rng-pci
+    -device virtio-balloon-pci,free-page-reporting=on
+    -device "virtio-blk-pci,id=disk1,drive=drive1,num-queues=$MAX_CPUS"
+    -drive "file=$DISK,id=drive1,if=none,format=qcow2,discard=unmap,detect-zeroes=unmap"
+    -fsdev "local,path=$SHARE,security_model=none,id=fsdev0"
+    -device virtio-9p-pci,fsdev=fsdev0,mount_tag=shared
+    -monitor "tcp:localhost:$MONITOR_PORT,server=on,wait=off"
+    -no-reboot
+  )
 
-    # The consoles of the app's other TTYs, hvc1 to hvc11, connected to nothing here.
-    local n
-    for n in $(seq 1 11); do
-        argv+=(-device "virtconsole,id=hvc$n,chardev=hvc$n-socket,bus=vser0.0"
-            -chardev "null,id=hvc$n-socket")
-    done
+  # The consoles of the app's other TTYs, hvc1 to hvc11, connected to nothing here.
+  local n
+  for n in $(seq 1 11); do
+    argv+=(-device "virtconsole,id=hvc$n,chardev=hvc$n-socket,bus=vser0.0"
+      -chardev "null,id=hvc$n-socket")
+  done
 
-    # The agent's socket. A short path, because a Unix socket's must fit in 104
-    # bytes.
-    AGENT_DIR="$(mktemp -d /tmp/tctish-agent.XXXXXX)"
-    AGENT_SOCKET="$AGENT_DIR/agent.sock"
-    trap 'rm -rf "$AGENT_DIR"' EXIT
-    argv+=(-chardev "socket,id=agent-socket,path=$AGENT_SOCKET,server=on,wait=off")
+  # The agent's socket. A short path, because a Unix socket's must fit in 104
+  # bytes.
+  AGENT_DIR="$(mktemp -d /tmp/tctish-agent.XXXXXX)"
+  AGENT_SOCKET="$AGENT_DIR/agent.sock"
+  trap 'rm -rf "$AGENT_DIR"' EXIT
+  argv+=(-chardev "socket,id=agent-socket,path=$AGENT_SOCKET,server=on,wait=off")
 
-    local cmdline="tcti_disk=file page_reporting.page_reporting_order=2"
-    cmdline="$cmdline console=ttyS0 earlyprintk=serial,ttyS0 rcupdate.rcu_cpu_stall_suppress=1"
-    if [ "$USE_SERIAL" -eq 1 ]; then
-        argv+=(-nographic -chardev null,id=hvc0-socket)
-    else
-        # signal=off hands Ctrl-C to the guest rather than to QEMU, as in the app.
-        argv+=(-display none -serial "file:$LOG" -chardev stdio,id=hvc0-socket,signal=off)
-    fi
-    argv+=(-append "$cmdline")
+  local cmdline="tcti_disk=file page_reporting.page_reporting_order=2"
+  cmdline="$cmdline console=ttyS0 earlyprintk=serial,ttyS0 rcupdate.rcu_cpu_stall_suppress=1"
+  if [ "$USE_SERIAL" -eq 1 ]; then
+    argv+=(-nographic -chardev null,id=hvc0-socket)
+  else
+    # signal=off hands Ctrl-C to the guest rather than to QEMU, as in the app.
+    argv+=(-display none -serial "file:$LOG" -chardev stdio,id=hvc0-socket,signal=off)
+  fi
+  argv+=(-append "$cmdline")
 
-    [ -n "$SNAPSHOT" ] && argv+=(-loadvm "$SNAPSHOT")
+  [ -n "$SNAPSHOT" ] && argv+=(-loadvm "$SNAPSHOT")
 
-    [ "$CPUS" -le "$MAX_CPUS" ] || die "--cpus $CPUS is more than --max-cpus $MAX_CPUS"
+  [ "$CPUS" -le "$MAX_CPUS" ] || die "--cpus $CPUS is more than --max-cpus $MAX_CPUS"
 
-    note "$QEMU, machine $MACHINE, $CPUS of $MAX_CPUS cpus, $MEMORY"
-    note "9p share: $SHARE (tag 'shared')"
-    note "monitor: telnet localhost $MONITOR_PORT"
-    note "agent: $AGENT_SOCKET"
+  note "$QEMU, machine $MACHINE, $CPUS of $MAX_CPUS cpus, $MEMORY"
+  note "9p share: $SHARE (tag 'shared')"
+  note "monitor: telnet localhost $MONITOR_PORT"
+  note "agent: $AGENT_SOCKET"
 
-    if [ "$USE_SERIAL" -eq 1 ]; then
-        note "serial console follows; the guest logs in as root automatically"
-        echo
-        "${argv[@]}"
-        return
-    fi
-
-    note "kernel log: ${LOG#"$REPO"/}"
-    note "hvc0 follows; the guest logs in as root automatically. 'poweroff', then y, to leave"
+  if [ "$USE_SERIAL" -eq 1 ]; then
+    note "serial console follows; the guest logs in as root automatically"
     echo
+    "${argv[@]}"
+    return
+  fi
 
-    # In the background rather than exec'd, so that this script can pass on
-    # the window's size as it changes: bash runs a trap only between commands,
-    # and `wait` is one it can be interrupted in. QEMU still has the terminal,
-    # as a script without job control keeps everything in one process group,
-    # but its stdin has to be handed over by name: without job control, bash
-    # gives a background command /dev/null otherwise.
-    exec 3<&0
-    "${argv[@]}" <&3 3<&- &
-    QEMU_PID=$!
+  note "kernel log: ${LOG#"$REPO"/}"
+  note "hvc0 follows; the guest logs in as root automatically. 'poweroff', then y, to leave"
+  echo
 
-    # A TERM sent to this script powers the guest down, rather than pulling
-    # its plug. Closing the window can't: the hangup reaches QEMU as well, as
-    # it shares this process group, and QEMU quits at once on one.
-    trap 'shut_down; exit 0' HUP TERM
+  # In the background rather than exec'd, so that this script can pass on
+  # the window's size as it changes: bash runs a trap only between commands,
+  # and `wait` is one it can be interrupted in. QEMU still has the terminal,
+  # as a script without job control keeps everything in one process group,
+  # but its stdin has to be handed over by name: without job control, bash
+  # gives a background command /dev/null otherwise.
+  exec 3<&0
+  "${argv[@]}" <&3 3<&- &
+  QEMU_PID=$!
 
-    # The size now, once the monitor is listening, and again each time it
-    # changes. QEMU keeps it until the guest's driver is up to be told.
-    until nc -z 127.0.0.1 "$MONITOR_PORT" 2>/dev/null; do
-        kill -0 "$QEMU_PID" 2>/dev/null || break
-        sleep 0.2
-    done
-    send_console_size
-    trap send_console_size WINCH
+  # A TERM sent to this script powers the guest down, rather than pulling
+  # its plug. Closing the window can't: the hangup reaches QEMU as well, as
+  # it shares this process group, and QEMU quits at once on one.
+  trap 'shut_down; exit 0' HUP TERM
 
-    while kill -0 "$QEMU_PID" 2>/dev/null; do
-        wait "$QEMU_PID" || true
-    done
+  # The size now, once the monitor is listening, and again each time it
+  # changes. QEMU keeps it until the guest's driver is up to be told.
+  until nc -z 127.0.0.1 "$MONITOR_PORT" 2>/dev/null; do
+    kill -0 "$QEMU_PID" 2>/dev/null || break
+    sleep 0.2
+  done
+  send_console_size
+  trap send_console_size WINCH
+
+  while kill -0 "$QEMU_PID" 2>/dev/null; do
+    wait "$QEMU_PID" || true
+  done
 }
 
 main "$@"

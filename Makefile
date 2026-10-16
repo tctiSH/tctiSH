@@ -233,7 +233,7 @@ endef
 # Not ours to reformat, and excluded everywhere.
 #
 #   third-party             submodules and vendored sources, including QEMU
-#   assets                  guest-side build scripts, a world apart
+#   assets                  the guest's files, but for its shell scripts; see SHELL_SOURCES
 #   patches                 context lines are literal, so reformatting silently breaks them
 #
 # Everything is found through `git ls-files`, which also keeps build output out by construction.
@@ -241,11 +241,14 @@ NOT_OURS := ^(third-party|assets|patches)/
 
 SWIFT_SOURCES  := $(shell git ls-files '*.swift' | grep -Ev '$(NOT_OURS)')
 C_SOURCES      := $(shell git ls-files '*.c' '*.h' '*.m' '*.mm' | grep -Ev '$(NOT_OURS)')
-SHELL_SOURCES  := $(shell git ls-files '*.sh' | grep -Ev '$(NOT_OURS)')
+# The guest's shell scripts are formatted as the Mac's are: those in assets/ as well, with the ones
+# that have no .sh named.
+NOT_OURS_SHELL := ^(third-party|patches)/
+SHELL_SOURCES  := $(sort $(shell git ls-files '*.sh' | grep -Ev '$(NOT_OURS_SHELL)') \
+                         $(shell git ls-files assets/scripts assets/overlay/init))
 PYTHON_SOURCES := $(shell git ls-files '*.py' | grep -Ev '$(NOT_OURS)')
-# Nix gets a narrower exclusion than the rest. The `assets/` entry in NOT_OURS is about guest-side
-# shell scripts having separate conventions; a Nix flake is ours wherever it happens to sit, and
-# assets/kernel/flake.nix pins the kernel toolchain. The wildcard is there as well as `git ls-files`
+# Nix gets a narrower exclusion than the rest too: a Nix flake is ours wherever it happens to sit,
+# and assets/kernel/flake.nix pins the kernel toolchain. The wildcard is there as well as `git ls-files`
 # so that a flake is formatted before its first commit rather than after it -- $(sort) dedupes the
 # two sources once it is tracked.
 NOT_OURS_NIX   := ^(third-party|patches)/
@@ -259,10 +262,9 @@ RUST_SOURCES   := $(shell git ls-files '*.rs' | grep -Ev '$(NOT_OURS)')
 # the target; see utils/tctictl/build_and_copy.sh, which builds with the same one.
 CARGO_TARGET := x86_64-unknown-linux-musl
 
-# Four spaces, matching Xcode's editor and the existing scripts. The dialect comes
-# from each script's shebang, so a genuinely POSIX script would still be treated
-# as one.
-SHFMT_FLAGS := --indent 4 --case-indent
+# Two spaces. The dialect comes from each script's shebang, so a genuinely POSIX script is treated as
+# one. The profile.d scripts have none, and are read as bash, which formats POSIX the same.
+SHFMT_FLAGS := --indent 2 --case-indent
 
 # Comments are the one thing swift-format will not touch: it neither breaks a line that runs past
 # the limit nor joins short ones back up, so a paragraph wrapped at 60 columns and one wrapped at 99

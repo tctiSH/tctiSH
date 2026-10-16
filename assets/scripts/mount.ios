@@ -8,23 +8,22 @@ FAKE=0
 
 eval set -- "$OPTS"
 
-while :
-do
+while :; do
   case "$1" in
 
-	# Handle fake mounts.
-	-f )
-	  FAKE=1
-	  shift
-	  ;;
-	
-	## For now, ignore most flags.
-	-s | -n | -v )
-	  shift
+    # Handle fake mounts.
+    -f)
+      FAKE=1
+      shift
       ;;
 
-	## For now, ignore all arguments.
-	-N | -o | -t )
+    ## For now, ignore most flags.
+    -s | -n | -v)
+      shift
+      ;;
+
+    ## For now, ignore all arguments.
+    -N | -o | -t)
       shift 2
       ;;
     --)
@@ -33,21 +32,21 @@ do
       ;;
     *)
       echo "Unexpected option: $1"
-	  exit -1
+      exit -1
       ;;
   esac
 done
 
 # Print arguments if we don't have them.
 if [ $# != 2 ]; then
-	echo "usage: mount.ios <mount_name> <mountpoint>"
-	exit -1
+  echo "usage: mount.ios <mount_name> <mountpoint>"
+  exit -1
 fi
 
 # Perform the actual mount: tctictl asks for the folder, shares it as /ios_host/$1, and binds that
 # at $2.
 if [ $FAKE == 1 ]; then
-	echo tctictl mount --name "$1" "$2"
+  echo tctictl mount --name "$1" "$2"
 else
-	tctictl mount --name "$1" "$2"
+  tctictl mount --name "$1" "$2"
 fi

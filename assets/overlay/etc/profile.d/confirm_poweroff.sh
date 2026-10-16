@@ -11,26 +11,26 @@
 # fails, so that `poweroff && ...` doesn't carry on as if it had worked.
 #
 case $- in
-*i*)
-	_tctish_confirm_stop() {
-		echo "$1 stops Linux, and every terminal with it, until tctiSH is opened again."
-		printf 'Linux then starts afresh. Continue? [y/N] '
-		_tctish_answer=
-		read -r _tctish_answer
-		case "$_tctish_answer" in
-		[yY]*)
-			unset _tctish_answer
-			command "$@"
-			;;
-		*)
-			unset _tctish_answer
-			echo "Not done."
-			return 1
-			;;
-		esac
-	}
+  *i*)
+    _tctish_confirm_stop() {
+      echo "$1 stops Linux, and every terminal with it, until tctiSH is opened again."
+      printf 'Linux then starts afresh. Continue? [y/N] '
+      _tctish_answer=
+      read -r _tctish_answer
+      case "$_tctish_answer" in
+        [yY]*)
+          unset _tctish_answer
+          command "$@"
+          ;;
+        *)
+          unset _tctish_answer
+          echo "Not done."
+          return 1
+          ;;
+      esac
+    }
 
-	poweroff() { _tctish_confirm_stop poweroff "$@"; }
-	halt() { _tctish_confirm_stop halt "$@"; }
-	;;
+    poweroff() { _tctish_confirm_stop poweroff "$@"; }
+    halt() { _tctish_confirm_stop halt "$@"; }
+    ;;
 esac

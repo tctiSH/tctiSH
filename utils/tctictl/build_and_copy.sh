@@ -23,17 +23,17 @@ NC='\033[0m'
 # `nix develop --command`, or as `make tctictl`, rather than expecting a global
 # cargo to have had `rustup target add` run against it.
 command -v cargo >/dev/null 2>&1 || {
-    echo -e "${RED}'cargo' not found.${NC}" >&2
-    exit 1
+  echo -e "${RED}'cargo' not found.${NC}" >&2
+  exit 1
 }
 
 # The unpacked ramdisk isn't in the repo -- it's gitignored, and built by
 # whatever produced initrd.img. Say so plainly rather than letting `cp` fail
 # with something less helpful.
 [ -d "$RAMDISK_BIN" ] || {
-    echo -e "${RED}No unpacked ramdisk at $RAMDISK_BIN.${NC}" >&2
-    echo "It isn't in the repo; unpack initrd.img there first." >&2
-    exit 1
+  echo -e "${RED}No unpacked ramdisk at $RAMDISK_BIN.${NC}" >&2
+  echo "It isn't in the repo; unpack initrd.img there first." >&2
+  exit 1
 }
 
 echo -e "${GREEN}Building tctictl for $TARGET...${NC}"

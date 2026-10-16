@@ -59,78 +59,78 @@ GREEN=$'\033[0;32m'
 NC=$'\033[0m'
 
 die() {
-    echo "${RED}error:${NC} $*" >&2
-    exit 1
+  echo "${RED}error:${NC} $*" >&2
+  exit 1
 }
 
 note() {
-    echo "${GREEN}==>${NC} $*"
+  echo "${GREEN}==>${NC} $*"
 }
 
 # See the matching note in build_rootfs.sh: the devshell's $PATH filter drops
 # Homebrew, and `container` lives there.
 CONTAINER=""
 resolve_container() {
-    local candidate
-    for candidate in container /opt/homebrew/bin/container /usr/local/bin/container; do
-        if command -v "$candidate" >/dev/null 2>&1; then
-            CONTAINER="$candidate"
-            return 0
-        fi
-    done
-    die "no 'container' runtime found. Install it with: brew install container"
+  local candidate
+  for candidate in container /opt/homebrew/bin/container /usr/local/bin/container; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      CONTAINER="$candidate"
+      return 0
+    fi
+  done
+  die "no 'container' runtime found. Install it with: brew install container"
 }
 
 maybe_reexec() {
-    [ "$(uname -s)" = "Linux" ] && return 0
+  [ "$(uname -s)" = "Linux" ] && return 0
 
-    resolve_container
+  resolve_container
 
-    "$CONTAINER" system status >/dev/null 2>&1 ||
-        die "the container runtime is not running. Start it with: container system start"
+  "$CONTAINER" system status >/dev/null 2>&1 ||
+    die "the container runtime is not running. Start it with: container system start"
 
-    note "re-executing inside a Linux container"
-    exec "$CONTAINER" run --rm \
-        -c 4 -m 4g \
-        -v "$REPO:$REPO" -w "$REPO" \
-        alpine:latest \
-        sh -c "apk add --no-cache bash e2fsprogs qemu-img >/dev/null 2>&1 && exec bash '${BASH_SOURCE[0]}' $*"
+  note "re-executing inside a Linux container"
+  exec "$CONTAINER" run --rm \
+    -c 4 -m 4g \
+    -v "$REPO:$REPO" -w "$REPO" \
+    alpine:latest \
+    sh -c "apk add --no-cache bash e2fsprogs qemu-img >/dev/null 2>&1 && exec bash '${BASH_SOURCE[0]}' $*"
 }
 
 main() {
-    maybe_reexec "$@"
+  maybe_reexec "$@"
 
-    local work raw
-    work="$(mktemp -d)"
-    raw="$work/disk.raw"
-    # shellcheck disable=SC2064
-    trap "rm -rf '$work'" EXIT
+  local work raw
+  work="$(mktemp -d)"
+  raw="$work/disk.raw"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$work'" EXIT
 
-    note "mke2fs $(mke2fs -V 2>&1 | head -1 | sed 's/^mke2fs //')"
+  note "mke2fs $(mke2fs -V 2>&1 | head -1 | sed 's/^mke2fs //')"
 
-    # Sparse, so this costs nothing until mke2fs writes metadata into it.
-    truncate -s "$DISK_SIZE" "$raw"
+  # Sparse, so this costs nothing until mke2fs writes metadata into it.
+  truncate -s "$DISK_SIZE" "$raw"
 
-    # -F because the target is a file rather than a block device, and mke2fs
-    # would otherwise ask.
-    note "making ext4 ($DISK_SIZE)"
-    mkfs.ext4 -q -F \
-        -U "$FS_UUID" \
-        -E "hash_seed=$HASH_SEED" \
-        -O "$FS_FEATURES" \
-        "$raw"
+  # -F because the target is a file rather than a block device, and mke2fs
+  # would otherwise ask.
+  note "making ext4 ($DISK_SIZE)"
+  mkfs.ext4 -q -F \
+    -U "$FS_UUID" \
+    -E "hash_seed=$HASH_SEED" \
+    -O "$FS_FEATURES" \
+    "$raw"
 
-    # Never mount it. The shipped image was, which is why it carries a dirty
-    # journal; leaving it untouched is what keeps first boot from recovering.
-    note "converting to qcow2"
-    qemu-img convert -f raw -O qcow2 "$raw" "$OUT.tmp"
-    mv "$OUT.tmp" "$OUT"
+  # Never mount it. The shipped image was, which is why it carries a dirty
+  # journal; leaving it untouched is what keeps first boot from recovering.
+  note "converting to qcow2"
+  qemu-img convert -f raw -O qcow2 "$raw" "$OUT.tmp"
+  mv "$OUT.tmp" "$OUT"
 
-    echo
-    note "built ${OUT#"$REPO"/}"
-    echo "    virtual:   $DISK_SIZE"
-    echo "    on disk:   $(du -h "$OUT" | cut -f1)"
-    echo "    sha256:    $(sha256sum "$OUT" | cut -d' ' -f1)"
+  echo
+  note "built ${OUT#"$REPO"/}"
+  echo "    virtual:   $DISK_SIZE"
+  echo "    on disk:   $(du -h "$OUT" | cut -f1)"
+  echo "    sha256:    $(sha256sum "$OUT" | cut -d' ' -f1)"
 }
 
 main "$@"

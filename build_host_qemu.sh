@@ -40,18 +40,18 @@ BASEDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 QEMU_DIR="${HOST_QEMU_SRC:-$BASEDIR/third-party/qemu}"
 
 die() {
-    echo "${RED}error:${NC} $*" >&2
-    exit 1
+  echo "${RED}error:${NC} $*" >&2
+  exit 1
 }
 
 BACKEND="${1:-}"
 case "$BACKEND" in
-    tcti) BACKEND_FLAGS="--enable-tcg-threaded-interpreter" ;;
-    jit) BACKEND_FLAGS="" ;;
-    hybrid-tcti) BACKEND_FLAGS="--enable-tcg-hybrid=tcti" ;;
-    hybrid-jit) BACKEND_FLAGS="--enable-tcg-hybrid=jit" ;;
-    hybrid) BACKEND_FLAGS="--enable-tcg-hybrid=runtime" ;;
-    *) die "usage: $(basename "$0") tcti|jit|hybrid-tcti|hybrid-jit|hybrid" ;;
+  tcti) BACKEND_FLAGS="--enable-tcg-threaded-interpreter" ;;
+  jit) BACKEND_FLAGS="" ;;
+  hybrid-tcti) BACKEND_FLAGS="--enable-tcg-hybrid=tcti" ;;
+  hybrid-jit) BACKEND_FLAGS="--enable-tcg-hybrid=jit" ;;
+  hybrid) BACKEND_FLAGS="--enable-tcg-hybrid=runtime" ;;
+  *) die "usage: $(basename "$0") tcti|jit|hybrid-tcti|hybrid-jit|hybrid" ;;
 esac
 
 BUILD_ROOT="$BASEDIR/build-macOS-arm64"
@@ -74,15 +74,15 @@ GC_ROOT="$BUILD_ROOT/nix-gc-root"
 # `nix` is looked for beyond $PATH because the default devshell filters it out
 # of $PATH, and this has to work when run from inside that shell too.
 if [ "${TCTISH_DEVSHELL:-}" != "host-qemu" ]; then
-    NIX="$(command -v nix || true)"
-    for candidate in /run/current-system/sw/bin/nix /nix/var/nix/profiles/default/bin/nix; do
-        [ -n "$NIX" ] && break
-        [ -x "$candidate" ] && NIX="$candidate"
-    done
-    [ -n "$NIX" ] || die "cannot find nix, which this build needs for its host libraries"
+  NIX="$(command -v nix || true)"
+  for candidate in /run/current-system/sw/bin/nix /nix/var/nix/profiles/default/bin/nix; do
+    [ -n "$NIX" ] && break
+    [ -x "$candidate" ] && NIX="$candidate"
+  done
+  [ -n "$NIX" ] || die "cannot find nix, which this build needs for its host libraries"
 
-    mkdir -p "$BUILD_ROOT"
-    exec "$NIX" develop --profile "$GC_ROOT" "$BASEDIR#host-qemu" --command "$0" "$@"
+  mkdir -p "$BUILD_ROOT"
+  exec "$NIX" develop --profile "$GC_ROOT" "$BASEDIR#host-qemu" --command "$0" "$@"
 fi
 
 # The flags follow QEMU_PLATFORM_BUILD_FLAGS in build_dependencies.sh, so that
@@ -103,19 +103,19 @@ fi
 # --disable-download because prepare_qemu_source has already fetched every
 # subproject configure needs.
 CONFIGURE_FLAGS=(
-    --target-list=x86_64-softmmu
-    --disable-hvf --disable-cocoa --disable-coreaudio --disable-sdl --disable-gtk
-    --disable-vnc --disable-spice --disable-opengl --disable-dbus-display
-    --disable-virglrenderer --enable-capstone --disable-fdt --disable-rust
-    --disable-gnutls --disable-gcrypt --disable-nettle --disable-libssh
-    --disable-curl --disable-libusb --disable-usb-redir --disable-libiscsi
-    --disable-lzo --disable-snappy --disable-zstd --disable-png
-    --disable-vde --disable-curses --disable-smartcard
-    --disable-docs --disable-werror --disable-tools --disable-guest-agent
-    --enable-slirp --disable-slirp-smbd -Dforce_fallback_for=slirp
-    -Dslirp:default_library=static
-    --with-coroutine=libucontext --enable-ucontext
-    --enable-virtfs --disable-download
+  --target-list=x86_64-softmmu
+  --disable-hvf --disable-cocoa --disable-coreaudio --disable-sdl --disable-gtk
+  --disable-vnc --disable-spice --disable-opengl --disable-dbus-display
+  --disable-virglrenderer --enable-capstone --disable-fdt --disable-rust
+  --disable-gnutls --disable-gcrypt --disable-nettle --disable-libssh
+  --disable-curl --disable-libusb --disable-usb-redir --disable-libiscsi
+  --disable-lzo --disable-snappy --disable-zstd --disable-png
+  --disable-vde --disable-curses --disable-smartcard
+  --disable-docs --disable-werror --disable-tools --disable-guest-agent
+  --enable-slirp --disable-slirp-smbd -Dforce_fallback_for=slirp
+  -Dslirp:default_library=static
+  --with-coroutine=libucontext --enable-ucontext
+  --enable-virtfs --disable-download
 )
 [ -z "$BACKEND_FLAGS" ] || CONFIGURE_FLAGS+=("$BACKEND_FLAGS")
 
@@ -128,9 +128,9 @@ CONFIGURE_FLAGS=(
 ENVIRONMENT="$(readlink -f "$GC_ROOT" 2>/dev/null || true)"
 CONFIGURED="$ENVIRONMENT ${CONFIGURE_FLAGS[*]}"
 if [ -n "$ENVIRONMENT" ] && [ -f "$BUILD_DIR/build.ninja" ] &&
-    [ "$(cat "$BUILD_DIR/environment" 2>/dev/null)" != "$CONFIGURED" ]; then
-    echo "${GREEN}The host-qemu shell or the configure flags have changed; configuring QEMU ($BACKEND) again...${NC}"
-    rm -rf "$BUILD_DIR"
+  [ "$(cat "$BUILD_DIR/environment" 2>/dev/null)" != "$CONFIGURED" ]; then
+  echo "${GREEN}The host-qemu shell or the configure flags have changed; configuring QEMU ($BACKEND) again...${NC}"
+  rm -rf "$BUILD_DIR"
 fi
 
 # shellcheck source=qemu_source.sh
@@ -138,16 +138,16 @@ source "$BASEDIR/qemu_source.sh"
 prepare_qemu_source
 
 if [ ! -f "$BUILD_DIR/build.ninja" ]; then
+  rm -rf "$BUILD_DIR"
+  mkdir -p "$BUILD_DIR"
+  echo "${GREEN}Configuring QEMU ($BACKEND) for this Mac...${NC}"
+  if ! (cd "$BUILD_DIR" && "$QEMU_DIR/configure" "${CONFIGURE_FLAGS[@]}"); then
+    # Removed so the next run configures afresh rather than building a
+    # half-configured tree.
     rm -rf "$BUILD_DIR"
-    mkdir -p "$BUILD_DIR"
-    echo "${GREEN}Configuring QEMU ($BACKEND) for this Mac...${NC}"
-    if ! (cd "$BUILD_DIR" && "$QEMU_DIR/configure" "${CONFIGURE_FLAGS[@]}"); then
-        # Removed so the next run configures afresh rather than building a
-        # half-configured tree.
-        rm -rf "$BUILD_DIR"
-        die "configure failed"
-    fi
-    [ -z "$ENVIRONMENT" ] || echo "$CONFIGURED" >"$BUILD_DIR/environment"
+    die "configure failed"
+  fi
+  [ -z "$ENVIRONMENT" ] || echo "$CONFIGURED" >"$BUILD_DIR/environment"
 fi
 
 echo "${GREEN}Building QEMU ($BACKEND) for this Mac...${NC}"

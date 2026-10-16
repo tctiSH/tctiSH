@@ -37,89 +37,89 @@ SDK=
 SDKMINVER=
 
 command -v realpath >/dev/null 2>&1 || realpath() {
-    [[ $1 = /* ]] && echo "$1" || echo "$PWD/${1#./}"
+  [[ $1 = /* ]] && echo "$1" || echo "$PWD/${1#./}"
 }
 
 version_check() {
-    [ "$1" = "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" ]
+  [ "$1" = "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" ]
 }
 
 usage() {
-    echo "Usage: [VARIABLE...] $(basename $0) [-d] [-r]"
-    echo ""
-    echo "  -d, --download   Force re-download of source even if already downloaded."
-    echo "  -r, --rebuild    Avoid cleaning build directory."
-    echo ""
-    echo "  VARIABLEs are:"
-    echo "    NCPU           Number of CPUs to use in 'make', 0 to use all cores."
-    echo "    SDKVERSION     Target a specific SDK version."
-    echo "    CHOST          Configure host, set if not deducable by ARCH."
-    echo ""
-    echo "    CFLAGS CPPFLAGS CXXFLAGS LDFLAGS"
-    echo ""
-    exit 1
+  echo "Usage: [VARIABLE...] $(basename $0) [-d] [-r]"
+  echo ""
+  echo "  -d, --download   Force re-download of source even if already downloaded."
+  echo "  -r, --rebuild    Avoid cleaning build directory."
+  echo ""
+  echo "  VARIABLEs are:"
+  echo "    NCPU           Number of CPUs to use in 'make', 0 to use all cores."
+  echo "    SDKVERSION     Target a specific SDK version."
+  echo "    CHOST          Configure host, set if not deducable by ARCH."
+  echo ""
+  echo "    CFLAGS CPPFLAGS CXXFLAGS LDFLAGS"
+  echo ""
+  exit 1
 }
 
 check_env() {
-    command -v python3 >/dev/null 2>&1 || {
-        echo >&2 "${RED}You must install 'python3' on your host machine.${NC}"
-        exit 1
-    }
-    command -v meson >/dev/null 2>&1 || {
-        echo >&2 "${RED}You must install 'meson' on your host machine.${NC}"
-        exit 1
-    }
-    command -v msgfmt >/dev/null 2>&1 || {
-        printf >&2 '%b\n' "${RED}You must install 'gettext' on your host machine.\n\t'msgfmt' needs to be in your \$PATH as well.${NC}"
-        exit 1
-    }
-    command -v xcrun >/dev/null 2>&1 || {
-        echo >&2 "${RED}'xcrun' is not found. Make sure you are running on OSX."
-        exit 1
-    }
-    command -v otool >/dev/null 2>&1 || {
-        echo >&2 "${RED}'otool' is not found. Make sure you are running on OSX."
-        exit 1
-    }
-    command -v install_name_tool >/dev/null 2>&1 || {
-        echo >&2 "${RED}'install_name_tool' is not found. Make sure you are running on OSX."
-        exit 1
-    }
-    version_check "2.4" "$(bison -V | head -1 | awk '{ print $NF }')" || {
-        echo >&2 "${RED}'bison' >= 2.4 is required. Did you install from Homebrew and updated your \$PATH variable?"
-        exit 1
-    }
+  command -v python3 >/dev/null 2>&1 || {
+    echo >&2 "${RED}You must install 'python3' on your host machine.${NC}"
+    exit 1
+  }
+  command -v meson >/dev/null 2>&1 || {
+    echo >&2 "${RED}You must install 'meson' on your host machine.${NC}"
+    exit 1
+  }
+  command -v msgfmt >/dev/null 2>&1 || {
+    printf >&2 '%b\n' "${RED}You must install 'gettext' on your host machine.\n\t'msgfmt' needs to be in your \$PATH as well.${NC}"
+    exit 1
+  }
+  command -v xcrun >/dev/null 2>&1 || {
+    echo >&2 "${RED}'xcrun' is not found. Make sure you are running on OSX."
+    exit 1
+  }
+  command -v otool >/dev/null 2>&1 || {
+    echo >&2 "${RED}'otool' is not found. Make sure you are running on OSX."
+    exit 1
+  }
+  command -v install_name_tool >/dev/null 2>&1 || {
+    echo >&2 "${RED}'install_name_tool' is not found. Make sure you are running on OSX."
+    exit 1
+  }
+  version_check "2.4" "$(bison -V | head -1 | awk '{ print $NF }')" || {
+    echo >&2 "${RED}'bison' >= 2.4 is required. Did you install from Homebrew and updated your \$PATH variable?"
+    exit 1
+  }
 }
 
 download() {
-    URL=$1
-    FILE="$(basename $URL)"
-    NAME="${FILE%.tar.*}"
-    TARGET="$BUILD_DIR/$FILE"
-    DIR="$BUILD_DIR/$NAME"
-    PATCH="$PATCHES_DIR/${NAME}.patch"
-    DATA="$PATCHES_DIR/data/${NAME}"
-    if [ -f "$TARGET" -a -z "$REDOWNLOAD" ]; then
-        echo "${GREEN}$TARGET already downloaded! Run with -d to force re-download.${NC}"
-    else
-        echo "${GREEN}Downloading ${URL}...${NC}"
-        curl -L -O "$URL"
-        mv "$FILE" "$TARGET"
-    fi
-    if [ -d "$DIR" ]; then
-        echo "${GREEN}Deleting existing build directory ${DIR}...${NC}"
-        rm -rf "$DIR"
-    fi
-    echo "${GREEN}Unpacking ${NAME}...${NC}"
-    tar -xf "$TARGET" -C "$BUILD_DIR"
-    if [ -f "$PATCH" ]; then
-        echo "${GREEN}Patching ${NAME}...${NC}"
-        patch -d "$DIR" -p1 <"$PATCH"
-    fi
-    if [ -d "$DATA" ]; then
-        echo "${GREEN}Patching data ${NAME}...${NC}"
-        cp -r "$DATA/." "$DIR"
-    fi
+  URL=$1
+  FILE="$(basename $URL)"
+  NAME="${FILE%.tar.*}"
+  TARGET="$BUILD_DIR/$FILE"
+  DIR="$BUILD_DIR/$NAME"
+  PATCH="$PATCHES_DIR/${NAME}.patch"
+  DATA="$PATCHES_DIR/data/${NAME}"
+  if [ -f "$TARGET" -a -z "$REDOWNLOAD" ]; then
+    echo "${GREEN}$TARGET already downloaded! Run with -d to force re-download.${NC}"
+  else
+    echo "${GREEN}Downloading ${URL}...${NC}"
+    curl -L -O "$URL"
+    mv "$FILE" "$TARGET"
+  fi
+  if [ -d "$DIR" ]; then
+    echo "${GREEN}Deleting existing build directory ${DIR}...${NC}"
+    rm -rf "$DIR"
+  fi
+  echo "${GREEN}Unpacking ${NAME}...${NC}"
+  tar -xf "$TARGET" -C "$BUILD_DIR"
+  if [ -f "$PATCH" ]; then
+    echo "${GREEN}Patching ${NAME}...${NC}"
+    patch -d "$DIR" -p1 <"$PATCH"
+  fi
+  if [ -d "$DATA" ]; then
+    echo "${GREEN}Patching data ${NAME}...${NC}"
+    cp -r "$DATA/." "$DIR"
+  fi
 }
 
 # Meson resolves a [wrap-file] by looking in the subproject's packagecache before
@@ -138,44 +138,44 @@ download() {
 # well when the network is behaving. Deleting this function and the two
 # PCRE2_* entries in sources would leave a working build.
 seed_packagecache() {
-    SEED_DIR="$1"
-    shift
-    SEED_CACHE="$SEED_DIR/subprojects/packagecache"
-    mkdir -p "$SEED_CACHE"
-    for url in "$@"; do
-        seed_file="$(basename "$url")"
-        seed_target="$BUILD_DIR/$seed_file"
-        if [ -f "$seed_target" -a -z "$REDOWNLOAD" ]; then
-            echo "${GREEN}$seed_target already downloaded! Run with -d to force re-download.${NC}"
-        else
-            echo "${GREEN}Downloading ${url}...${NC}"
-            # Into place only once curl has succeeded. Writing straight to
-            # $seed_target would leave a truncated file behind on an interrupted
-            # download, and the next run would skip re-fetching it and hand meson
-            # a bad hash -- which reads as a corrupt wrap rather than a failed
-            # download. download() avoids this the same way.
-            curl -L -o "$seed_target.part" "$url"
-            mv "$seed_target.part" "$seed_target"
-        fi
-        cp "$seed_target" "$SEED_CACHE/$seed_file"
-    done
+  SEED_DIR="$1"
+  shift
+  SEED_CACHE="$SEED_DIR/subprojects/packagecache"
+  mkdir -p "$SEED_CACHE"
+  for url in "$@"; do
+    seed_file="$(basename "$url")"
+    seed_target="$BUILD_DIR/$seed_file"
+    if [ -f "$seed_target" -a -z "$REDOWNLOAD" ]; then
+      echo "${GREEN}$seed_target already downloaded! Run with -d to force re-download.${NC}"
+    else
+      echo "${GREEN}Downloading ${url}...${NC}"
+      # Into place only once curl has succeeded. Writing straight to
+      # $seed_target would leave a truncated file behind on an interrupted
+      # download, and the next run would skip re-fetching it and hand meson
+      # a bad hash -- which reads as a corrupt wrap rather than a failed
+      # download. download() avoids this the same way.
+      curl -L -o "$seed_target.part" "$url"
+      mv "$seed_target.part" "$seed_target"
+    fi
+    cp "$seed_target" "$SEED_CACHE/$seed_file"
+  done
 }
 
 download_all() {
-    [ -d "$BUILD_DIR" ] || mkdir -p "$BUILD_DIR"
-    download $PKG_CONFIG_SRC
-    download $FFI_SRC
-    download $ICONV_SRC
-    download $GETTEXT_SRC
-    download $GLIB_SRC
+  [ -d "$BUILD_DIR" ] || mkdir -p "$BUILD_DIR"
+  download $PKG_CONFIG_SRC
+  download $FFI_SRC
+  download $ICONV_SRC
+  download $GETTEXT_SRC
+  download $GLIB_SRC
 
-    # After download $GLIB_SRC, which re-extracts the tree this writes into.
-    GLIB_FILE="$(basename $GLIB_SRC)"
-    seed_packagecache "$BUILD_DIR/${GLIB_FILE%.tar.*}" "$PCRE2_SRC" "$PCRE2_PATCH_SRC"
+  # After download $GLIB_SRC, which re-extracts the tree this writes into.
+  GLIB_FILE="$(basename $GLIB_SRC)"
+  seed_packagecache "$BUILD_DIR/${GLIB_FILE%.tar.*}" "$PCRE2_SRC" "$PCRE2_PATCH_SRC"
 
-    download $PIXMAN_SRC
+  download $PIXMAN_SRC
 
-    prepare_qemu_source
+  prepare_qemu_source
 }
 
 # QEMU_SUBPROJECTS, prepare_qemu_source and drop_stale_qemu_subproject, which the
@@ -183,137 +183,137 @@ download_all() {
 source "$(dirname "$(realpath "$0")")/qemu_source.sh"
 
 copy_private_headers() {
-    MACOS_SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
-    IOKIT_HEADERS_PATH="$MACOS_SDK_PATH/System/Library/Frameworks/IOKit.framework/Headers"
-    OSTYPES_HEADERS_PATH="$MACOS_SDK_PATH/usr/include/libkern"
-    OUTPUT_INCLUDES="$PREFIX/include"
-    if [ ! -d "$IOKIT_HEADERS_PATH" ]; then
-        echo "${RED}Failed to find IOKit headers in: $IOKIT_HEADERS_PATH${NC}"
-        exit 1
-    fi
-    if [ ! -d "$OSTYPES_HEADERS_PATH" ]; then
-        echo "${RED}Failed to find libkern headers in: $OSTYPES_HEADERS_PATH${NC}"
-        exit 1
-    fi
-    echo "${GREEN}Copying private headers...${NC}"
-    mkdir -p "$OUTPUT_INCLUDES"
-    cp -L -r "$IOKIT_HEADERS_PATH" "$OUTPUT_INCLUDES/IOKit"
-    rm "$OUTPUT_INCLUDES/IOKit/storage/IOMedia.h"
-    # patch headers
-    echo $OUTPUT_INCLUDES
-    LC_ALL=C sed -i -e 's/#if KERNEL_USER32/#if 0/g' $(find "$OUTPUT_INCLUDES/IOKit" -type f)
-    LC_ALL=C sed -i -e 's/#if !KERNEL_USER32/#if 1/g' $(find "$OUTPUT_INCLUDES/IOKit" -type f)
-    LC_ALL=C sed -i -e 's/#if KERNEL/#if 0/g' $(find "$OUTPUT_INCLUDES/IOKit" -type f)
-    LC_ALL=C sed -i -e 's/#if !KERNEL/#if 1/g' $(find "$OUTPUT_INCLUDES/IOKit" -type f)
-    LC_ALL=C sed -i -e 's/__UNAVAILABLE_PUBLIC_IOS;/;/g' $(find "$OUTPUT_INCLUDES/IOKit" -type f)
-    mkdir -p "$OUTPUT_INCLUDES/libkern"
-    cp -r "$OSTYPES_HEADERS_PATH/OSTypes.h" "$OUTPUT_INCLUDES/libkern/OSTypes.h"
+  MACOS_SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
+  IOKIT_HEADERS_PATH="$MACOS_SDK_PATH/System/Library/Frameworks/IOKit.framework/Headers"
+  OSTYPES_HEADERS_PATH="$MACOS_SDK_PATH/usr/include/libkern"
+  OUTPUT_INCLUDES="$PREFIX/include"
+  if [ ! -d "$IOKIT_HEADERS_PATH" ]; then
+    echo "${RED}Failed to find IOKit headers in: $IOKIT_HEADERS_PATH${NC}"
+    exit 1
+  fi
+  if [ ! -d "$OSTYPES_HEADERS_PATH" ]; then
+    echo "${RED}Failed to find libkern headers in: $OSTYPES_HEADERS_PATH${NC}"
+    exit 1
+  fi
+  echo "${GREEN}Copying private headers...${NC}"
+  mkdir -p "$OUTPUT_INCLUDES"
+  cp -L -r "$IOKIT_HEADERS_PATH" "$OUTPUT_INCLUDES/IOKit"
+  rm "$OUTPUT_INCLUDES/IOKit/storage/IOMedia.h"
+  # patch headers
+  echo $OUTPUT_INCLUDES
+  LC_ALL=C sed -i -e 's/#if KERNEL_USER32/#if 0/g' $(find "$OUTPUT_INCLUDES/IOKit" -type f)
+  LC_ALL=C sed -i -e 's/#if !KERNEL_USER32/#if 1/g' $(find "$OUTPUT_INCLUDES/IOKit" -type f)
+  LC_ALL=C sed -i -e 's/#if KERNEL/#if 0/g' $(find "$OUTPUT_INCLUDES/IOKit" -type f)
+  LC_ALL=C sed -i -e 's/#if !KERNEL/#if 1/g' $(find "$OUTPUT_INCLUDES/IOKit" -type f)
+  LC_ALL=C sed -i -e 's/__UNAVAILABLE_PUBLIC_IOS;/;/g' $(find "$OUTPUT_INCLUDES/IOKit" -type f)
+  mkdir -p "$OUTPUT_INCLUDES/libkern"
+  cp -r "$OSTYPES_HEADERS_PATH/OSTypes.h" "$OUTPUT_INCLUDES/libkern/OSTypes.h"
 }
 
 meson_quote() {
-    echo "'$(echo $* | sed "s/ /','/g")'"
+  echo "'$(echo $* | sed "s/ /','/g")'"
 }
 
 generate_meson_cross() {
-    cross="$1"
-    echo "# Automatically generated - do not modify" >$cross
-    echo "[properties]" >>$cross
-    echo "needs_exe_wrapper = true" >>$cross
-    echo "[built-in options]" >>$cross
-    echo "c_args = [${CFLAGS:+$(meson_quote $CFLAGS)}]" >>$cross
-    echo "cpp_args = [${CXXFLAGS:+$(meson_quote $CXXFLAGS)}]" >>$cross
-    echo "c_link_args = [${LDFLAGS:+$(meson_quote $LDFLAGS)}]" >>$cross
-    echo "cpp_link_args = [${LDFLAGS:+$(meson_quote $LDFLAGS)}]" >>$cross
-    echo "[binaries]" >>$cross
-    echo "c = [$(meson_quote $CC)]" >>$cross
-    echo "cpp = [$(meson_quote $CXX)]" >>$cross
-    echo "objc = [$(meson_quote $OBJCC)]" >>$cross
-    echo "ar = [$(meson_quote $AR)]" >>$cross
-    echo "nm = [$(meson_quote $NM)]" >>$cross
-    echo "pkgconfig = ['$PREFIX/host/bin/pkg-config']" >>$cross
-    echo "ranlib = [$(meson_quote $RANLIB)]" >>$cross
-    echo "strip = [$(meson_quote $STRIP), '-x']" >>$cross
-    echo "python = ['$(which python3)']" >>$cross
-    # No glib-mkenums or glib-compile-resources here, though UTM's cross file
-    # names both. glib overrides find_program for its mkenums unconditionally
-    # -- it is a Python script, so cross-compiling does not stop it running -- and
-    # nothing in this tree invokes glib-compile-resources. Tested: glib 2.83
-    # builds with both entries absent *and* both tools removed from $PATH, and the
-    # exported symbols of libglib, libgobject and libgio are identical either way.
-    echo "[host_machine]" >>$cross
-    case $PLATFORM in
-        ios*)
-            echo "system = 'ios'" >>$cross
-            ;;
-        macos)
-            echo "system = 'darwin'" >>$cross
-            ;;
-    esac
-    case "$ARCH" in
-        armv7 | armv7s)
-            echo "cpu_family = 'arm'" >>$cross
-            ;;
-        arm64)
-            echo "cpu_family = 'aarch64'" >>$cross
-            ;;
-        i386)
-            echo "cpu_family = 'x86'" >>$cross
-            ;;
-        x86_64)
-            echo "cpu_family = 'x86_64'" >>$cross
-            ;;
-        *)
-            echo "cpu_family = '$ARCH'" >>$cross
-            ;;
-    esac
-    echo "cpu = '$ARCH'" >>$cross
-    echo "endian = 'little'" >>$cross
+  cross="$1"
+  echo "# Automatically generated - do not modify" >$cross
+  echo "[properties]" >>$cross
+  echo "needs_exe_wrapper = true" >>$cross
+  echo "[built-in options]" >>$cross
+  echo "c_args = [${CFLAGS:+$(meson_quote $CFLAGS)}]" >>$cross
+  echo "cpp_args = [${CXXFLAGS:+$(meson_quote $CXXFLAGS)}]" >>$cross
+  echo "c_link_args = [${LDFLAGS:+$(meson_quote $LDFLAGS)}]" >>$cross
+  echo "cpp_link_args = [${LDFLAGS:+$(meson_quote $LDFLAGS)}]" >>$cross
+  echo "[binaries]" >>$cross
+  echo "c = [$(meson_quote $CC)]" >>$cross
+  echo "cpp = [$(meson_quote $CXX)]" >>$cross
+  echo "objc = [$(meson_quote $OBJCC)]" >>$cross
+  echo "ar = [$(meson_quote $AR)]" >>$cross
+  echo "nm = [$(meson_quote $NM)]" >>$cross
+  echo "pkgconfig = ['$PREFIX/host/bin/pkg-config']" >>$cross
+  echo "ranlib = [$(meson_quote $RANLIB)]" >>$cross
+  echo "strip = [$(meson_quote $STRIP), '-x']" >>$cross
+  echo "python = ['$(which python3)']" >>$cross
+  # No glib-mkenums or glib-compile-resources here, though UTM's cross file
+  # names both. glib overrides find_program for its mkenums unconditionally
+  # -- it is a Python script, so cross-compiling does not stop it running -- and
+  # nothing in this tree invokes glib-compile-resources. Tested: glib 2.83
+  # builds with both entries absent *and* both tools removed from $PATH, and the
+  # exported symbols of libglib, libgobject and libgio are identical either way.
+  echo "[host_machine]" >>$cross
+  case $PLATFORM in
+    ios*)
+      echo "system = 'ios'" >>$cross
+      ;;
+    macos)
+      echo "system = 'darwin'" >>$cross
+      ;;
+  esac
+  case "$ARCH" in
+    armv7 | armv7s)
+      echo "cpu_family = 'arm'" >>$cross
+      ;;
+    arm64)
+      echo "cpu_family = 'aarch64'" >>$cross
+      ;;
+    i386)
+      echo "cpu_family = 'x86'" >>$cross
+      ;;
+    x86_64)
+      echo "cpu_family = 'x86_64'" >>$cross
+      ;;
+    *)
+      echo "cpu_family = '$ARCH'" >>$cross
+      ;;
+  esac
+  echo "cpu = '$ARCH'" >>$cross
+  echo "endian = 'little'" >>$cross
 }
 
 # Prevent contamination from host pkg-config files by building ours
 build_pkg_config() {
-    FILE="$(basename $PKG_CONFIG_SRC)"
-    NAME="${FILE%.tar.*}"
-    DIR="$BUILD_DIR/$NAME"
-    pwd="$(pwd)"
+  FILE="$(basename $PKG_CONFIG_SRC)"
+  NAME="${FILE%.tar.*}"
+  DIR="$BUILD_DIR/$NAME"
+  pwd="$(pwd)"
 
-    # pkg-config is a *host* tool, so it must build against the macOS SDK rather
-    # than the iOS one $SDKROOT points at. 'env -i' scrubs SDKROOT along with
-    # everything else, which makes clang fall back to its built-in Command Line
-    # Tools SDK which dies during linking if they are newer than the selected
-    # xcode.
-    HOST_SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
+  # pkg-config is a *host* tool, so it must build against the macOS SDK rather
+  # than the iOS one $SDKROOT points at. 'env -i' scrubs SDKROOT along with
+  # everything else, which makes clang fall back to its built-in Command Line
+  # Tools SDK which dies during linking if they are newer than the selected
+  # xcode.
+  HOST_SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
 
-    # pkg-config 0.29.2 bundles glib 2.38.2 (2013). clang 16 promoted several
-    # legacy-C patterns from warnings to hard errors, so that bundled glib no
-    # longer compiles as-is. Downgrade them back to warnings for this host tool
-    # only; nothing we ship is built with these flags. "-g -O2" is autoconf's
-    # default CFLAGS, restated here because setting CFLAGS at all replaces it.
-    HOST_CFLAGS="-g -O2 -Wno-error=int-conversion"
-    HOST_CFLAGS="$HOST_CFLAGS -Wno-error=implicit-function-declaration"
-    HOST_CFLAGS="$HOST_CFLAGS -Wno-error=incompatible-pointer-types"
+  # pkg-config 0.29.2 bundles glib 2.38.2 (2013). clang 16 promoted several
+  # legacy-C patterns from warnings to hard errors, so that bundled glib no
+  # longer compiles as-is. Downgrade them back to warnings for this host tool
+  # only; nothing we ship is built with these flags. "-g -O2" is autoconf's
+  # default CFLAGS, restated here because setting CFLAGS at all replaces it.
+  HOST_CFLAGS="-g -O2 -Wno-error=int-conversion"
+  HOST_CFLAGS="$HOST_CFLAGS -Wno-error=implicit-function-declaration"
+  HOST_CFLAGS="$HOST_CFLAGS -Wno-error=incompatible-pointer-types"
 
-    # The same availability rule the iOS build gets, and for the same reason: a symbol newer
-    # than the deployment target is weak-linked and NULL, so pkg-config would die on any macOS
-    # older than the SDK it was built against. Set at call time, well after CFLAGS_AVAILABILITY.
-    HOST_CFLAGS="$HOST_CFLAGS $CFLAGS_AVAILABILITY"
+  # The same availability rule the iOS build gets, and for the same reason: a symbol newer
+  # than the deployment target is weak-linked and NULL, so pkg-config would die on any macOS
+  # older than the SDK it was built against. Set at call time, well after CFLAGS_AVAILABILITY.
+  HOST_CFLAGS="$HOST_CFLAGS $CFLAGS_AVAILABILITY"
 
-    cd "$DIR"
-    if [ -z "$REBUILD" ]; then
-        echo "${GREEN}Configuring ${NAME}...${NC}"
-        # The bundled glib probes for pipe2 with autoconf, which declares the function itself
-        # rather than including the header, so the error above never reaches the probe. Answer
-        # for it: pipe2 is macOS 27 and newer, and glib falls back to pipe() plus an fcntl.
-        env -i SDKROOT="$HOST_SDKROOT" CFLAGS="$HOST_CFLAGS" ac_cv_func_pipe2=no \
-            ./configure --prefix="$PREFIX" --bindir="$PREFIX/host/bin" --with-internal-glib $@
-    fi
-    echo "${GREEN}Building ${NAME}...${NC}"
-    SDKROOT="$HOST_SDKROOT" make -j$NCPU
-    echo "${GREEN}Installing ${NAME}...${NC}"
-    SDKROOT="$HOST_SDKROOT" make install
-    cd "$pwd"
+  cd "$DIR"
+  if [ -z "$REBUILD" ]; then
+    echo "${GREEN}Configuring ${NAME}...${NC}"
+    # The bundled glib probes for pipe2 with autoconf, which declares the function itself
+    # rather than including the header, so the error above never reaches the probe. Answer
+    # for it: pipe2 is macOS 27 and newer, and glib falls back to pipe() plus an fcntl.
+    env -i SDKROOT="$HOST_SDKROOT" CFLAGS="$HOST_CFLAGS" ac_cv_func_pipe2=no \
+      ./configure --prefix="$PREFIX" --bindir="$PREFIX/host/bin" --with-internal-glib $@
+  fi
+  echo "${GREEN}Building ${NAME}...${NC}"
+  SDKROOT="$HOST_SDKROOT" make -j$NCPU
+  echo "${GREEN}Installing ${NAME}...${NC}"
+  SDKROOT="$HOST_SDKROOT" make install
+  cd "$pwd"
 
-    export PATH="$PREFIX/host/bin:$PATH"
+  export PATH="$PREFIX/host/bin:$PATH"
 }
 
 # Takes either a source URL, resolved to the directory download() unpacked it
@@ -321,225 +321,225 @@ build_pkg_config() {
 # subdirectory of its tarball. meson_build() below has taken both all along;
 # this just matches it.
 build() {
-    SRCDIR="$1"
-    shift 1
-    case $SRCDIR in
-        http* | ftp*)
-            FILE="$(basename $SRCDIR)"
-            SRCDIR="$BUILD_DIR/${FILE%.tar.*}"
-            ;;
-    esac
-    NAME="$(basename $SRCDIR)"
-    pwd="$(pwd)"
+  SRCDIR="$1"
+  shift 1
+  case $SRCDIR in
+    http* | ftp*)
+      FILE="$(basename $SRCDIR)"
+      SRCDIR="$BUILD_DIR/${FILE%.tar.*}"
+      ;;
+  esac
+  NAME="$(basename $SRCDIR)"
+  pwd="$(pwd)"
 
-    cd "$SRCDIR"
-    if [ -z "$REBUILD" ]; then
-        echo "${GREEN}Configuring ${NAME}...${NC}"
-        ./configure --prefix="$PREFIX" --host="$CHOST" $@
-    fi
-    echo "${GREEN}Building ${NAME}...${NC}"
-    make -j$NCPU
-    echo "${GREEN}Installing ${NAME}...${NC}"
-    make install
-    cd "$pwd"
+  cd "$SRCDIR"
+  if [ -z "$REBUILD" ]; then
+    echo "${GREEN}Configuring ${NAME}...${NC}"
+    ./configure --prefix="$PREFIX" --host="$CHOST" $@
+  fi
+  echo "${GREEN}Building ${NAME}...${NC}"
+  make -j$NCPU
+  echo "${GREEN}Installing ${NAME}...${NC}"
+  make install
+  cd "$pwd"
 }
 
 build_qemu() {
-    NAME="QEMU"
+  NAME="QEMU"
 
-    # Out of tree, and out of the checkout too. Emptied first, as the old
-    # tarball tree used to be by being re-extracted: a stale configuration
-    # surviving a change of flags is the failure this avoids.
-    BUILD_SUBDIR="$BUILD_DIR/qemu"
-    if [ -z "$REBUILD" ]; then
-        rm -rf "$BUILD_SUBDIR"
-    fi
+  # Out of tree, and out of the checkout too. Emptied first, as the old
+  # tarball tree used to be by being re-extracted: a stale configuration
+  # surviving a change of flags is the failure this avoids.
+  BUILD_SUBDIR="$BUILD_DIR/qemu"
+  if [ -z "$REBUILD" ]; then
+    rm -rf "$BUILD_SUBDIR"
+  fi
 
-    # QEMU's configure reads $CFLAGS/$CXXFLAGS/$LDFLAGS straight out of the
-    # environment and writes them into its meson cross file. It used to take
-    # them as $QEMU_CFLAGS instead, which is why this function once moved them
-    # aside; that spelling is gone, and moving them aside now builds QEMU with
-    # no -isysroot and no deployment target -- against the macOS SDK, silently.
+  # QEMU's configure reads $CFLAGS/$CXXFLAGS/$LDFLAGS straight out of the
+  # environment and writes them into its meson cross file. It used to take
+  # them as $QEMU_CFLAGS instead, which is why this function once moved them
+  # aside; that spelling is gone, and moving them aside now builds QEMU with
+  # no -isysroot and no deployment target -- against the macOS SDK, silently.
 
-    pwd="$(pwd)"
-    mkdir -p "$BUILD_SUBDIR"
-    cd "$BUILD_SUBDIR"
-    echo "${GREEN}Configuring QEMU...${NC}"
-    # QEMU's configure defaults objcc to a bare `clang` and lets meson resolve it from $PATH, even
-    # though every other binary it writes into the cross file is a full Xcode path. Pass it
-    # explicitly so the ObjC probe cannot be captured by whatever clang happens to come first --
-    # a nix one links against the macOS SDK and fails against our iOS target.
-    "$QEMU_DIR/configure" --prefix="$PREFIX" --host="$CHOST" --cross-prefix="" \
-        --with-coroutine=libucontext --objcc="$OBJCC" $@
-    echo "${GREEN}Building QEMU...${NC}"
-    ninja
-    echo "${GREEN}Installing QEMU...${NC}"
-    ninja install
-    cd "$pwd"
+  pwd="$(pwd)"
+  mkdir -p "$BUILD_SUBDIR"
+  cd "$BUILD_SUBDIR"
+  echo "${GREEN}Configuring QEMU...${NC}"
+  # QEMU's configure defaults objcc to a bare `clang` and lets meson resolve it from $PATH, even
+  # though every other binary it writes into the cross file is a full Xcode path. Pass it
+  # explicitly so the ObjC probe cannot be captured by whatever clang happens to come first --
+  # a nix one links against the macOS SDK and fails against our iOS target.
+  "$QEMU_DIR/configure" --prefix="$PREFIX" --host="$CHOST" --cross-prefix="" \
+    --with-coroutine=libucontext --objcc="$OBJCC" $@
+  echo "${GREEN}Building QEMU...${NC}"
+  ninja
+  echo "${GREEN}Installing QEMU...${NC}"
+  ninja install
+  cd "$pwd"
 }
 
 meson_build() {
-    SRCDIR="$1"
-    shift 1
-    FILE="$(basename $SRCDIR)"
-    NAME="${FILE%.tar.*}"
-    case $SRCDIR in
-        http* | ftp*)
-            SRCDIR="$BUILD_DIR/$NAME"
-            ;;
-    esac
-    MESON_CROSS="$(realpath "$BUILD_DIR")/meson.cross"
-    if [ ! -f "$MESON_CROSS" ]; then
-        generate_meson_cross "$MESON_CROSS"
-    fi
-    pwd="$(pwd)"
+  SRCDIR="$1"
+  shift 1
+  FILE="$(basename $SRCDIR)"
+  NAME="${FILE%.tar.*}"
+  case $SRCDIR in
+    http* | ftp*)
+      SRCDIR="$BUILD_DIR/$NAME"
+      ;;
+  esac
+  MESON_CROSS="$(realpath "$BUILD_DIR")/meson.cross"
+  if [ ! -f "$MESON_CROSS" ]; then
+    generate_meson_cross "$MESON_CROSS"
+  fi
+  pwd="$(pwd)"
 
-    cd "$SRCDIR"
-    if [ -z "$REBUILD" ]; then
-        rm -rf utm_build
-        echo "${GREEN}Configuring ${NAME}...${NC}"
-        meson utm_build --prefix="$PREFIX" --buildtype=plain --cross-file "$MESON_CROSS" "$@"
-    fi
-    echo "${GREEN}Building ${NAME}...${NC}"
-    meson compile -C utm_build -j $NCPU
-    echo "${GREEN}Installing ${NAME}...${NC}"
-    meson install -C utm_build
-    cd "$pwd"
+  cd "$SRCDIR"
+  if [ -z "$REBUILD" ]; then
+    rm -rf utm_build
+    echo "${GREEN}Configuring ${NAME}...${NC}"
+    meson utm_build --prefix="$PREFIX" --buildtype=plain --cross-file "$MESON_CROSS" "$@"
+  fi
+  echo "${GREEN}Building ${NAME}...${NC}"
+  meson compile -C utm_build -j $NCPU
+  echo "${GREEN}Installing ${NAME}...${NC}"
+  meson install -C utm_build
+  cd "$pwd"
 }
 
 build_qemu_dependencies() {
-    # Order matters, and follows UTM's. libffi and libintl are both hard
-    # dependencies of glib's meson.build -- dependency('libffi') and
-    # dependency('intl') -- which resolve through $PREFIX/host/bin/pkg-config
-    # and -L$PREFIX/lib, so they have to be installed before glib configures.
-    # Miss either and meson falls back to a wrap: libffi.wrap is a git clone of
-    # a gstreamer fork, and proxy-libintl.wrap is a stub that resolves nothing.
-    #
-    # gettext wants libiconv, so iconv sits between them.
-    build $FFI_SRC
-    build $ICONV_SRC
+  # Order matters, and follows UTM's. libffi and libintl are both hard
+  # dependencies of glib's meson.build -- dependency('libffi') and
+  # dependency('intl') -- which resolve through $PREFIX/host/bin/pkg-config
+  # and -L$PREFIX/lib, so they have to be installed before glib configures.
+  # Miss either and meson falls back to a wrap: libffi.wrap is a git clone of
+  # a gstreamer fork, and proxy-libintl.wrap is a stub that resolves nothing.
+  #
+  # gettext wants libiconv, so iconv sits between them.
+  build $FFI_SRC
+  build $ICONV_SRC
 
-    # strchrnul (iOS 18.4) and pipe2 (iOS 27) are both past our 18.0 deployment
-    # target, so the linker weak-links them and the call lands on NULL. gnulib
-    # probes by declaring `char pipe2 ();` itself rather than including the
-    # header, so the availability attribute never reaches the compiler and
-    # -Werror=unguarded-availability-new cannot correct the answer -- it only
-    # fires later, on gnulib's use of the function it was told exists.
-    # `future` is how gnulib spells "the OS will have it one day, use your
-    # replacement"; it is what these two variables exist for.
-    #
-    # Checked against the whole of gettext's ac_cv_func_*=yes set: these are the
-    # only two the iOS 27 SDK puts beyond 18.0. strchrnul is copied from UTM,
-    # which hit it first; pipe2 is ours, and is the same SDK change that the
-    # glib patch works around.
-    #
-    # Only gettext-runtime is built, which is a standalone autoconf package
-    # inside the tarball. glib wants libintl and libintl.h; nothing in this tree
-    # wants anything else gettext builds, and gettext-tools is almost all of it
-    # -- 189s and 27MB installed for the whole thing against 42s and 1.6MB for
-    # this, and six dylibs that fixup_all turns into frameworks against one.
-    #
-    # It also means UTM's gettext patch is not needed: both of its hunks are in
-    # libtextstyle/ and gettext-tools/, neither of which a runtime-only
-    # configure enters. Verified by building it both ways -- same installed
-    # headers, same libintl. This is the one real divergence from UTM here, so
-    # if a future gettext bump misbehaves, try their whole-tree configure and
-    # their patch before anything else.
-    GETTEXT_FILE="$(basename $GETTEXT_SRC)"
-    gl_cv_onwards_func_strchrnul=future gl_cv_onwards_func_pipe2=future \
-        build "$BUILD_DIR/${GETTEXT_FILE%.tar.*}/gettext-runtime" \
-        --disable-java --disable-c++ --disable-libasprintf
+  # strchrnul (iOS 18.4) and pipe2 (iOS 27) are both past our 18.0 deployment
+  # target, so the linker weak-links them and the call lands on NULL. gnulib
+  # probes by declaring `char pipe2 ();` itself rather than including the
+  # header, so the availability attribute never reaches the compiler and
+  # -Werror=unguarded-availability-new cannot correct the answer -- it only
+  # fires later, on gnulib's use of the function it was told exists.
+  # `future` is how gnulib spells "the OS will have it one day, use your
+  # replacement"; it is what these two variables exist for.
+  #
+  # Checked against the whole of gettext's ac_cv_func_*=yes set: these are the
+  # only two the iOS 27 SDK puts beyond 18.0. strchrnul is copied from UTM,
+  # which hit it first; pipe2 is ours, and is the same SDK change that the
+  # glib patch works around.
+  #
+  # Only gettext-runtime is built, which is a standalone autoconf package
+  # inside the tarball. glib wants libintl and libintl.h; nothing in this tree
+  # wants anything else gettext builds, and gettext-tools is almost all of it
+  # -- 189s and 27MB installed for the whole thing against 42s and 1.6MB for
+  # this, and six dylibs that fixup_all turns into frameworks against one.
+  #
+  # It also means UTM's gettext patch is not needed: both of its hunks are in
+  # libtextstyle/ and gettext-tools/, neither of which a runtime-only
+  # configure enters. Verified by building it both ways -- same installed
+  # headers, same libintl. This is the one real divergence from UTM here, so
+  # if a future gettext bump misbehaves, try their whole-tree configure and
+  # their patch before anything else.
+  GETTEXT_FILE="$(basename $GETTEXT_SRC)"
+  gl_cv_onwards_func_strchrnul=future gl_cv_onwards_func_pipe2=future \
+    build "$BUILD_DIR/${GETTEXT_FILE%.tar.*}/gettext-runtime" \
+    --disable-java --disable-c++ --disable-libasprintf
 
-    # -Dsysprof=disabled stops meson cloning the sysprof subproject from
-    # gitlab.gnome.org while configuring -- glib's sysprof.wrap is a wrap-git,
-    # so unlike pcre2 there is no hash to check and nothing to seed, and it is a
-    # network fetch in the middle of the build for a profiler this never uses.
-    # With it, glib configures with zero git clones; exported symbols unchanged.
-    #
-    # -Ddtrace=disabled is UTM's, and is *not* load-bearing: glib builds happily
-    # with /usr/sbin/dtrace found, and the exported symbols are identical either
-    # way. Kept for parity with UTM and because generating DTrace probes for iOS
-    # is pointless, not because anything breaks without it.
-    meson_build $GLIB_SRC -Dtests=false -Ddtrace=disabled -Dsysprof=disabled
+  # -Dsysprof=disabled stops meson cloning the sysprof subproject from
+  # gitlab.gnome.org while configuring -- glib's sysprof.wrap is a wrap-git,
+  # so unlike pcre2 there is no hash to check and nothing to seed, and it is a
+  # network fetch in the middle of the build for a profiler this never uses.
+  # With it, glib configures with zero git clones; exported symbols unchanged.
+  #
+  # -Ddtrace=disabled is UTM's, and is *not* load-bearing: glib builds happily
+  # with /usr/sbin/dtrace found, and the exported symbols are identical either
+  # way. Kept for parity with UTM and because generating DTrace probes for iOS
+  # is pointless, not because anything breaks without it.
+  meson_build $GLIB_SRC -Dtests=false -Ddtrace=disabled -Dsysprof=disabled
 
-    build $PIXMAN_SRC
+  build $PIXMAN_SRC
 }
 
 fixup() {
-    FILE=$1
-    BASE=$(basename "$FILE")
-    BASEFILENAME=${BASE%.*}
-    LIBNAME=${BASEFILENAME#lib*}
-    BUNDLE_ID="com.utmapp.${LIBNAME//_/-}"
-    FRAMEWORKNAME="$LIBNAME.framework"
-    BASEFRAMEWORKPATH="$PREFIX/Frameworks/$FRAMEWORKNAME"
-    if [ "$PLATFORM" == "macos" ]; then
-        FRAMEWORKPATH="$BASEFRAMEWORKPATH/Versions/A"
-        INFOPATH="$FRAMEWORKPATH/Resources"
-    else
-        FRAMEWORKPATH="$BASEFRAMEWORKPATH"
-        INFOPATH="$FRAMEWORKPATH"
-    fi
-    NEWFILE="$FRAMEWORKPATH/$LIBNAME"
-    LIST=$(otool -L "$FILE" | tail -n +2 | cut -d ' ' -f 1 | awk '{$1=$1};1')
-    OLDIFS=$IFS
-    IFS=$'\n'
-    echo "${GREEN}Fixing up $FILE...${NC}"
-    mkdir -p "$FRAMEWORKPATH"
-    mkdir -p "$INFOPATH"
-    cp -a "$FILE" "$NEWFILE"
-    /usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string $LIBNAME" "$INFOPATH/Info.plist"
-    /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string $BUNDLE_ID" "$INFOPATH/Info.plist"
-    /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string $SDKMINVER" "$INFOPATH/Info.plist"
-    /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 1" "$INFOPATH/Info.plist"
-    /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.0" "$INFOPATH/Info.plist"
-    if [ "$PLATFORM" == "macos" ]; then
-        ln -sf "A" "$BASEFRAMEWORKPATH/Versions/Current"
-        ln -sf "Versions/Current/Resources" "$BASEFRAMEWORKPATH/Resources"
-        ln -sf "Versions/Current/$LIBNAME" "$BASEFRAMEWORKPATH/$LIBNAME"
-    fi
-    newname="@rpath/$FRAMEWORKNAME/$LIBNAME"
-    install_name_tool -id "$newname" "$NEWFILE"
-    for g in $LIST; do
-        base=$(basename "$g")
-        basefilename=${base%.*}
-        libname=${basefilename#lib*}
-        dir=$(dirname "$g")
+  FILE=$1
+  BASE=$(basename "$FILE")
+  BASEFILENAME=${BASE%.*}
+  LIBNAME=${BASEFILENAME#lib*}
+  BUNDLE_ID="com.utmapp.${LIBNAME//_/-}"
+  FRAMEWORKNAME="$LIBNAME.framework"
+  BASEFRAMEWORKPATH="$PREFIX/Frameworks/$FRAMEWORKNAME"
+  if [ "$PLATFORM" == "macos" ]; then
+    FRAMEWORKPATH="$BASEFRAMEWORKPATH/Versions/A"
+    INFOPATH="$FRAMEWORKPATH/Resources"
+  else
+    FRAMEWORKPATH="$BASEFRAMEWORKPATH"
+    INFOPATH="$FRAMEWORKPATH"
+  fi
+  NEWFILE="$FRAMEWORKPATH/$LIBNAME"
+  LIST=$(otool -L "$FILE" | tail -n +2 | cut -d ' ' -f 1 | awk '{$1=$1};1')
+  OLDIFS=$IFS
+  IFS=$'\n'
+  echo "${GREEN}Fixing up $FILE...${NC}"
+  mkdir -p "$FRAMEWORKPATH"
+  mkdir -p "$INFOPATH"
+  cp -a "$FILE" "$NEWFILE"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string $LIBNAME" "$INFOPATH/Info.plist"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string $BUNDLE_ID" "$INFOPATH/Info.plist"
+  /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string $SDKMINVER" "$INFOPATH/Info.plist"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 1" "$INFOPATH/Info.plist"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.0" "$INFOPATH/Info.plist"
+  if [ "$PLATFORM" == "macos" ]; then
+    ln -sf "A" "$BASEFRAMEWORKPATH/Versions/Current"
+    ln -sf "Versions/Current/Resources" "$BASEFRAMEWORKPATH/Resources"
+    ln -sf "Versions/Current/$LIBNAME" "$BASEFRAMEWORKPATH/$LIBNAME"
+  fi
+  newname="@rpath/$FRAMEWORKNAME/$LIBNAME"
+  install_name_tool -id "$newname" "$NEWFILE"
+  for g in $LIST; do
+    base=$(basename "$g")
+    basefilename=${base%.*}
+    libname=${basefilename#lib*}
+    dir=$(dirname "$g")
 
-        # Two spellings can reach this. Anything installed with `ninja
-        # install` has had its install names rewritten by meson on the way, so
-        # its dependencies arrive as "$PREFIX/lib/libfoo.dylib"; a dylib copied
-        # straight out of a build tree, as the separate JIT build of QEMU once
-        # was, still carries whatever the linker emitted -- normally
-        # "@rpath/libfoo.dylib".
-        #
-        # Matching only the first would leave raw @rpath names for anything we
-        # ship, which resolve to nothing once the library is inside a
-        # framework: a dlopen failure at runtime, with no build-time sign of it.
-        # Guarded on the library being one of ours -- tested against
-        # $PREFIX/lib rather than against the framework, because fixup_all
-        # builds the frameworks as it walks and a later one would not exist yet.
-        if [ "$dir" == "$PREFIX/lib" ] ||
-            { [ "$dir" == "@rpath" ] && [ -f "$PREFIX/lib/$base" ]; }; then
-            if [ "$PLATFORM" == "macos" ]; then
-                newname="@rpath/$libname.framework/Versions/A/$libname"
-            else
-                newname="@rpath/$libname.framework/$libname"
-            fi
-            install_name_tool -change "$g" "$newname" "$NEWFILE"
-        fi
-    done
-    IFS=$OLDIFS
+    # Two spellings can reach this. Anything installed with `ninja
+    # install` has had its install names rewritten by meson on the way, so
+    # its dependencies arrive as "$PREFIX/lib/libfoo.dylib"; a dylib copied
+    # straight out of a build tree, as the separate JIT build of QEMU once
+    # was, still carries whatever the linker emitted -- normally
+    # "@rpath/libfoo.dylib".
+    #
+    # Matching only the first would leave raw @rpath names for anything we
+    # ship, which resolve to nothing once the library is inside a
+    # framework: a dlopen failure at runtime, with no build-time sign of it.
+    # Guarded on the library being one of ours -- tested against
+    # $PREFIX/lib rather than against the framework, because fixup_all
+    # builds the frameworks as it walks and a later one would not exist yet.
+    if [ "$dir" == "$PREFIX/lib" ] ||
+      { [ "$dir" == "@rpath" ] && [ -f "$PREFIX/lib/$base" ]; }; then
+      if [ "$PLATFORM" == "macos" ]; then
+        newname="@rpath/$libname.framework/Versions/A/$libname"
+      else
+        newname="@rpath/$libname.framework/$libname"
+      fi
+      install_name_tool -change "$g" "$newname" "$NEWFILE"
+    fi
+  done
+  IFS=$OLDIFS
 }
 
 fixup_all() {
-    OLDIFS=$IFS
-    IFS=$'\n'
-    FILES=$(find "$SYSROOT_DIR/lib" -type f -maxdepth 1 -name "*.dylib")
-    for f in $FILES; do
-        fixup $f || true
-    done
-    IFS=$OLDIFS
+  OLDIFS=$IFS
+  IFS=$'\n'
+  FILES=$(find "$SYSROOT_DIR/lib" -type f -maxdepth 1 -name "*.dylib")
+  for f in $FILES; do
+    fixup $f || true
+  done
+  IFS=$OLDIFS
 }
 
 # parse args
@@ -549,18 +549,18 @@ QEMU_DIR=
 REDOWNLOAD=
 PLATFORM_FAMILY_NAME=
 while [ "x$1" != "x" ]; do
-    case $1 in
-        -d | --download)
-            REDOWNLOAD=y
-            ;;
-        -r | --rebuild)
-            REBUILD=y
-            ;;
-        *)
-            usage
-            ;;
-    esac
-    shift
+  case $1 in
+    -d | --download)
+      REDOWNLOAD=y
+      ;;
+    -r | --rebuild)
+      REBUILD=y
+      ;;
+    *)
+      usage
+      ;;
+  esac
+  shift
 done
 
 # We only support one environment.
@@ -571,7 +571,7 @@ CHOST=$CPU-apple-darwin
 export CHOST
 
 if [ -z "$SDKMINVER" ]; then
-    SDKMINVER="$IOS_SDKMINVER"
+  SDKMINVER="$IOS_SDKMINVER"
 fi
 SDK=iphoneos
 CFLAGS_MINVER="-miphoneos-version-min=$SDKMINVER"
@@ -638,10 +638,10 @@ QEMU_DIR=""
 source "$PATCHES_DIR/sources"
 
 if [ -z "$QEMU_DIR" ]; then
-    QEMU_DIR="$BASEDIR/third-party/qemu"
+  QEMU_DIR="$BASEDIR/third-party/qemu"
 elif [ ! -d "$QEMU_DIR" ]; then
-    echo "${RED}Cannot find: ${QEMU_DIR}...${NC}"
-    exit 1
+  echo "${RED}Cannot find: ${QEMU_DIR}...${NC}"
+  exit 1
 fi
 
 [ -d "$SYSROOT_DIR" ] || mkdir -p "$SYSROOT_DIR"
@@ -650,19 +650,19 @@ PREFIX="$(realpath "$SYSROOT_DIR")"
 # Export supplied SDKVERSION or use system default
 SDKNAME=$(basename $(xcrun --sdk $SDK --show-sdk-platform-path) .platform)
 if [ ! -z "$SDKVERSION" ]; then
-    SDKROOT=$(xcrun --sdk $SDK --show-sdk-platform-path)"/Developer/SDKs/$SDKNAME$SDKVERSION.sdk"
+  SDKROOT=$(xcrun --sdk $SDK --show-sdk-platform-path)"/Developer/SDKs/$SDKNAME$SDKVERSION.sdk"
 else
-    SDKVERSION=$(xcrun --sdk $SDK --show-sdk-version) # current version
-    SDKROOT=$(xcrun --sdk $SDK --show-sdk-path)       # current version
+  SDKVERSION=$(xcrun --sdk $SDK --show-sdk-version) # current version
+  SDKROOT=$(xcrun --sdk $SDK --show-sdk-path)       # current version
 fi
 
 if [ -z "$SDKMINVER" ]; then
-    SDKMINVER="$SDKVERSION"
+  SDKMINVER="$SDKVERSION"
 fi
 
 # Set NCPU
 if [ -z "$NCPU" ] || [ $NCPU -eq 0 ]; then
-    NCPU="$(sysctl -n hw.ncpu)"
+  NCPU="$(sysctl -n hw.ncpu)"
 fi
 export NCPU
 
@@ -721,14 +721,14 @@ check_env
 echo "${GREEN}Starting build for ${PLATFORM_FAMILY_NAME} ${ARCH} [${NCPU} jobs]${NC}"
 
 if [ ! -f "$BUILD_DIR/BUILD_SUCCESS" ]; then
-    if [ ! -z "$REBUILD" ]; then
-        echo "${RED}Error, no previous successful build found.${NC}"
-        exit 1
-    fi
+  if [ ! -z "$REBUILD" ]; then
+    echo "${RED}Error, no previous successful build found.${NC}"
+    exit 1
+  fi
 fi
 
 if [ -z "$REBUILD" ]; then
-    download_all
+  download_all
 fi
 echo "${GREEN}Deleting old sysroot!${NC}"
 rm -rf "$PREFIX/"*

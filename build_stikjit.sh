@@ -43,45 +43,45 @@ NC='\033[0m'
 # the project, since the framework has to be loadable by the oldest thing that
 # embeds it.
 project_deployment_target() {
-    grep -oE 'IPHONEOS_DEPLOYMENT_TARGET = [0-9]+(\.[0-9]+)?;' \
-        "$BASEDIR/tctiSH.xcodeproj/project.pbxproj" 2>/dev/null |
-        sed -E 's/.* = ([0-9.]+);/\1/' |
-        sort -V | head -1
+  grep -oE 'IPHONEOS_DEPLOYMENT_TARGET = [0-9]+(\.[0-9]+)?;' \
+    "$BASEDIR/tctiSH.xcodeproj/project.pbxproj" 2>/dev/null |
+    sed -E 's/.* = ([0-9.]+);/\1/' |
+    sort -V | head -1
 }
 
 DEPLOYMENT_TARGET="${STIKJIT_DEPLOYMENT_TARGET:-$(project_deployment_target || true)}"
 
 if [ -z "$DEPLOYMENT_TARGET" ]; then
-    echo -e "${RED}Couldn't read IPHONEOS_DEPLOYMENT_TARGET from tctiSH.xcodeproj.${NC}" >&2
-    echo "Set STIKJIT_DEPLOYMENT_TARGET to build anyway." >&2
-    exit 1
+  echo -e "${RED}Couldn't read IPHONEOS_DEPLOYMENT_TARGET from tctiSH.xcodeproj.${NC}" >&2
+  echo "Set STIKJIT_DEPLOYMENT_TARGET to build anyway." >&2
+  exit 1
 fi
 
 check_env() {
-    if [ ! -d "$SOURCE_DIR" ]; then
-        echo -e "${RED}No StikJIT source at $SOURCE_DIR.${NC}" >&2
-        echo "Initialise the submodule, or point STIKJIT_SOURCE at a checkout." >&2
-        exit 1
-    fi
+  if [ ! -d "$SOURCE_DIR" ]; then
+    echo -e "${RED}No StikJIT source at $SOURCE_DIR.${NC}" >&2
+    echo "Initialise the submodule, or point STIKJIT_SOURCE at a checkout." >&2
+    exit 1
+  fi
 
-    if [ ! -f "$SOURCE_DIR/project.yml" ]; then
-        echo -e "${RED}$SOURCE_DIR has no project.yml; is it a StikJIT checkout?${NC}" >&2
-        exit 1
-    fi
+  if [ ! -f "$SOURCE_DIR/project.yml" ]; then
+    echo -e "${RED}$SOURCE_DIR has no project.yml; is it a StikJIT checkout?${NC}" >&2
+    exit 1
+  fi
 
-    command -v xcodegen >/dev/null 2>&1 || {
-        echo -e "${RED}'xcodegen' not found. Run inside 'nix develop'.${NC}" >&2
-        exit 1
-    }
+  command -v xcodegen >/dev/null 2>&1 || {
+    echo -e "${RED}'xcodegen' not found. Run inside 'nix develop'.${NC}" >&2
+    exit 1
+  }
 
-    # Falling back to StikJIT's vendored copy would build perfectly well and
-    # then be missing the pairing API, which surfaces as undefined symbols in
-    # Swift rather than as anything naming idevice.
-    if [ ! -f "$IDEVICE_DIR/libidevice_ffi.a" ] || [ ! -f "$IDEVICE_DIR/idevice.h" ]; then
-        echo -e "${RED}No idevice build at $IDEVICE_DIR.${NC}" >&2
-        echo "Run './build_idevice.sh' first, or 'make idevice'." >&2
-        exit 1
-    fi
+  # Falling back to StikJIT's vendored copy would build perfectly well and
+  # then be missing the pairing API, which surfaces as undefined symbols in
+  # Swift rather than as anything naming idevice.
+  if [ ! -f "$IDEVICE_DIR/libidevice_ffi.a" ] || [ ! -f "$IDEVICE_DIR/idevice.h" ]; then
+    echo -e "${RED}No idevice build at $IDEVICE_DIR.${NC}" >&2
+    echo "Run './build_idevice.sh' first, or 'make idevice'." >&2
+    exit 1
+  fi
 }
 
 check_env
@@ -93,18 +93,18 @@ check_env
 # rsync skips what hasn't changed, which matters -- the vendored Rust library is
 # 92MB of the 94MB here.
 stage_source() {
-    mkdir -p "$WORK_DIR"
-    rsync -a --delete --exclude '.git' "$SOURCE_DIR"/ "$WORK_DIR"/
+  mkdir -p "$WORK_DIR"
+  rsync -a --delete --exclude '.git' "$SOURCE_DIR"/ "$WORK_DIR"/
 }
 
 # Replaces StikJIT's vendored idevice with ours.
 stage_idevice() {
-    cp "$IDEVICE_DIR/libidevice_ffi.a" "$WORK_DIR/idevice/libidevice_ffi.a"
-    cp "$IDEVICE_DIR/idevice.h" "$WORK_DIR/idevice/idevice.h"
+  cp "$IDEVICE_DIR/libidevice_ffi.a" "$WORK_DIR/idevice/libidevice_ffi.a"
+  cp "$IDEVICE_DIR/idevice.h" "$WORK_DIR/idevice/idevice.h"
 
-    if [ -f "$IDEVICE_DIR/VERSION" ]; then
-        echo "  idevice $(tail -1 "$IDEVICE_DIR/VERSION") ($(head -c 12 "$IDEVICE_DIR/VERSION"))"
-    fi
+  if [ -f "$IDEVICE_DIR/VERSION" ]; then
+    echo "  idevice $(tail -1 "$IDEVICE_DIR/VERSION") ($(head -c 12 "$IDEVICE_DIR/VERSION"))"
+  fi
 }
 
 # Fixes we need that aren't upstream yet. The submodule points at
@@ -116,26 +116,26 @@ stage_idevice() {
 # business: it prints "Skipped patch" and **exits 0**. A patch that reports
 # success and changes nothing is worse than one that fails outright.
 apply_patches() {
-    local patch_file name
-    for patch_file in "$BASEDIR"/patches/stikjit-*.patch; do
-        [ -e "$patch_file" ] || return 0
-        name="$(basename "$patch_file")"
+  local patch_file name
+  for patch_file in "$BASEDIR"/patches/stikjit-*.patch; do
+    [ -e "$patch_file" ] || return 0
+    name="$(basename "$patch_file")"
 
-        if ! patch -p1 -d "$WORK_DIR" --forward <"$patch_file"; then
-            echo -e "${RED}Failed to apply $name.${NC}" >&2
-            echo "The submodule has probably moved on; the patch needs rebasing." >&2
-            exit 1
-        fi
+    if ! patch -p1 -d "$WORK_DIR" --forward <"$patch_file"; then
+      echo -e "${RED}Failed to apply $name.${NC}" >&2
+      echo "The submodule has probably moved on; the patch needs rebasing." >&2
+      exit 1
+    fi
 
-        # Belt and braces, having just been caught by a silent no-op: reversing
-        # it has to be possible, which it only is if it went in.
-        if ! patch -p1 -d "$WORK_DIR" --reverse --dry-run --force <"$patch_file" >/dev/null 2>&1; then
-            echo -e "${RED}$name reported success but isn't present.${NC}" >&2
-            exit 1
-        fi
+    # Belt and braces, having just been caught by a silent no-op: reversing
+    # it has to be possible, which it only is if it went in.
+    if ! patch -p1 -d "$WORK_DIR" --reverse --dry-run --force <"$patch_file" >/dev/null 2>&1; then
+      echo -e "${RED}$name reported success but isn't present.${NC}" >&2
+      exit 1
+    fi
 
-        echo "  $name"
-    done
+    echo "  $name"
+  done
 }
 
 echo -e "${GREEN}Building StikJIT from $SOURCE_DIR (iOS $DEPLOYMENT_TARGET)...${NC}"
@@ -175,24 +175,24 @@ echo -e "${GREEN}Generating the Xcode project...${NC}"
 # it has to have one.
 echo -e "${GREEN}Archiving...${NC}"
 xcodebuild archive \
-    -project "$WORK_DIR/StikJIT.xcodeproj" \
-    -scheme StikJIT \
-    -destination 'generic/platform=iOS' \
-    -archivePath "$ARCHIVE_PATH" \
-    BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-    SKIP_INSTALL=NO \
-    GENERATE_INFOPLIST_FILE=YES \
-    IPHONEOS_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET"
+  -project "$WORK_DIR/StikJIT.xcodeproj" \
+  -scheme StikJIT \
+  -destination 'generic/platform=iOS' \
+  -archivePath "$ARCHIVE_PATH" \
+  BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+  SKIP_INSTALL=NO \
+  GENERATE_INFOPLIST_FILE=YES \
+  IPHONEOS_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET"
 
 if [ ! -d "$FRAMEWORK_PATH" ]; then
-    echo -e "${RED}Archive produced no framework at $FRAMEWORK_PATH.${NC}" >&2
-    exit 1
+  echo -e "${RED}Archive produced no framework at $FRAMEWORK_PATH.${NC}" >&2
+  exit 1
 fi
 
 echo -e "${GREEN}Packaging the xcframework...${NC}"
 rm -rf "$OUTPUT_PATH"
 xcodebuild -create-xcframework \
-    -framework "$FRAMEWORK_PATH" \
-    -output "$OUTPUT_PATH"
+  -framework "$FRAMEWORK_PATH" \
+  -output "$OUTPUT_PATH"
 
 echo -e "${GREEN}Built $OUTPUT_PATH${NC}"

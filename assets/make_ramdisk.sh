@@ -15,8 +15,8 @@ set -euo pipefail
 ASSETS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 [ -d "$ASSETS/ramdisk" ] || {
-    echo "error: no unpacked ramdisk at $ASSETS/ramdisk. Run dev_ramdisk.sh first." >&2
-    exit 1
+  echo "error: no unpacked ramdisk at $ASSETS/ramdisk. Run dev_ramdisk.sh first." >&2
+  exit 1
 }
 
 # -H newc is the format the kernel's initramfs loader reads.
@@ -30,8 +30,8 @@ ASSETS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # them the archive depends on readdir order and carries a build timestamp, so two
 # packs of identical trees produce different bytes.
 (
-    cd "$ASSETS/ramdisk"
-    find . | LC_ALL=C sort | cpio -o -H newc --quiet
+  cd "$ASSETS/ramdisk"
+  find . | LC_ALL=C sort | cpio -o -H newc --quiet
 ) | gzip -9 -n >"$ASSETS/initrd.img"
 
 echo "packed $(du -h "$ASSETS/initrd.img" | cut -f1) into ${ASSETS##*/}/initrd.img"

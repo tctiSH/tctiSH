@@ -28,22 +28,22 @@
 # first: under a kernel with fewer hvc lines it is missing, and opening it
 # read-write would make a file in its place.
 if [ $# -gt 0 ]; then
-    console="/dev/$1"
-    tries=0
-    until [ -c "$console" ] && (: <>"$console") 2>/dev/null; do
-        tries=$((tries + 1))
-        if [ "$tries" -lt 60 ]; then
-            sleep 1
-        else
-            [ "$tries" -eq 60 ] && echo "tctish-login: $console has no port yet" >&2
-            sleep 60
-        fi
-    done
+  console="/dev/$1"
+  tries=0
+  until [ -c "$console" ] && (: <>"$console") 2>/dev/null; do
+    tries=$((tries + 1))
+    if [ "$tries" -lt 60 ]; then
+      sleep 1
+    else
+      [ "$tries" -eq 60 ] && echo "tctish-login: $console has no port yet" >&2
+      sleep 60
+    fi
+  done
 
-    exec <>"$console" >&0 2>&0
+  exec <>"$console" >&0 2>&0
 
-    # What init does to a tty it opens itself.
-    stty sane
+  # What init does to a tty it opens itself.
+  stty sane
 fi
 
 # On a virtio console, log in once a TTY in the app shows it, so that what the
@@ -66,34 +66,34 @@ CONSOLES=/run/tctish/consoles
 name="$(tty)"
 name="${name#/dev/}"
 case "$name" in
-hvc*)
+  hvc*)
     trap 'woken=1' WINCH
     read -r boot </proc/sys/kernel/random/boot_id
 
     is_shown() {
-        kept_boot=
-        kept=
-        read -r kept_boot kept 2>/dev/null <"$CONSOLES/$name"
-        if [ "$kept_boot" = "$boot" ]; then
-            [ "$kept" = shown ]
-        else
-            [ "$name" = hvc0 ]
-        fi
+      kept_boot=
+      kept=
+      read -r kept_boot kept 2>/dev/null <"$CONSOLES/$name"
+      if [ "$kept_boot" = "$boot" ]; then
+        [ "$kept" = shown ]
+      else
+        [ "$name" = hvc0 ]
+      fi
     }
 
     while :; do
-        woken=
-        is_shown && break
-        sleep 60 &
-        [ -n "$woken" ] || wait $!
-        kill $! 2>/dev/null
+      woken=
+      is_shown && break
+      sleep 60 &
+      [ -n "$woken" ] || wait $!
+      kill $! 2>/dev/null
     done
     trap - WINCH
 
     # Renamed into place, so that nothing reads half a record.
     mkdir -p "$CONSOLES" &&
-        echo "$boot shown" >"$CONSOLES/.$name.login" &&
-        mv -f "$CONSOLES/.$name.login" "$CONSOLES/$name"
+      echo "$boot shown" >"$CONSOLES/.$name.login" &&
+      mv -f "$CONSOLES/.$name.login" "$CONSOLES/$name"
     ;;
 esac
 
@@ -109,7 +109,7 @@ export TERM=xterm-256color
 stty -ixon -ixoff iutf8
 
 case "$(tty)" in
-/dev/ttyS*) [ -n "$(stty size 2>/dev/null)" ] || stty rows 24 cols 80 ;;
+  /dev/ttyS*) [ -n "$(stty size 2>/dev/null)" ] || stty rows 24 cols 80 ;;
 esac
 
 exec /bin/busybox login -f root

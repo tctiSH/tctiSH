@@ -82,290 +82,290 @@ DEFAULT_COMMAND="/run/tctish/default-command"
 # is no udev, so /dev/virtio-ports/<name> never appears; devtmpfs makes only
 # the kernel's /dev/vportNpM, whose numbers are the order ports were added in.
 find_port() {
-    set +f
-    for sysdev in /sys/class/virtio-ports/vport*; do
-        [ -e "$sysdev" ] || continue
+  set +f
+  for sysdev in /sys/class/virtio-ports/vport*; do
+    [ -e "$sysdev" ] || continue
 
-        if [ "$(cat "$sysdev/name" 2>/dev/null)" = "$NAME" ]; then
-            set -f
-            echo "/dev/$(basename "$sysdev")"
-            return 0
-        fi
-    done
-    set -f
+    if [ "$(cat "$sysdev/name" 2>/dev/null)" = "$NAME" ]; then
+      set -f
+      echo "/dev/$(basename "$sysdev")"
+      return 0
+    fi
+  done
+  set -f
 
-    return 1
+  return 1
 }
 
 # The file cache the kernel can reclaim, in MiB: its two file LRU lists. Not
 # Cached, which also counts tmpfs and the initramfs, which reclaim can't touch.
 file_cache_mib() {
-    awk '/^Active\(file\):/ { a = $2 } /^Inactive\(file\):/ { i = $2 }
+  awk '/^Active\(file\):/ { a = $2 } /^Inactive\(file\):/ { i = $2 }
         END { print int((a + i) / 1024) }' /proc/meminfo
 }
 
 # Milliseconds since boot, to the kernel's tick.
 uptime_ms() {
-    awk '{ print int($1 * 1000) }' /proc/uptime
+  awk '{ print int($1 * 1000) }' /proc/uptime
 }
 
 # time <id> <seconds.nanoseconds>
 set_time() {
-    id="$1"
-    case "${2:-}" in
-        "" | *[!0-9.]* | *.*.*)
-            echo "error $id time bad-time"
-            return
-            ;;
-    esac
+  id="$1"
+  case "${2:-}" in
+    "" | *[!0-9.]* | *.*.*)
+      echo "error $id time bad-time"
+      return
+      ;;
+  esac
 
-    if result="$(tctictl lowlevel set-clock "$2" 2>&1)"; then
-        echo "done $id $result"
-    else
-        echo "error $id time $(echo "$result" | tr '\n' ' ')"
-    fi
+  if result="$(tctictl lowlevel set-clock "$2" 2>&1)"; then
+    echo "done $id $result"
+  else
+    echo "error $id time $(echo "$result" | tr '\n' ' ')"
+  fi
 }
 
 # zone <id> <name>
 set_zone() {
-    id="$1"
-    zone="${2:-}"
+  id="$1"
+  zone="${2:-}"
 
-    # Zone names are letters, digits, _ + - and /: no dots, so no "..", and no
-    # leading /.
-    case "$zone" in
-        "" | /* | *[!A-Za-z0-9_+/-]*)
-            echo "error $id zone bad-name"
-            return
-            ;;
-    esac
-    if [ ! -f "$ZONEINFO/$zone" ]; then
-        echo "error $id zone unknown-zone"
-        return
-    fi
+  # Zone names are letters, digits, _ + - and /: no dots, so no "..", and no
+  # leading /.
+  case "$zone" in
+    "" | /* | *[!A-Za-z0-9_+/-]*)
+      echo "error $id zone bad-name"
+      return
+      ;;
+  esac
+  if [ ! -f "$ZONEINFO/$zone" ]; then
+    echo "error $id zone unknown-zone"
+    return
+  fi
 
-    old="$(readlink /etc/localtime 2>/dev/null)"
-    if [ "$old" = "$ZONEINFO/$zone" ]; then
-        echo "done $id unchanged"
-        return
-    fi
-    case "$old" in
-        "$ZONEINFO"/*) old="${old#"$ZONEINFO"/}" ;;
-        *) old="-" ;;
-    esac
+  old="$(readlink /etc/localtime 2>/dev/null)"
+  if [ "$old" = "$ZONEINFO/$zone" ]; then
+    echo "done $id unchanged"
+    return
+  fi
+  case "$old" in
+    "$ZONEINFO"/*) old="${old#"$ZONEINFO"/}" ;;
+    *) old="-" ;;
+  esac
 
-    # Renamed into place, so that nothing reads a missing or half-written
-    # /etc/localtime. musl reads it once per process, when TZ is unset.
-    if ln -sf "$ZONEINFO/$zone" /etc/.localtime.agent &&
-        mv -f /etc/.localtime.agent /etc/localtime &&
-        echo "$zone" >/etc/.timezone.agent &&
-        mv -f /etc/.timezone.agent /etc/timezone; then
-        echo "done $id changed $old"
-    else
-        rm -f /etc/.localtime.agent /etc/.timezone.agent
-        echo "error $id zone write-failed"
-    fi
+  # Renamed into place, so that nothing reads a missing or half-written
+  # /etc/localtime. musl reads it once per process, when TZ is unset.
+  if ln -sf "$ZONEINFO/$zone" /etc/.localtime.agent &&
+    mv -f /etc/.localtime.agent /etc/localtime &&
+    echo "$zone" >/etc/.timezone.agent &&
+    mv -f /etc/.timezone.agent /etc/timezone; then
+    echo "done $id changed $old"
+  else
+    rm -f /etc/.localtime.agent /etc/.timezone.agent
+    echo "error $id zone write-failed"
+  fi
 }
 
 # default-command <id> <base64 command, or ->
 set_default_command() {
-    id="$1"
-    case "${2:-}" in
-        -) command= ;;
-        "" | *[!A-Za-z0-9+/=]*)
-            echo "error $id default-command bad-command"
-            return
-            ;;
-        *)
-            # A login reads one line.
-            if ! command="$(echo "$2" | base64 -d 2>/dev/null)" ||
-                [ "$(printf '%s\n' "$command" | wc -l)" -ne 1 ]; then
-                echo "error $id default-command bad-command"
-                return
-            fi
-            ;;
-    esac
+  id="$1"
+  case "${2:-}" in
+    -) command= ;;
+    "" | *[!A-Za-z0-9+/=]*)
+      echo "error $id default-command bad-command"
+      return
+      ;;
+    *)
+      # A login reads one line.
+      if ! command="$(echo "$2" | base64 -d 2>/dev/null)" ||
+        [ "$(printf '%s\n' "$command" | wc -l)" -ne 1 ]; then
+        echo "error $id default-command bad-command"
+        return
+      fi
+      ;;
+  esac
 
-    # Renamed into place, so that a login never reads half of it. Empty for
-    # none, which a login tells from a missing file: one not sent yet.
-    if mkdir -p "${DEFAULT_COMMAND%/*}" &&
-        { [ -z "$command" ] || printf '%s\n' "$command"; } >"$DEFAULT_COMMAND.agent" &&
-        mv -f "$DEFAULT_COMMAND.agent" "$DEFAULT_COMMAND"; then
-        echo "done $id"
-    else
-        rm -f "$DEFAULT_COMMAND.agent"
-        echo "error $id default-command write-failed"
-    fi
+  # Renamed into place, so that a login never reads half of it. Empty for
+  # none, which a login tells from a missing file: one not sent yet.
+  if mkdir -p "${DEFAULT_COMMAND%/*}" &&
+    { [ -z "$command" ] || printf '%s\n' "$command"; } >"$DEFAULT_COMMAND.agent" &&
+    mv -f "$DEFAULT_COMMAND.agent" "$DEFAULT_COMMAND"; then
+    echo "done $id"
+  else
+    rm -f "$DEFAULT_COMMAND.agent"
+    echo "error $id default-command write-failed"
+  fi
 }
 
 # reclaim <id> <MiB>
 reclaim() {
-    id="$1"
-    case "${2:-}" in
-        "" | *[!0-9]*)
-            echo "error $id reclaim bad-budget"
-            return
-            ;;
-    esac
+  id="$1"
+  case "${2:-}" in
+    "" | *[!0-9]*)
+      echo "error $id reclaim bad-budget"
+      return
+      ;;
+  esac
 
-    started="$(uptime_ms)"
-    before="$(file_cache_mib)"
-    excess=$((before - $2))
+  started="$(uptime_ms)"
+  before="$(file_cache_mib)"
+  excess=$((before - $2))
 
-    # Fails with EAGAIN when it reclaimed less than asked, which is still as far
-    # as it could go; the answer says how far that was. swappiness=0 keeps it to
-    # the file cache even if the guest has swap.
-    if [ "$excess" -gt 0 ]; then
-        echo "${excess}M swappiness=0" >/sys/fs/cgroup/memory.reclaim 2>/dev/null
-    fi
+  # Fails with EAGAIN when it reclaimed less than asked, which is still as far
+  # as it could go; the answer says how far that was. swappiness=0 keeps it to
+  # the file cache even if the guest has swap.
+  if [ "$excess" -gt 0 ]; then
+    echo "${excess}M swappiness=0" >/sys/fs/cgroup/memory.reclaim 2>/dev/null
+  fi
 
-    echo "done $id $before $(file_cache_mib) $(($(uptime_ms) - started))"
+  echo "done $id $before $(file_cache_mib) $(($(uptime_ms) - started))"
 }
 
 # The processes whose controlling tty is one of the devices numbered in $1, as
 # Linux writes them in /proc/<pid>/stat, on one line. Only the leaders of their
 # sessions if $2 is "leaders".
 on_tty() {
-    want=" $1 "
-    only="${2:-}"
-    stats="$(
-        set +f
-        echo /proc/[0-9]*/stat
-    )"
-    for stat in $stats; do
-        # The whole file, as a command's name can hold a newline. Error output
-        # is redirected first, so that a process that has ended since the list
-        # was made (the subshell above among them) says nothing.
-        line=
-        IFS= read -r -d '' line 2>/dev/null <"$stat"
-        [ -n "$line" ] || continue
+  want=" $1 "
+  only="${2:-}"
+  stats="$(
+    set +f
+    echo /proc/[0-9]*/stat
+  )"
+  for stat in $stats; do
+    # The whole file, as a command's name can hold a newline. Error output
+    # is redirected first, so that a process that has ended since the list
+    # was made (the subshell above among them) says nothing.
+    line=
+    IFS= read -r -d '' line 2>/dev/null <"$stat"
+    [ -n "$line" ] || continue
 
-        # After the command's name, which is in parentheses and can hold
-        # anything: state, ppid, pgrp, session, then tty_nr.
-        # shellcheck disable=SC2086
-        set -- ${line##*\) }
-        session="${4:-}"
-        tty="${5:-}"
-        pid="${stat#/proc/}"
-        pid="${pid%/stat}"
-        case "$want" in
-            *" $tty "*) ;;
-            *) continue ;;
-        esac
-        if [ "$only" != leaders ] || [ "$session" = "$pid" ]; then
-            printf '%s ' "$pid"
-        fi
-    done
+    # After the command's name, which is in parentheses and can hold
+    # anything: state, ppid, pgrp, session, then tty_nr.
+    # shellcheck disable=SC2086
+    set -- ${line##*\) }
+    session="${4:-}"
+    tty="${5:-}"
+    pid="${stat#/proc/}"
+    pid="${pid%/stat}"
+    case "$want" in
+      *" $tty "*) ;;
+      *) continue ;;
+    esac
+    if [ "$only" != leaders ] || [ "$session" = "$pid" ]; then
+      printf '%s ' "$pid"
+    fi
+  done
 }
 
 # The session leaders on the devices numbered in $1 that are among the pids in
 # $2.
 signalled_leaders() {
-    for pid in $(on_tty "$1" leaders); do
-        case " $2 " in
-            *" $pid "*) printf '%s ' "$pid" ;;
-        esac
-    done
+  for pid in $(on_tty "$1" leaders); do
+    case " $2 " in
+      *" $pid "*) printf '%s ' "$pid" ;;
+    esac
+  done
 }
 
 # Prints the device number of the console $3, as /proc/<pid>/stat writes it,
 # or answers request $1, operation $2, with an error and fails.
 console_tty() {
-    case "$3" in
-        hvc[0-9] | hvc[1-9][0-9]) ;;
-        *)
-            echo "error $1 $2 bad-console" >&3
-            return 1
-            ;;
-    esac
-    if ! dev="$(cat "/sys/class/tty/$3/dev" 2>/dev/null)"; then
-        echo "error $1 $2 unknown-console" >&3
-        return 1
-    fi
-    major="${dev%:*}"
-    minor="${dev#*:}"
-    echo $(((minor & 255) | (major << 8) | ((minor & ~255) << 12)))
+  case "$3" in
+    hvc[0-9] | hvc[1-9][0-9]) ;;
+    *)
+      echo "error $1 $2 bad-console" >&3
+      return 1
+      ;;
+  esac
+  if ! dev="$(cat "/sys/class/tty/$3/dev" 2>/dev/null)"; then
+    echo "error $1 $2 unknown-console" >&3
+    return 1
+  fi
+  major="${dev%:*}"
+  minor="${dev#*:}"
+  echo $(((minor & 255) | (major << 8) | ((minor & ~255) << 12)))
 }
 
 # Records whether a TTY has shown the console $1 this boot, $2 being "shown" or
 # "hidden", and fails if it can't. Renamed into place, so that a login never
 # reads half a record.
 record() {
-    mkdir -p "$CONSOLES" &&
-        echo "$BOOT_ID $2" >"$CONSOLES/.$1.agent" &&
-        mv -f "$CONSOLES/.$1.agent" "$CONSOLES/$1"
+  mkdir -p "$CONSOLES" &&
+    echo "$BOOT_ID $2" >"$CONSOLES/.$1.agent" &&
+    mv -f "$CONSOLES/.$1.agent" "$CONSOLES/$1"
 }
 
 # shown <id> <console>
 shown() {
-    tty_nr="$(console_tty "$1" shown "${2:-}")" || return
-    if ! record "$2" shown; then
-        echo "error $1 shown write-failed"
-        return
-    fi
+  tty_nr="$(console_tty "$1" shown "${2:-}")" || return
+  if ! record "$2" shown; then
+    echo "error $1 shown write-failed"
+    return
+  fi
 
-    # The record first, then the signal: a login reads the record each time it
-    # wakes, and only after it can be woken, so it can't miss both.
-    leaders="$(on_tty "$tty_nr" leaders)"
-    # shellcheck disable=SC2086
-    [ -n "$leaders" ] && kill -WINCH $leaders 2>/dev/null
-    echo "done $1"
+  # The record first, then the signal: a login reads the record each time it
+  # wakes, and only after it can be woken, so it can't miss both.
+  leaders="$(on_tty "$tty_nr" leaders)"
+  # shellcheck disable=SC2086
+  [ -n "$leaders" ] && kill -WINCH $leaders 2>/dev/null
+  echo "done $1"
 }
 
 # hangup <id> <console>...
 hang_up() {
-    id="$1"
-    shift
-    if [ $# -eq 0 ]; then
-        echo "error $id hangup bad-console"
-        return
-    fi
-    ttys=
-    for console in "$@"; do
-        tty_nr="$(console_tty "$id" hangup "$console")" || return
-        ttys="$ttys $tty_nr"
-    done
+  id="$1"
+  shift
+  if [ $# -eq 0 ]; then
+    echo "error $id hangup bad-console"
+    return
+  fi
+  ttys=
+  for console in "$@"; do
+    tty_nr="$(console_tty "$id" hangup "$console")" || return
+    ttys="$ttys $tty_nr"
+  done
 
-    # Before the signals, so that the login init starts after an old one ends
-    # finds it. If it can't be written, the next login goes ahead without
-    # waiting, which is better than leaving the programs running.
-    for console in "$@"; do
-        record "$console" hidden
-    done
+  # Before the signals, so that the login init starts after an old one ends
+  # finds it. If it can't be written, the next login goes ahead without
+  # waiting, which is better than leaving the programs running.
+  for console in "$@"; do
+    record "$console" hidden
+  done
 
-    pids="$(on_tty "$ttys")"
-    # CONT as well, for stopped jobs, which act on HUP only once they run.
-    if [ -n "$pids" ]; then
-        # shellcheck disable=SC2086
-        kill -HUP $pids 2>/dev/null
-        # shellcheck disable=SC2086
-        kill -CONT $pids 2>/dev/null
-    fi
-
-    # A login whose shell ignores SIGHUP keeps the session, so leaders still
-    # there after a second are killed. Only those signalled above: the login
-    # init starts in an old one's place must stay.
-    waited=0
-    leaders="$(signalled_leaders "$ttys" "$pids")"
-    while [ -n "$leaders" ] && [ "$waited" -lt 10 ]; do
-        sleep 0.1
-        waited=$((waited + 1))
-        leaders="$(signalled_leaders "$ttys" "$pids")"
-    done
-    killed=0
-    for pid in $leaders; do
-        kill -KILL "$pid" 2>/dev/null && killed=$((killed + 1))
-    done
-
-    # Again, now that the old logins are gone: one woken by a TTY just before
-    # this began may have written "shown" over the first.
-    for console in "$@"; do
-        record "$console" hidden
-    done
-
+  pids="$(on_tty "$ttys")"
+  # CONT as well, for stopped jobs, which act on HUP only once they run.
+  if [ -n "$pids" ]; then
     # shellcheck disable=SC2086
-    set -- $pids
-    echo "done $id $# $killed"
+    kill -HUP $pids 2>/dev/null
+    # shellcheck disable=SC2086
+    kill -CONT $pids 2>/dev/null
+  fi
+
+  # A login whose shell ignores SIGHUP keeps the session, so leaders still
+  # there after a second are killed. Only those signalled above: the login
+  # init starts in an old one's place must stay.
+  waited=0
+  leaders="$(signalled_leaders "$ttys" "$pids")"
+  while [ -n "$leaders" ] && [ "$waited" -lt 10 ]; do
+    sleep 0.1
+    waited=$((waited + 1))
+    leaders="$(signalled_leaders "$ttys" "$pids")"
+  done
+  killed=0
+  for pid in $leaders; do
+    kill -KILL "$pid" 2>/dev/null && killed=$((killed + 1))
+  done
+
+  # Again, now that the old logins are gone: one woken by a TTY just before
+  # this began may have written "shown" over the first.
+  for console in "$@"; do
+    record "$console" hidden
+  done
+
+  # shellcheck disable=SC2086
+  set -- $pids
+  echo "done $id $# $killed"
 }
 
 # Linux makes a port before QEMU has named it, so a look early in the boot can
@@ -374,27 +374,27 @@ hang_up() {
 # booted without the port (not by the app) costs a look a minute.
 tries=0
 until PORT="$(find_port)"; do
-    tries=$((tries + 1))
-    if [ "$tries" -lt 60 ]; then
-        sleep 1
-    else
-        [ "$tries" -eq 60 ] && echo "tctish-agent: no virtio-serial port named $NAME yet" >&2
-        sleep 60
-    fi
+  tries=$((tries + 1))
+  if [ "$tries" -lt 60 ]; then
+    sleep 1
+  else
+    [ "$tries" -eq 60 ] && echo "tctish-agent: no virtio-serial port named $NAME yet" >&2
+    sleep 60
+  fi
 done
 
 # Linux lets a port be open only once. Someone else has it open (cat on the
 # device, say): wait before init starts this again, rather than spin.
 if ! (: <>"$PORT") 2>/dev/null; then
-    echo "tctish-agent: $PORT is busy" >&2
-    sleep 10
-    exit 1
+  echo "tctish-agent: $PORT is busy" >&2
+  sleep 10
+  exit 1
 fi
 
 # Read and write on one descriptor.
 exec 3<>"$PORT"
 
-read -r BOOT_ID < /proc/sys/kernel/random/boot_id
+read -r BOOT_ID </proc/sys/kernel/random/boot_id
 
 # Waits for the app to connect, like every write here.
 echo "hello $BOOT_ID" >&3
@@ -403,25 +403,25 @@ echo "hello $BOOT_ID" >&3
 trap 'echo "bye $BOOT_ID" >&3; exit 0' TERM
 
 while :; do
-    while read -r request id arguments <&3; do
-        # The arguments as words; none contains a space.
-        # shellcheck disable=SC2086
-        set -- $arguments
+  while read -r request id arguments <&3; do
+    # The arguments as words; none contains a space.
+    # shellcheck disable=SC2086
+    set -- $arguments
 
-        case "$request" in
-            ping) echo "pong $id $BOOT_ID" ;;
-            time) set_time "$id" "${1:-}" ;;
-            zone) set_zone "$id" "${1:-}" ;;
-            sync) if sync; then echo "done $id"; else echo "error $id sync failed"; fi ;;
-            reclaim) reclaim "$id" "${1:-}" ;;
-            hangup) hang_up "$id" "$@" ;;
-            shown) shown "$id" "${1:-}" ;;
-            default-command) set_default_command "$id" "${1:-}" ;;
-            *) echo "error ${id:--} $request unknown" ;;
-        esac >&3
-    done
+    case "$request" in
+      ping) echo "pong $id $BOOT_ID" ;;
+      time) set_time "$id" "${1:-}" ;;
+      zone) set_zone "$id" "${1:-}" ;;
+      sync) if sync; then echo "done $id"; else echo "error $id sync failed"; fi ;;
+      reclaim) reclaim "$id" "${1:-}" ;;
+      hangup) hang_up "$id" "$@" ;;
+      shown) shown "$id" "${1:-}" ;;
+      default-command) set_default_command "$id" "${1:-}" ;;
+      *) echo "error ${id:--} $request unknown" ;;
+    esac >&3
+  done
 
-    # Reads end at once while nothing on the host is connected, which is what
-    # the loop above ending means. Wait for the app, rather than spin.
-    sleep 1
+  # Reads end at once while nothing on the host is connected, which is what
+  # the loop above ending means. Wait for the app, rather than spin.
+  sleep 1
 done

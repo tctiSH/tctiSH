@@ -1,24 +1,23 @@
 #!/bin/sh
 
 make_misc_dev() {
-	TARGET=$1
-	NAME=$2
+  TARGET=$1
+  NAME=$2
 
-	# Find the minor number for our device node...
-	MAJOR=10
-	MINOR=$(cat /proc/misc | grep $NAME | cut -d " "  -f 1)
+  # Find the minor number for our device node...
+  MAJOR=10
+  MINOR=$(cat /proc/misc | grep $NAME | cut -d " " -f 1)
 
-	# ... and create our node file.
-	mknod $TARGET c $MAJOR $MINOR
+  # ... and create our node file.
+  mknod $TARGET c $MAJOR $MINOR
 }
 
-
 # Set up our basic device environment.
-mount -t devtmpfs  none /dev
+mount -t devtmpfs none /dev
 mkdir -p /dev/pts
-mount -t devpts    none /dev/pts
-mount -t proc	   none /proc
-mount -t sysfs	   none /sys
+mount -t devpts none /dev/pts
+mount -t proc none /proc
+mount -t sysfs none /sys
 
 # Set up networking.
 ifconfig eth0 192.168.100.100
@@ -34,107 +33,107 @@ mount --bind / /var/tcti-rootfs/ro-root
 
 # Create our connection to our real filesystem contianer.
 if grep "tcti_disk=file" /proc/cmdline; then
-	# If we're using a file backend (e.g. for development), mount it.
-	#
-	# /dev/vda comes from devtmpfs, mounted above. This used to be a hand-rolled
-	# `mknod /dev/ios0 b 254 0`, which worked only because virtio-blk happened to
-	# land on major 254 -- the major is allocated dynamically at registration, so
-	# nothing guarantees it, and the failure mode is a device node pointing at
-	# nothing.
-	#
-	# The mkfs path should never run: empty.qcow ships with a made ext4 on it, so
-	# that a first launch does not pay for formatting 200 GiB under emulation.
-	# What follows is a safety net, and it is written to be safe in the direction
-	# that matters -- it will decline to format far more readily than it will
-	# destroy something.
-	#
-	# It used to test `[ $MOUNTSTAT == 255 ]`, which is not a status mount
-	# returns: busybox gives 1 on failure and util-linux gives 32. So the branch
-	# was dead, and a failed mount fell through silently -- the overlay's upper
-	# layer would end up on the initramfs tmpfs, the guest would look entirely
-	# normal, and every write would vanish at the next boot.
-	#
-	# The obvious repair, `-ne 0`, is worse than the bug: mount also fails for a
-	# dirty filesystem, for a feature this kernel does not implement, and for a
-	# transient device error. Formatting in response to any of those destroys the
-	# user's data to fix a problem they did not have.
-	#
-	# So the question asked is not "did the mount fail" but "is there anything
-	# there at all", which is what blkid answers.
-	#
-	# Its *output* is tested rather than its exit status, and that is not
-	# fussiness: blkid here is the busybox applet, which exits 0 whether or not it
-	# recognises anything. Checking the status instead makes every disk look
-	# occupied -- which fails safe, but turns a genuinely blank disk into a guest
-	# that silently never persists anything. Found by testing it.
-	#
-	# -o discard so that space the guest frees goes back to the phone as it is
-	# freed. Without it ext4 never reports a deleted block, and disk.qcow only
-	# ever grows: virtio-blk would carry the discard, and QEMU would punch the
-	# hole in the file (qemu_launcher.c opens the drive with discard=unmap), but
-	# nothing ever asks. It costs a discard per freed extent at commit, which a
-	# mass delete pays for in one go. A device that cannot discard only earns a
-	# warning from ext4, never a failed mount.
-	if ! mount -o discard /dev/vda /var/tcti-rootfs/rw-ios; then
-		if [ -n "$(blkid /dev/vda 2>/dev/null)" ]; then
-			echo "--------------------------------------------------------------------------"
-			echo "The persistent disk has a filesystem, but it could not be mounted."
-			echo ""
-			echo "Refusing to reformat it: the data is probably still there, and this"
-			echo "may just need an fsck. Changes made in this session will NOT persist."
-			echo "--------------------------------------------------------------------------"
-		else
-			echo "--------------------------------------------------------------------------"
-			echo "The persistent disk holds no filesystem. Creating one."
-			echo "--------------------------------------------------------------------------"
+  # If we're using a file backend (e.g. for development), mount it.
+  #
+  # /dev/vda comes from devtmpfs, mounted above. This used to be a hand-rolled
+  # `mknod /dev/ios0 b 254 0`, which worked only because virtio-blk happened to
+  # land on major 254 -- the major is allocated dynamically at registration, so
+  # nothing guarantees it, and the failure mode is a device node pointing at
+  # nothing.
+  #
+  # The mkfs path should never run: empty.qcow ships with a made ext4 on it, so
+  # that a first launch does not pay for formatting 200 GiB under emulation.
+  # What follows is a safety net, and it is written to be safe in the direction
+  # that matters -- it will decline to format far more readily than it will
+  # destroy something.
+  #
+  # It used to test `[ $MOUNTSTAT == 255 ]`, which is not a status mount
+  # returns: busybox gives 1 on failure and util-linux gives 32. So the branch
+  # was dead, and a failed mount fell through silently -- the overlay's upper
+  # layer would end up on the initramfs tmpfs, the guest would look entirely
+  # normal, and every write would vanish at the next boot.
+  #
+  # The obvious repair, `-ne 0`, is worse than the bug: mount also fails for a
+  # dirty filesystem, for a feature this kernel does not implement, and for a
+  # transient device error. Formatting in response to any of those destroys the
+  # user's data to fix a problem they did not have.
+  #
+  # So the question asked is not "did the mount fail" but "is there anything
+  # there at all", which is what blkid answers.
+  #
+  # Its *output* is tested rather than its exit status, and that is not
+  # fussiness: blkid here is the busybox applet, which exits 0 whether or not it
+  # recognises anything. Checking the status instead makes every disk look
+  # occupied -- which fails safe, but turns a genuinely blank disk into a guest
+  # that silently never persists anything. Found by testing it.
+  #
+  # -o discard so that space the guest frees goes back to the phone as it is
+  # freed. Without it ext4 never reports a deleted block, and disk.qcow only
+  # ever grows: virtio-blk would carry the discard, and QEMU would punch the
+  # hole in the file (qemu_launcher.c opens the drive with discard=unmap), but
+  # nothing ever asks. It costs a discard per freed extent at commit, which a
+  # mass delete pays for in one go. A device that cannot discard only earns a
+  # warning from ext4, never a failed mount.
+  if ! mount -o discard /dev/vda /var/tcti-rootfs/rw-ios; then
+    if [ -n "$(blkid /dev/vda 2>/dev/null)" ]; then
+      echo "--------------------------------------------------------------------------"
+      echo "The persistent disk has a filesystem, but it could not be mounted."
+      echo ""
+      echo "Refusing to reformat it: the data is probably still there, and this"
+      echo "may just need an fsck. Changes made in this session will NOT persist."
+      echo "--------------------------------------------------------------------------"
+    else
+      echo "--------------------------------------------------------------------------"
+      echo "The persistent disk holds no filesystem. Creating one."
+      echo "--------------------------------------------------------------------------"
 
-			mkfs.ext4 /dev/vda
+      mkfs.ext4 /dev/vda
 
-			if mount -o discard /dev/vda /var/tcti-rootfs/rw-ios; then
-				echo "Persistent disk created and mounted."
-			else
-				echo "----------------------------------------------------------------------"
-				echo "The disk was formatted but still will not mount. Changes made in this"
-				echo "session will NOT persist."
-				echo "----------------------------------------------------------------------"
-			fi
-		fi
-	fi
+      if mount -o discard /dev/vda /var/tcti-rootfs/rw-ios; then
+        echo "Persistent disk created and mounted."
+      else
+        echo "----------------------------------------------------------------------"
+        echo "The disk was formatted but still will not mount. Changes made in this"
+        echo "session will NOT persist."
+        echo "----------------------------------------------------------------------"
+      fi
+    fi
+  fi
 
-	# Trim once per cold boot, in the background:
-	#
-	#   - Everything a disk freed before it was mounted with -o discard.
-	#   - Partial clusters. QEMU only frees a qcow2 cluster (64 KiB) when the
-	#     whole of it is discarded, so a 4 KiB delete inside a live cluster is
-	#     dropped, and online discard never revisits it once its neighbors go too.
-	#     fstrim walks free extents, so it sends them whole.
-	#
-	# From here because the mount is outside the chroot: it is not in the
-	# guest's mount table, so nothing inside would ever think to trim it.
-	# Resuming a saved session skips this script, but a resumed guest has
-	# already mounted with discard: this script is in initrd.img, which the
-	# snapshot epoch digests, so no session saved under an older init resumes.
-	#
-	# Backgrounded and niced, since it walks every block group under emulation
-	# and the boot should not wait for that. It survives the exec below as a child
-	# of PID 1, which busybox init reaps. Its report goes to the kernel log, so
-	# `dmesg` shows what it reclaimed and when it finished.
-	#
-	# /sbin/fstrim by path because nice does the lookup, not the shell: the
-	# kernel starts init with no PATH, and nice's execvp then falls back to
-	# libc's default of /bin:/usr/bin, which misses /sbin. The shell has a
-	# default that includes it, which is why nothing else here
-	# needs a path.
-	if mountpoint -q /var/tcti-rootfs/rw-ios; then
-		nice -n 19 /sbin/fstrim -v /var/tcti-rootfs/rw-ios >/dev/kmsg 2>&1 &
-	fi
+  # Trim once per cold boot, in the background:
+  #
+  #   - Everything a disk freed before it was mounted with -o discard.
+  #   - Partial clusters. QEMU only frees a qcow2 cluster (64 KiB) when the
+  #     whole of it is discarded, so a 4 KiB delete inside a live cluster is
+  #     dropped, and online discard never revisits it once its neighbors go too.
+  #     fstrim walks free extents, so it sends them whole.
+  #
+  # From here because the mount is outside the chroot: it is not in the
+  # guest's mount table, so nothing inside would ever think to trim it.
+  # Resuming a saved session skips this script, but a resumed guest has
+  # already mounted with discard: this script is in initrd.img, which the
+  # snapshot epoch digests, so no session saved under an older init resumes.
+  #
+  # Backgrounded and niced, since it walks every block group under emulation
+  # and the boot should not wait for that. It survives the exec below as a child
+  # of PID 1, which busybox init reaps. Its report goes to the kernel log, so
+  # `dmesg` shows what it reclaimed and when it finished.
+  #
+  # /sbin/fstrim by path because nice does the lookup, not the shell: the
+  # kernel starts init with no PATH, and nice's execvp then falls back to
+  # libc's default of /bin:/usr/bin, which misses /sbin. The shell has a
+  # default that includes it, which is why nothing else here
+  # needs a path.
+  if mountpoint -q /var/tcti-rootfs/rw-ios; then
+    nice -n 19 /sbin/fstrim -v /var/tcti-rootfs/rw-ios >/dev/kmsg 2>&1 &
+  fi
 
 else
-	echo "--------------DISK BACKEND NOT YET IMPLEMENTED!--------------"
-	echo ""
-	echo "Dropping you into an environment where changes will not persist."
-	echo ""
-	echo "-------------------------------------------------------------"
+  echo "--------------DISK BACKEND NOT YET IMPLEMENTED!--------------"
+  echo ""
+  echo "Dropping you into an environment where changes will not persist."
+  echo ""
+  echo "-------------------------------------------------------------"
 fi
 
 # Create a home directory for root.
@@ -178,69 +177,69 @@ chmod 700 /var/tcti-rootfs/rw-ios/userroot/root
 USERROOT=/var/tcti-rootfs/rw-ios/userroot
 INITTAB="$USERROOT/etc/inittab"
 if [ -c "$INITTAB" ]; then
-	rm -f "$INITTAB"
+  rm -f "$INITTAB"
 elif [ -f "$INITTAB" ] && ! { grep -q '^[^#]*tctish-login' "$INITTAB" &&
-	grep -q '^[^#]*tctish-agent' "$INITTAB"; }; then
-	ASIDE="$INITTAB.before-console"
-	n=1
-	while [ -e "$ASIDE" ]; do
-		ASIDE="$INITTAB.before-console.$n"
-		n=$((n + 1))
-	done
-	mv "$INITTAB" "$ASIDE"
+  grep -q '^[^#]*tctish-agent' "$INITTAB"; }; then
+  ASIDE="$INITTAB.before-console"
+  n=1
+  while [ -e "$ASIDE" ]; do
+    ASIDE="$INITTAB.before-console.$n"
+    n=$((n + 1))
+  done
+  mv "$INITTAB" "$ASIDE"
 
-	ASIDE="/etc/${ASIDE##*/}"
-	echo "tctish: moved /etc/inittab to $ASIDE, as it would hide the console" >/dev/kmsg
+  ASIDE="/etc/${ASIDE##*/}"
+  echo "tctish: moved /etc/inittab to $ASIDE, as it would hide the console" >/dev/kmsg
 
-	# Said once, at the next login, by a script that then removes itself.
-	mkdir -p "$USERROOT/etc/profile.d"
-	cat >"$USERROOT/etc/profile.d/tctish-inittab-notice.sh" <<-EOF
+  # Said once, at the next login, by a script that then removes itself.
+  mkdir -p "$USERROOT/etc/profile.d"
+  cat >"$USERROOT/etc/profile.d/tctish-inittab-notice.sh" <<-EOF
 		echo "tctiSH: your /etc/inittab didn't start this terminal, so it is now $ASIDE."
 		echo "Copy any changes you made to it into /etc/inittab."
 		echo
 		rm -f /etc/profile.d/tctish-inittab-notice.sh
 	EOF
 elif [ -f "$INITTAB" ] && grep -qxE 'ttyS0::respawn:/bin/busybox login -f root|::respawn:/usr/bin/tctish-(powerbtn|agent)|::respawn:/sbin/syslogd -n -S -s 12 -b 8' "$INITTAB"; then
-	sed -i \
-		-e 's|^ttyS0::respawn:/bin/busybox login -f root$|ttyS0::respawn:/usr/bin/tctish-login|' \
-		-e 's|^::respawn:/usr/bin/tctish-powerbtn$|kmsg::respawn:/usr/bin/tctish-powerbtn|' \
-		-e 's|^::respawn:/usr/bin/tctish-agent$|kmsg::respawn:/usr/bin/tctish-agent|' \
-		-e 's|^::respawn:/sbin/syslogd -n -S -s 12 -b 8$|kmsg::respawn:/sbin/syslogd -n -S -s 12 -b 8|' \
-		"$INITTAB"
-	echo "tctish: brought /etc/inittab's lines from before Kernel Log up to date" >/dev/kmsg
+  sed -i \
+    -e 's|^ttyS0::respawn:/bin/busybox login -f root$|ttyS0::respawn:/usr/bin/tctish-login|' \
+    -e 's|^::respawn:/usr/bin/tctish-powerbtn$|kmsg::respawn:/usr/bin/tctish-powerbtn|' \
+    -e 's|^::respawn:/usr/bin/tctish-agent$|kmsg::respawn:/usr/bin/tctish-agent|' \
+    -e 's|^::respawn:/sbin/syslogd -n -S -s 12 -b 8$|kmsg::respawn:/sbin/syslogd -n -S -s 12 -b 8|' \
+    "$INITTAB"
+  echo "tctish: brought /etc/inittab's lines from before Kernel Log up to date" >/dev/kmsg
 fi
 # Trailing spaces and a CR, as an editor may leave, are allowed after hvc0's line.
 if [ -f "$INITTAB" ] && grep -qxE 'hvc0::respawn:/usr/bin/tctish-login[[:space:]]*' "$INITTAB" &&
-	! grep -q 'tctish-login hvc' "$INITTAB"; then
-	awk '{ print }
+  ! grep -q 'tctish-login hvc' "$INITTAB"; then
+  awk '{ print }
 		/^hvc0::respawn:\/usr\/bin\/tctish-login[[:space:]]*$/ {
 			for (n = 1; n <= 11; n++) print "kmsg::respawn:/usr/bin/tctish-login hvc" n
 		}' "$INITTAB" >"$INITTAB.tctish" && mv "$INITTAB.tctish" "$INITTAB" &&
-		echo "tctish: added the logins on hvc1 to hvc11 to /etc/inittab" >/dev/kmsg
-	rm -f "$INITTAB.tctish"
+    echo "tctish: added the logins on hvc1 to hvc11 to /etc/inittab" >/dev/kmsg
+  rm -f "$INITTAB.tctish"
 fi
 
 CONSOLE_STAMP=/var/tcti-rootfs/rw-ios/.tctish-ssh-removed
 if [ ! -e "$CONSOLE_STAMP" ]; then
-	MIGRATED=1
-	if [ -f "$USERROOT/etc/apk/world" ]; then
-		sed -i '/^dropbear$/d' "$USERROOT/etc/apk/world" || MIGRATED=
-	fi
+  MIGRATED=1
+  if [ -f "$USERROOT/etc/apk/world" ]; then
+    sed -i '/^dropbear$/d' "$USERROOT/etc/apk/world" || MIGRATED=
+  fi
 
-	KEYS="$USERROOT/root/.ssh/authorized_keys"
-	PLACEHOLDER='ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDeeHEUBy1ijDajh7rrxvNn94Z01kq0Ys[^ ]* ktemkin@aigis.ktemk.in'
-	if [ -f "$KEYS" ] && grep -qx "$PLACEHOLDER" "$KEYS"; then
-		sed -i "/^$PLACEHOLDER\$/d" "$KEYS" || MIGRATED=
-		if [ ! -s "$KEYS" ]; then
-			rm -f "$KEYS"
-			rmdir "$USERROOT/root/.ssh" 2>/dev/null
-		fi
-	fi
+  KEYS="$USERROOT/root/.ssh/authorized_keys"
+  PLACEHOLDER='ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDeeHEUBy1ijDajh7rrxvNn94Z01kq0Ys[^ ]* ktemkin@aigis.ktemk.in'
+  if [ -f "$KEYS" ] && grep -qx "$PLACEHOLDER" "$KEYS"; then
+    sed -i "/^$PLACEHOLDER\$/d" "$KEYS" || MIGRATED=
+    if [ ! -s "$KEYS" ]; then
+      rm -f "$KEYS"
+      rmdir "$USERROOT/root/.ssh" 2>/dev/null
+    fi
+  fi
 
-	rm -f "$USERROOT"/etc/dropbear/dropbear_*_host_key || MIGRATED=
-	rmdir "$USERROOT/etc/dropbear" 2>/dev/null
+  rm -f "$USERROOT"/etc/dropbear/dropbear_*_host_key || MIGRATED=
+  rmdir "$USERROOT/etc/dropbear" 2>/dev/null
 
-	[ -n "$MIGRATED" ] && touch "$CONSOLE_STAMP"
+  [ -n "$MIGRATED" ] && touch "$CONSOLE_STAMP"
 fi
 
 # The image has /bin, /sbin and /lib merged into /usr: each is a link to its
@@ -263,50 +262,50 @@ fi
 # merge had failed.
 USRLINKED=
 for dir in usr usr/bin usr/sbin usr/lib; do
-	[ -L "$USERROOT/$dir" ] && USRLINKED=1
+  [ -L "$USERROOT/$dir" ] && USRLINKED=1
 done
 
 UNMERGED=
 for dir in bin sbin lib; do
-	if [ -d "$USERROOT/$dir" ] && [ ! -L "$USERROOT/$dir" ]; then
-		UNMERGED="$UNMERGED /$dir"
-	fi
+  if [ -d "$USERROOT/$dir" ] && [ ! -L "$USERROOT/$dir" ]; then
+    UNMERGED="$UNMERGED /$dir"
+  fi
 done
 if [ -n "$UNMERGED" ]; then
-	mkdir -p "$USERROOT/var/log"
-	MERGELOG="$USERROOT/var/log/tctish-merge-usr.log"
-	[ -n "$USRLINKED" ] && echo "not merged: the disk's /usr, or a directory in it, is a link" >"$MERGELOG"
-	if [ -z "$USRLINKED" ] && /usr/bin/merge-usr --root "$USERROOT" >"$MERGELOG" 2>&1; then
-		echo "tctish: merged the disk's$UNMERGED into /usr, as the image is" >/dev/kmsg
-		NOTICE="merged$UNMERGED on your disk into /usr, as Alpine now has them"
-	else
-		echo "tctish: couldn't merge the disk's$UNMERGED into /usr; setting them aside" >/dev/kmsg
-		NOTICE="couldn't merge$UNMERGED on your disk into /usr, so set them aside"
-		for dir in $UNMERGED; do
-			if [ -d "$USERROOT$dir" ] && [ ! -L "$USERROOT$dir" ]; then
-				mv "$USERROOT$dir" "$USERROOT$dir.unmerged-failed"
-			fi
-		done
-	fi
+  mkdir -p "$USERROOT/var/log"
+  MERGELOG="$USERROOT/var/log/tctish-merge-usr.log"
+  [ -n "$USRLINKED" ] && echo "not merged: the disk's /usr, or a directory in it, is a link" >"$MERGELOG"
+  if [ -z "$USRLINKED" ] && /usr/bin/merge-usr --root "$USERROOT" >"$MERGELOG" 2>&1; then
+    echo "tctish: merged the disk's$UNMERGED into /usr, as the image is" >/dev/kmsg
+    NOTICE="merged$UNMERGED on your disk into /usr, as Alpine now has them"
+  else
+    echo "tctish: couldn't merge the disk's$UNMERGED into /usr; setting them aside" >/dev/kmsg
+    NOTICE="couldn't merge$UNMERGED on your disk into /usr, so set them aside"
+    for dir in $UNMERGED; do
+      if [ -d "$USERROOT$dir" ] && [ ! -L "$USERROOT$dir" ]; then
+        mv "$USERROOT$dir" "$USERROOT$dir.unmerged-failed"
+      fi
+    done
+  fi
 
-	ASIDE=
-	for dir in bin sbin lib; do
-		if [ -e "${USERROOT}$dir.unmerged" ]; then
-			TO="/$dir.unmerged"
-			n=1
-			while [ -e "$USERROOT$TO" ]; do
-				TO="/$dir.unmerged.$n"
-				n=$((n + 1))
-			done
-			mv "${USERROOT}$dir.unmerged" "$USERROOT$TO"
-			ASIDE="$ASIDE $TO"
-		fi
-	done
-	[ -n "$ASIDE" ] && NOTICE="$NOTICE. Files that were there twice are in$ASIDE"
+  ASIDE=
+  for dir in bin sbin lib; do
+    if [ -e "${USERROOT}$dir.unmerged" ]; then
+      TO="/$dir.unmerged"
+      n=1
+      while [ -e "$USERROOT$TO" ]; do
+        TO="/$dir.unmerged.$n"
+        n=$((n + 1))
+      done
+      mv "${USERROOT}$dir.unmerged" "$USERROOT$TO"
+      ASIDE="$ASIDE $TO"
+    fi
+  done
+  [ -n "$ASIDE" ] && NOTICE="$NOTICE. Files that were there twice are in$ASIDE"
 
-	# Said once, at the next login, by a script that then removes itself.
-	mkdir -p "$USERROOT/etc/profile.d"
-	cat >"$USERROOT/etc/profile.d/tctish-merge-notice.sh" <<-EOF
+  # Said once, at the next login, by a script that then removes itself.
+  mkdir -p "$USERROOT/etc/profile.d"
+  cat >"$USERROOT/etc/profile.d/tctish-merge-notice.sh" <<-EOF
 		echo "tctiSH: $NOTICE. The details are in /var/log/tctish-merge-usr.log."
 		echo
 		rm -f /etc/profile.d/tctish-merge-notice.sh
@@ -321,25 +320,24 @@ fi
 # hides the image's copy just as well, and logs each to the kernel log. Only
 # /usr/bin is checked: the merge above has left /bin a link to it.
 for tool in "$USERROOT"/usr/bin/tctictl "$USERROOT"/usr/bin/tctish-* "$USERROOT"/usr/bin/mount.ios; do
-	[ -z "$USRLINKED" ] || break
-	if [ -e "$tool" ] || [ -L "$tool" ]; then
-		rm -f "$tool" &&
-			echo "tctish: removed the disk's copy of ${tool#"$USERROOT"}, which hid tctiSH's" >/dev/kmsg
-	fi
+  [ -z "$USRLINKED" ] || break
+  if [ -e "$tool" ] || [ -L "$tool" ]; then
+    rm -f "$tool" &&
+      echo "tctish: removed the disk's copy of ${tool#"$USERROOT"}, which hid tctiSH's" >/dev/kmsg
+  fi
 done
-
 
 # ... and finally, mount together our union.
 mkdir -p /var/tcti-rootfs/rw-ios/work
 mkdir -p /var/tcti-rootfs/rw-ios/userroot
 mount -t overlay overlay \
-	-o lowerdir=/var/tcti-rootfs/ro-root,upperdir=/var/tcti-rootfs/rw-ios/userroot,workdir=/var/tcti-rootfs/rw-ios/work \
-	/var/tcti-rootfs/rw-union
+  -o lowerdir=/var/tcti-rootfs/ro-root,upperdir=/var/tcti-rootfs/rw-ios/userroot,workdir=/var/tcti-rootfs/rw-ios/work \
+  /var/tcti-rootfs/rw-union
 
 # Splork our procfs and sysfs into our new root.
-mount -t proc		none /var/tcti-rootfs/rw-union/proc
-mount -t sysfs		none /var/tcti-rootfs/rw-union/sys
-mount -t devtmpfs	none /var/tcti-rootfs/rw-union/dev
+mount -t proc none /var/tcti-rootfs/rw-union/proc
+mount -t sysfs none /var/tcti-rootfs/rw-union/sys
+mount -t devtmpfs none /var/tcti-rootfs/rw-union/dev
 
 # The pseudo-filesystems the 6.18 kernel's new capabilities are reached through.
 # None of these costs anything at runtime -- they are virtual, with no threads,
@@ -358,9 +356,9 @@ mount -t devtmpfs	none /var/tcti-rootfs/rw-union/dev
 #   debugfs     0700 because it exposes a great deal of kernel internals. Some
 #               older tooling still reaches tracing through it rather than
 #               through tracefs.
-mount -t tracefs    none /var/tcti-rootfs/rw-union/sys/kernel/tracing
-mount -t bpf        none /var/tcti-rootfs/rw-union/sys/fs/bpf
-mount -t cgroup2    none /var/tcti-rootfs/rw-union/sys/fs/cgroup
+mount -t tracefs none /var/tcti-rootfs/rw-union/sys/kernel/tracing
+mount -t bpf none /var/tcti-rootfs/rw-union/sys/fs/bpf
+mount -t cgroup2 none /var/tcti-rootfs/rw-union/sys/fs/cgroup
 mount -t securityfs none /var/tcti-rootfs/rw-union/sys/kernel/security
 mount -t debugfs -o mode=700 none /var/tcti-rootfs/rw-union/sys/kernel/debug
 
@@ -395,8 +393,8 @@ echo 1 >/proc/sys/vm/overcommit_memory
 # Emulation hack: replace our random and urandom devices with a direct call
 # up to the _host_'s version of these files, since the host has more entropy.
 rm \
-	/var/tcti-rootfs/rw-union/dev/random  \
-	/var/tcti-rootfs/rw-union/dev/urandom
+  /var/tcti-rootfs/rw-union/dev/random \
+  /var/tcti-rootfs/rw-union/dev/urandom
 make_misc_dev /var/tcti-rootfs/rw-union/dev/random hw_random
 make_misc_dev /var/tcti-rootfs/rw-union/dev/urandom hw_random
 
