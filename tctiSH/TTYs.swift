@@ -197,16 +197,28 @@ final class TTYWindow {
     }
 
     /// The window's name, in App Exposé, the window list and Move Terminal to:
-    /// the selected TTY's, then how many others the window has.
+    /// the selected TTY's, then how many other user TTYs the window has, then
+    /// the system TTYs shown in its switcher, by name, or as System Terminals
+    /// for both: "Default (and 2 Other Terminals and Kernel Log)".
     var title: String {
-        // Never negative: a window that has just emptied is asked as it closes.
-        let others = max(ordered.count - 1, 0)
-        let name = selected.name
-        return switch others {
-        case 0: name
-        case 1: "\(name) (and 1 Other Terminal)"
-        default: "\(name) (and \(others) Other Terminals)"
+        let others = users.filter { $0 !== selected }.count
+        // Only those shown in the switcher are in the window.
+        let system = system.filter { $0 !== selected }
+
+        var also: [String] = []
+        switch others {
+        case 0: break
+        case 1: also.append("1 Other Terminal")
+        default: also.append("\(others) Other Terminals")
         }
+        switch system.count {
+        case 0: break
+        case 1: also.append(system[0].name)
+        default: also.append("System Terminals")
+        }
+
+        let name = selected.name
+        return also.isEmpty ? name : "\(name) (and \(also.joined(separator: " and ")))"
     }
 
     /// Whether any TTY in the window, other than the selected one, has rung the

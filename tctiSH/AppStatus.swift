@@ -130,6 +130,7 @@ final class AppStatus: NSObject {
         ChardevTransport.vmManagement.start()
         GuestAgent.shared.start()
         GuestClock.shared.start()
+        DefaultCommand.shared.start()
 
         // These stack rather than take turns, so both are on screen together. Order here is
         // stacking order: the JIT verdict on top, where it reads first and then leaves after a few

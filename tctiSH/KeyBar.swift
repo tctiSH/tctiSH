@@ -115,11 +115,11 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
     /// TTYs; see `SwitcherButton`.
     let switcher = SwitcherButton()
 
-    private let leading = KeyBar.makeCapsule()
-    private let trailing = KeyBar.makeCapsule()
+    private let leading = GlassCapsule()
+    private let trailing = GlassCapsule()
 
     /// The left rail's capsule, holding pinned keys.
-    private let leftRail = KeyBar.makeCapsule()
+    private let leftRail = GlassCapsule()
 
     private let more = MoreButton(configuration: .plain())
     private let dismiss = UIButton(configuration: .plain())
@@ -300,7 +300,8 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
         autoresizingMask = .flexibleHeight
         backgroundColor = .clear
 
-        // It floats over the terminal rather than the system's chrome, and the terminal is dark.
+        // Styled for the terminal it floats over, rather than for the system: dark until
+        // ViewController matches it to the theme.
         overrideUserInterfaceStyle = .dark
 
         // The keyboard's window, which the bar is in, doesn't take the app's tint, so the bar takes
@@ -361,18 +362,14 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
         fatalError("init(coder:) is not used; this bar is built in code")
     }
 
-    /// A capsule of glass, or of frosted material before iOS 26.
-    static func makeCapsule() -> UIVisualEffectView {
-        if #available(iOS 26.0, *) {
-            let capsule = UIVisualEffectView(effect: UIGlassEffect())
-            capsule.cornerConfiguration = .capsule()
-            return capsule
+    /// The tint of the bar's glass, matched to the terminal's theme.
+    var glassTint: UIColor? {
+        get { leading.tint }
+        set {
+            for capsule in [leading, trailing, leftRail] {
+                capsule.tint = newValue
+            }
         }
-
-        let capsule = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
-        capsule.layer.cornerCurve = .continuous
-        capsule.clipsToBounds = true
-        return capsule
     }
 
     private static func style(_ button: UIButton, symbol: String, label: String) {
@@ -390,18 +387,25 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
     /// each button's is shaped to whatever it shows, so an icon, a label and
     /// the arrow pad each get a different one.
     fileprivate static func hoverStyle(for view: UIView) -> UIPointerStyle {
-        let rect = view.frame.insetBy(dx: hoverInset, dy: hoverInset)
-        let side = min(rect.width, rect.height)
-        let circle = CGRect(
-            x: rect.midX - side / 2, y: rect.midY - side / 2, width: side, height: side)
+        let circle = hoverCircle(in: view.frame)
         return UIPointerStyle(
             effect: .highlight(UITargetedPreview(view: view)),
-            shape: .roundedRect(circle, radius: side / 2))
+            shape: .roundedRect(circle, radius: circle.width / 2))
+    }
+
+    /// The circle the pointer becomes over a button with `frame`.
+    fileprivate static func hoverCircle(in frame: CGRect) -> CGRect {
+        let rect = frame.insetBy(dx: hoverInset, dy: hoverInset)
+        let side = min(rect.width, rect.height)
+        return CGRect(x: rect.midX - side / 2, y: rect.midY - side / 2, width: side, height: side)
     }
 
     static func hover(_ button: UIButton) {
         button.isPointerInteractionEnabled = true
         button.pointerStyleProvider = { button, _, _ in hoverStyle(for: button) }
+        button.addGestureRecognizer(
+            UIHoverGestureRecognizer(target: HoverShade.self, action: #selector(HoverShade.hovered))
+        )
     }
 
     // MARK: Sizing
@@ -1872,5 +1876,36 @@ private final class ArrowPad: UIButton {
         let timer = Timer(timeInterval: interval, repeats: true) { _ in fire() }
         RunLoop.main.add(timer, forMode: .common)
         repeatTimer = timer
+    }
+}
+
+/// A faint shade over a button while the pointer is on it, in the circle the
+/// pointer becomes, on light glass only. The pointer's highlight lightens what
+/// it's over, which shows on dark glass but barely on light.
+private final class HoverShade: UIView {
+
+    private static let opacity: CGFloat = 0.08
+
+    @objc static func hovered(_ hover: UIHoverGestureRecognizer) {
+        guard let button = hover.view else { return }
+        let shade =
+            button.subviews.lazy.compactMap { $0 as? HoverShade }.first
+            ?? {
+                let shade = HoverShade()
+                shade.isUserInteractionEnabled = false
+                shade.backgroundColor = .black
+                shade.alpha = 0
+                button.insertSubview(shade, at: 0)
+                return shade
+            }()
+
+        let on = hover.state == .began || hover.state == .changed
+        let shown = on && button.traitCollection.userInterfaceStyle == .light
+        let circle = KeyBar.hoverCircle(in: button.bounds)
+        shade.frame = circle
+        shade.layer.cornerRadius = circle.width / 2
+        UIView.animate(withDuration: 0.15, delay: 0, options: [.beginFromCurrentState]) {
+            shade.alpha = shown ? opacity : 0
+        }
     }
 }

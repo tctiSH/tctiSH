@@ -175,6 +175,11 @@ final class TTYCardCell: UICollectionViewCell {
     /// context menu, the lifted view is clipped to the cell's bounds.
     static let ringOutset: CGFloat = 5
 
+    /// The picture's faint edge.
+    private static let edge = UIColor { traits in
+        UIColor(white: traits.userInterfaceStyle == .dark ? 1 : 0, alpha: 0.15)
+    }
+
     /// Called by the close button and the Close accessibility action. The
     /// switcher sets it to ask for confirmation, then close the TTY.
     var close: () -> Void = {}
@@ -214,7 +219,11 @@ final class TTYCardCell: UICollectionViewCell {
         thumbnail.layer.cornerRadius = Self.cornerRadius
         thumbnail.layer.cornerCurve = .continuous
         thumbnail.layer.borderWidth = 1
-        thumbnail.layer.borderColor = UIColor.white.withAlphaComponent(0.15).cgColor
+        thumbnail.layer.borderColor = Self.edge.resolvedColor(with: traitCollection).cgColor
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (cell: Self, _) in
+            cell.thumbnail.layer.borderColor =
+                Self.edge.resolvedColor(with: cell.traitCollection).cgColor
+        }
         body.addSubview(thumbnail)
 
         hoverOverlay.layer.cornerRadius = Self.cornerRadius
@@ -350,9 +359,16 @@ final class TTYPillCell: UICollectionViewCell {
 
     /// The color behind the pill, which shows through its translucent fill and
     /// from which the hover overlay is computed.
-    var surface: UIColor = .black
+    var surface: UIColor = .black {
+        didSet { background.backgroundColor = fillColor.withAlphaComponent(Self.fill) }
+    }
 
     private static let fill = 0.12
+
+    /// What the fill tints the surface with.
+    private var fillColor: UIColor {
+        TerminalTheme.interfaceStyle(over: surface) == .dark ? .white : .black
+    }
 
     private let background = UIView()
     private let hoverOverlay = UIView()
@@ -363,11 +379,11 @@ final class TTYPillCell: UICollectionViewCell {
     override init(frame: CGRect) {
         super.init(frame: frame)
         hover = HoverResponse(cell: self, overlay: hoverOverlay, scale: 1.04) {
-            [unowned self] in SwitcherBackground.blend(.white, alpha: Self.fill, over: surface)
+            [unowned self] in ColorMath.blend(fillColor, alpha: Self.fill, over: surface)
         }
         let body = hover.body
 
-        background.backgroundColor = UIColor.white.withAlphaComponent(Self.fill)
+        background.backgroundColor = fillColor.withAlphaComponent(Self.fill)
         background.layer.cornerCurve = .continuous
         body.addSubview(background)
 

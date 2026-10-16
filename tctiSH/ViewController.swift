@@ -129,6 +129,17 @@ class ViewController: UIViewController {
     /// Whether the follow button is shown or fading in.
     private var followButtonShown = false
 
+    /// The style of the bars and buttons over the terminal, and of the status
+    /// bar: dark over a dark theme, light over a light one.
+    private var overlayStyle = UIUserInterfaceStyle.dark
+
+    /// The tint of the glass of the bars and buttons over the terminal.
+    private var glassTint: UIColor?
+
+    override var preferredStatusBarStyle: UIStatusBarStyle {
+        overlayStyle == .light ? .darkContent : .lightContent
+    }
+
     /// Whether the floating switcher button is shown or fading in.
     private var floatingSwitcherShown = false
 
@@ -196,10 +207,29 @@ class ViewController: UIViewController {
 
         // The window's pills. The first presenter to attach also starts the app's reporting; see
         // `AppStatus.attach`.
-        let status = StatusPresenter(over: view, backdrop: currentTerminal.nativeBackgroundColor)
+        let status = StatusPresenter(over: view) { [weak self] in
+            self?.terminal.nativeBackgroundColor ?? .black
+        }
         status.keepsClearOf = followButton
         self.status = status
         AppStatus.shared.attach(status)
+
+        applyTheme()
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(applyTheme), name: TerminalThemes.didChange, object: nil)
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
+            (controller: ViewController, _) in
+            controller.applyTheme()
+            TerminalThemes.appearanceChanged()
+        }
+        // The glass's tint follows Increase Contrast and Reduce Transparency.
+        for name in [
+            UIAccessibility.darkerSystemColorsStatusDidChangeNotification,
+            UIAccessibility.reduceTransparencyStatusDidChangeNotification,
+        ] {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(applyTheme), name: name, object: nil)
+        }
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -533,6 +563,12 @@ extension ViewController {
             command.state = command.propertyList as? Int == Vcpus.foreground ? .on : .off
         case #selector(toggleKeepScreenAwake(_:)):
             command.state = AppSetting.keepScreenAwake.bool ? .on : .off
+        case #selector(setDarkTheme(_:)):
+            let id = command.propertyList as? String
+            command.state = id == TerminalThemes.selected(for: .dark).id ? .on : .off
+        case #selector(setLightTheme(_:)):
+            let id = command.propertyList as? String
+            command.state = id == TerminalThemes.selected(for: .light).id ? .on : .off
         default:
             break
         }
@@ -1201,6 +1237,8 @@ extension ViewController {
         closeFindBar(refocus: false)
 
         let bar = FindBar()
+        bar.overrideUserInterfaceStyle = overlayStyle
+        bar.glassTint = glassTint
         bar.terminal = terminal
         bar.close = { [weak self] in self?.closeFindBar(refocus: true) }
         findBar = bar
@@ -1494,6 +1532,18 @@ extension ViewController {
         Vcpus.foreground = count
     }
 
+    /// View > Dark Theme, as Settings > Appearance sets it.
+    @objc func setDarkTheme(_ sender: UICommand) {
+        guard let id = sender.propertyList as? String else { return }
+        TerminalThemes.select(id, for: .dark)
+    }
+
+    /// View > Light Theme, as Settings > Appearance sets it.
+    @objc func setLightTheme(_ sender: UICommand) {
+        guard let id = sender.propertyList as? String else { return }
+        TerminalThemes.select(id, for: .light)
+    }
+
     @objc func toggleKeepScreenAwake(_ sender: Any?) {
         AppSetting.keepScreenAwake.set(!AppSetting.keepScreenAwake.bool)
         ScreenAwake.apply()
@@ -1547,5 +1597,34 @@ extension ViewController: UIDropInteractionDelegate {
     func dropInteraction(_ interaction: UIDropInteraction, performDrop session: UIDropSession) {
         guard let tty = foreignTTY(in: session) else { return }
         TTYs.shared.move(tty, to: ttyWindow)
+    }
+}
+
+// MARK: - Theme
+
+extension ViewController {
+
+    /// Dresses what's around and over the terminal for the theme in use: the
+    /// margin around it, the status bar, and the bars and buttons over it,
+    /// whose glass is tinted as `OverlayGlass` works out.
+    @objc fileprivate func applyTheme() {
+        let theme = TerminalThemes.selected(for: TerminalThemes.Appearance(of: view))
+        view.backgroundColor = theme.background.uiColor
+
+        let style = theme.interfaceStyle
+        let overlays: [UIView?] = [keyBar, keyBar?.rails, followButton, floatingSwitcher, findBar]
+        for overlay in overlays {
+            overlay?.overrideUserInterfaceStyle = style
+        }
+
+        glassTint = OverlayGlass.tint(for: theme)
+        keyBar?.glassTint = glassTint
+        followButton.glassTint = glassTint
+        floatingSwitcher.glassTint = glassTint
+        findBar?.glassTint = glassTint
+        if style != overlayStyle {
+            overlayStyle = style
+            setNeedsStatusBarAppearanceUpdate()
+        }
     }
 }

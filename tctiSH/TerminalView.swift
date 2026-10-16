@@ -168,7 +168,11 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         applySettings()
 
         // Make sure the terminal looks the way it should before anything's displayed.
-        setUpTheming()
+        applyTheme()
+
+        // SwiftTerm draws its selection handles in a fixed blue rather than the tint, so they're
+        // given the accent.
+        selectionHandleColor = Accent.color
 
         setUpPointer()
 
@@ -180,6 +184,11 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         NotificationCenter.default.addObserver(
             self, selector: #selector(sceneWillEnterForeground),
             name: UIScene.willEnterForegroundNotification, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(applyTheme), name: TerminalThemes.didChange, object: nil)
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: TctiTermView, _) in
+            view.applyTheme()
+        }
     }
 
     @objc private func accentChanged() {
@@ -237,6 +246,8 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
             onOutput?()
         }
 
+        // Output moves the view, so a snap to a row in progress goes there at once.
+        finishSnap()
         let anchor = scrolledTo()
 
         // SwiftTerm scrolls the view as it takes the output in, which is not the user scrolling.
@@ -276,6 +287,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     private(set) var isFollowing = true {
         didSet {
             guard isFollowing != oldValue else { return }
+            placeEdgeFades()
             NotificationCenter.default.post(name: Self.followingDidChange, object: self)
         }
     }
@@ -294,8 +306,18 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     private var settling: DispatchWorkItem?
 
     public override var contentOffset: CGPoint {
-        didSet { noteScroll() }
+        didSet {
+            if !moving, contentOffset.y != oldValue.y {
+                scrollingDown = contentOffset.y > oldValue.y
+            }
+            noteScroll()
+            placeEdgeFades()
+        }
     }
+
+    /// Whether the view last moved down, toward newer output, rather than up;
+    /// the way a scroll that comes to rest between rows snaps.
+    private var scrollingDown = false
 
     /// Scrolls to the oldest line kept, and stops following new output, as
     /// scrolling there by hand would. A program on the alternate screen has no
@@ -304,6 +326,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         guard !getTerminal().isCurrentBufferAlternate, canScroll else { return }
         settling?.cancel()
         settling = nil
+        cancelSnap()
         isFollowing = false
 
         moving = true
@@ -315,6 +338,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     func follow() {
         settling?.cancel()
         settling = nil
+        cancelSnap()
         isFollowing = true
 
         moving = true
@@ -332,8 +356,12 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     /// The row at the top of the screen, rounded as SwiftTerm rounds it: a
     /// pixel up, so that floating-point error can't make it the row above.
     private var topRow: Int {
-        let pixel = 1 / max(traitCollection.displayScale, 1)
-        return Int(((contentOffset.y + pixel) / rowHeight).rounded(.down))
+        Int(((contentOffset.y + pixel) / rowHeight).rounded(.down))
+    }
+
+    /// A pixel, in points.
+    private var pixel: CGFloat {
+        1 / max(traitCollection.displayScale, 1)
     }
 
     private var isAtBottom: Bool {
@@ -359,6 +387,8 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     /// SwiftTerm itself.
     private func noteScroll() {
         guard isMade, !moving, rowHeight > 0 else { return }
+        // Whoever moved the view, a snap to a row no longer has the last word on where it goes.
+        cancelSnap()
         guard userIsScrolling else {
             if settling == nil {
                 isFollowing = swiftTermFollows
@@ -381,7 +411,8 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
 
     /// Once a scroll that SwiftTerm didn't follow has come to rest, tells it
     /// the row now at the top, so that it stays there. SwiftTerm keeps to whole
-    /// rows, so the view moves to the nearest.
+    /// rows, so the view first glides on to the next whole row the way it was
+    /// going; see `snap`.
     private func settle() {
         settling = nil
         guard !userIsScrolling else {
@@ -390,10 +421,131 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         }
         guard !isFollowing, rowHeight > 0 else { return }
 
+        let height = rowHeight
+        let rows = contentOffset.y / height
+        let row = Int(
+            scrollingDown
+                ? (rows - pixel / height).rounded(.up) : (rows + pixel / height).rounded(.down))
+        let bottom = max(0, contentSize.height - bounds.height + adjustedContentInset.bottom)
+        let target = min(CGFloat(row) * height, bottom)
+
+        guard abs(target - contentOffset.y) >= pixel else {
+            rest(at: row)
+            return
+        }
+        cancelSnap()
+        snap = Snap(
+            row: row, from: contentOffset.y, to: target, start: CACurrentMediaTime(),
+            link: CADisplayLink(target: self, selector: #selector(stepSnap)))
+        snap?.link.add(to: .main, forMode: .common)
+    }
+
+    /// A glide to a whole row, at the end of a scroll that came to rest between
+    /// two. The view moves a frame at a time, as it does under a finger, since
+    /// SwiftTerm draws what's on screen afresh as the view moves.
+    private struct Snap {
+        var row: Int
+        var from: CGFloat
+        var to: CGFloat
+        var start: CFTimeInterval
+        var link: CADisplayLink
+    }
+
+    private var snap: Snap?
+
+    /// How long a snap to a row takes.
+    private static let snapDuration: CFTimeInterval = 0.2
+
+    @objc private func stepSnap() {
+        guard let snap else { return }
+        // A finger on the screen takes the view where it is. If it only taps, the view settles
+        // again from there.
+        guard !isTracking else {
+            cancelSnap()
+            settleSoon()
+            return
+        }
+        let progress = min((CACurrentMediaTime() - snap.start) / Self.snapDuration, 1)
+        // Easing out, as a scroll slows to a stop.
+        let eased = 1 - pow(1 - progress, 3)
+
         moving = true
-        scrollTo(row: Int((contentOffset.y / rowHeight).rounded()), notifyAccessibility: false)
+        contentOffset.y = snap.from + (snap.to - snap.from) * eased
+        moving = false
+
+        if progress >= 1 {
+            finishSnap()
+        }
+    }
+
+    /// Ends a snap in progress where it was going.
+    private func finishSnap() {
+        guard let snap else { return }
+        cancelSnap()
+        rest(at: snap.row)
+    }
+
+    /// Stops a snap in progress where it is, for something else moving the
+    /// view.
+    private func cancelSnap() {
+        snap?.link.invalidate()
+        snap = nil
+    }
+
+    /// Tells SwiftTerm `row` is at the top, which puts the view there.
+    private func rest(at row: Int) {
+        moving = true
+        scrollTo(row: row, notifyAccessibility: false)
         moving = false
         isFollowing = swiftTermFollows
+    }
+
+    // MARK: Fading the edges
+
+    /// Gradients at the top and bottom edges, a row high, that rows run under
+    /// as they leave the screen, so that they fade into the background rather
+    /// than being cut off. The screen is rarely a whole number of rows high, so
+    /// one row or the other is usually only partly on it.
+    ///
+    /// The bottom one shows while the terminal isn't following new output, and
+    /// the top one while there's anything above the screen: so the first row of
+    /// a new terminal, and the last while following, are never faded. They sit
+    /// at the edges of the view, which is where it clips what it draws.
+    private let topFade = edgeFade()
+    private let bottomFade = edgeFade()
+
+    private static func edgeFade() -> CAGradientLayer {
+        let fade = CAGradientLayer()
+        fade.zPosition = 1
+        fade.opacity = 0
+        return fade
+    }
+
+    public override func layoutSubviews() {
+        super.layoutSubviews()
+        placeEdgeFades()
+    }
+
+    /// Puts the fades at the edges of what's on screen. They're placed in the
+    /// scroll view's bounds, which move as it scrolls, so they're placed again
+    /// on every scroll.
+    private func placeEdgeFades() {
+        guard isMade else { return }
+        if topFade.superlayer == nil {
+            layer.addSublayer(topFade)
+            layer.addSublayer(bottomFade)
+        }
+
+        let height = rowHeight
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        topFade.frame = CGRect(x: bounds.minX, y: bounds.minY, width: bounds.width, height: height)
+        bottomFade.frame = CGRect(
+            x: bounds.minX, y: bounds.maxY - height, width: bounds.width, height: height)
+        topFade.opacity = bounds.minY > pixel ? 1 : 0
+        bottomFade.opacity = isFollowing ? 0 : 1
+        CATransaction.commit()
     }
 
     /// The row at the top of the screen, counted from the first line ever
@@ -657,42 +809,51 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
 
     }
 
-    /// Sets up use of the user's theme.
-    func setUpTheming() {
-        // FIXME: have this be user-specifiable
-        let theme = DefaultThemes.solzariedDark
-        self.installColors(theme.ansi)
+    // MARK: Theme
 
-        let t = getTerminal()
+    /// The colors last painted with, so that a change to a theme this terminal
+    /// isn't using, or to a name, doesn't redraw it for nothing.
+    private var appliedColors: [ThemeColor]?
 
-        t.foregroundColor = theme.foreground
-        t.backgroundColor = theme.background
+    /// Paints the terminal with the theme chosen for the appearance iOS is in:
+    /// the dark mode one or the light mode one.
+    @objc func applyTheme() {
+        let theme = TerminalThemes.selected(for: TerminalThemes.Appearance(of: self))
+        guard theme.colors != appliedColors else { return }
+        appliedColors = theme.colors
 
-        self.nativeBackgroundColor = makeUIColor(theme.background)
-        self.nativeForegroundColor = makeUIColor(theme.foreground)
-        self.layer.backgroundColor = makeUIColor(theme.background).cgColor
-        self.layer.borderColor = self.layer.backgroundColor
-        self.layer.shadowColor = self.layer.backgroundColor
-        self.backgroundColor = self.nativeBackgroundColor
+        installColors(theme.ansi.map(\.terminalColor))
 
-        self.selectedTextBackgroundColor = makeUIColor(theme.selectionColor)
+        // These set the terminal's default colors too.
+        let background = theme.background.uiColor
+        nativeForegroundColor = theme.foreground.uiColor
+        nativeBackgroundColor = background
+        layer.backgroundColor = background.cgColor
+        layer.borderColor = layer.backgroundColor
+        layer.shadowColor = layer.backgroundColor
+        backgroundColor = background
+        // At once, as the background changes, rather than as Core Animation would fade them.
+        let clear = background.withAlphaComponent(0)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        topFade.colors = [background.cgColor, clear.cgColor]
+        bottomFade.colors = [clear.cgColor, background.cgColor]
+        CATransaction.commit()
 
-        // SwiftTerm draws selected text black unless told otherwise, which on the theme's dark
-        // selection is next to invisible.
-        self.selectedTextForegroundColor = makeUIColor(theme.selectedText)
+        selectedTextBackgroundColor = theme.selection.uiColor
+        // SwiftTerm draws selected text black unless told otherwise, which on a dark selection is
+        // next to invisible.
+        selectedTextForegroundColor = theme.selectedText.uiColor
 
-        // SwiftTerm's selection handles are a fixed blue, rather than the tint, so they're told.
-        self.selectionHandleColor = Accent.color
-        self.caretColor = makeUIColor(theme.cursor)
+        caretColor = theme.cursor.uiColor
+        caretTextColor = theme.cursorText.uiColor
     }
 
-    // Helper that converts a SwiftTerm color into a UI color.
-    private func makeUIColor(_ color: SwiftTerm.Color) -> UIColor {
-        UIColor(
-            red: CGFloat(color.red) / 65535.0,
-            green: CGFloat(color.green) / 65535.0,
-            blue: CGFloat(color.blue) / 65535.0,
-            alpha: 1.0)
+    /// Out of a window, a terminal takes the active scene's appearance. Moved
+    /// into one, it takes that window's.
+    public override func didMoveToWindow() {
+        super.didMoveToWindow()
+        applyTheme()
     }
 
     /// Compliance initializer for things that can do encoding/decoding.

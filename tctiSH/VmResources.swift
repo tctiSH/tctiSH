@@ -633,6 +633,10 @@ enum AppSetting: String {
     case showVmManagement = "show_vm_management"
     case ttyDefaultNames = "tty_default_names"
     case keepProgramsWhenClosingWindow = "keep_programs_when_closing_window"
+    case defaultCommand = "default_command"
+    case darkTerminalTheme = "dark_terminal_theme"
+    case lightTerminalTheme = "light_terminal_theme"
+    case customTerminalThemes = "custom_terminal_themes"
 
     var string: String {
         UserDefaults.standard.string(forKey: rawValue) ?? ""

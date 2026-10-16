@@ -8,6 +8,9 @@ const COMMAND_FONT: &str = "font";
 /// The command used to get the current working directory.
 const COMMAND_GETCWD: &str = "getcwd";
 
+/// The command used to ask what new terminals start in place of the shell.
+const COMMAND_DEFAULT_COMMAND: &str = "default_command";
+
 /// Returns a given tctiSH font property.
 fn get_font_property(_property: &str) -> Result<String> {
     Ok("<TODO>".to_owned())
@@ -62,4 +65,11 @@ pub(crate) fn handle_getcwd() -> Result<String> {
         }
         Err(err) => Err(err),
     }
+}
+
+/// Returns the command tctiSH starts in new terminals in place of the login
+/// shell, or an empty string for the shell.
+pub(crate) fn default_command() -> Result<String> {
+    let response = run_command(COMMAND_DEFAULT_COMMAND.to_owned(), None, None)?;
+    Ok(response.value.unwrap_or_default())
 }

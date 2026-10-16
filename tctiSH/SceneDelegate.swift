@@ -54,6 +54,27 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
         appDelegate?.handleSceneWillConnect(shortcutItem: connectionOptions.shortcutItem)
         Accent.apply()
+
+        // Opened once the window is up, with something to show it from.
+        openingFile = connectionOptions.urlContexts.first
+    }
+
+    /// A theme file opened from Files, AirDrop or another app, while the window
+    /// is open.
+    func scene(_ scene: UIScene, openURLContexts contexts: Set<UIOpenURLContext>) {
+        guard let context = contexts.first else { return }
+        open(context)
+    }
+
+    /// A file that opened a new window, to open once it's active.
+    private var openingFile: UIOpenURLContext?
+
+    /// Opens a file iOS handed tctiSH: a terminal theme, the only kind
+    /// Info.plist claims.
+    private func open(_ context: UIOpenURLContext) {
+        guard let root = window?.rootViewController else { return }
+        SettingsViewController.openTheme(
+            at: context.url, inPlace: context.options.openInPlace, from: root)
     }
 
     /// Turns a new window away when no more TTYs can open: its session is
@@ -106,6 +127,11 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
         appDelegate?.handleSceneInForeground()
         ScreenAwake.apply()
+
+        if let file = openingFile {
+            openingFile = nil
+            open(file)
+        }
     }
 
     private var appDelegate: AppDelegate? {

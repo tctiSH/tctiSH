@@ -51,11 +51,16 @@ enum MenuBar {
     /// `watchWindows`.
     private static var builtWindowCount = 0
 
+    /// The themes' ids and names when the menu bar was last built, for
+    /// `watchThemes`.
+    private static var builtThemes: [String] = []
+
     /// Fills in the main menu bar. Called from `AppDelegate.buildMenu(with:)`,
     /// and again whenever the menu system is told to rebuild, as when Send ⌘
     /// Shortcuts to Linux changes, or a window opens or closes.
     static func build(with builder: UIMenuBuilder) {
         builtWindowCount = TTYs.shared.windows.count
+        builtThemes = themeList
 
         // Where the system keeps its Settings item, if it offers one there; otherwise at the top of
         // the app menu, which is where that item goes on the Mac.
@@ -174,6 +179,21 @@ enum MenuBar {
             guard TTYs.shared.windows.count != builtWindowCount else { return }
             UIMenuSystem.main.setNeedsRebuild()
         }
+    }
+
+    /// Has the menu bar rebuilt as a theme is added, renamed or deleted. Called
+    /// once, at launch.
+    static func watchThemes() {
+        NotificationCenter.default.addObserver(
+            forName: TerminalThemes.didChange, object: nil, queue: .main
+        ) { _ in
+            guard themeList != builtThemes else { return }
+            UIMenuSystem.main.setNeedsRebuild()
+        }
+    }
+
+    private static var themeList: [String] {
+        TerminalThemes.all.map { "\($0.id) \($0.title)" }
     }
 
     /// A system command as it is, or without its shortcut if that goes to
@@ -306,7 +326,7 @@ enum MenuBar {
     }
 
     /// View: the switcher; the selected TTY's font size, with Terminal's
-    /// shortcuts; and scrolling to either end.
+    /// shortcuts; the themes; and scrolling to either end.
     private static var viewGroups: [[UIMenuElement]] {
         [
             [
@@ -319,6 +339,7 @@ enum MenuBar {
                 command("Smaller", #selector(ViewController.makeTextSmaller(_:)), "-"),
                 command("Default Font Size", #selector(ViewController.useDefaultFontSize(_:)), "0"),
             ],
+            themeMenus,
             [
                 command(
                     "Scroll to Top", #selector(ViewController.scrollToTop(_:)),
@@ -328,6 +349,30 @@ enum MenuBar {
                     UIKeyCommand.inputEnd),
             ],
         ]
+    }
+
+    /// Dark Theme and Light Theme, the dark mode and light mode themes: the
+    /// built-in ones followed by the user's. The view controller ticks the one
+    /// in use as the menu opens.
+    private static var themeMenus: [UIMenuElement] {
+        TerminalThemes.Appearance.allCases.map { appearance in
+            let action =
+                appearance == .dark
+                ? #selector(ViewController.setDarkTheme(_:))
+                : #selector(ViewController.setLightTheme(_:))
+            func commands(_ themes: [TerminalTheme]) -> [UIMenuElement] {
+                themes.map { command($0.title, action, propertyList: $0.id) }
+            }
+
+            var children = commands(TerminalThemes.builtIn)
+            let custom = TerminalThemes.custom
+            if !custom.isEmpty {
+                children.append(UIMenu(options: .displayInline, children: commands(custom)))
+            }
+            return UIMenu(
+                title: appearance.themeTitle, image: UIImage(systemName: appearance.symbol),
+                children: children)
+        }
     }
 
     /// Window: the previous and next TTYs, ⌘1 to ⌘8 by position in the step

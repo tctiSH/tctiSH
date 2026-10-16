@@ -65,14 +65,14 @@ final class TTYSwitcherViewController: UIViewController {
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
-    private let searchCapsule = KeyBar.makeCapsule()
+    private let searchCapsule = GlassCapsule()
     private let searchField = UISearchTextField()
-    private let cancelSearchButton = UIButton(configuration: .plain())
-    private let addButton = UIButton(configuration: .plain())
+    private let cancelSearchButton = GlassButton(configuration: .plain())
+    private let addButton = GlassButton(configuration: .plain())
 
     /// The pills shown over the switcher, made when the first is.
     private var status: StatusPresenter?
-    private let doneButton = UIButton(configuration: .plain())
+    private let doneButton = GlassButton(configuration: .plain())
     private let countLabel = UILabel()
 
     /// Fires while the switcher is open, to redraw the cards' pictures.
@@ -175,7 +175,6 @@ final class TTYSwitcherViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        view.overrideUserInterfaceStyle = .dark
         view.tintColor = Accent.custom
 
         background.frame = view.bounds
@@ -203,27 +202,34 @@ final class TTYSwitcherViewController: UIViewController {
     /// a distinct color, and one that everything drawn on it can be read
     /// against.
     private var tint: UIColor {
-        SwitcherBackground.color(
-            cards: ttyWindow.selected.view?.nativeBackgroundColor ?? .black, accent: Accent.color)
+        SwitcherBackground.color(cards: cards, accent: Accent.color)
+    }
+
+    /// The color of the cards: the selected terminal's background.
+    private var cards: UIColor {
+        ttyWindow.selected.view?.nativeBackgroundColor ?? .black
     }
 
     /// The effect the switcher is drawn on: on iOS 26, glass with the tint at
     /// 90% opacity, so that the terminal underneath shows only as movement;
-    /// before iOS 26, a thick dark blur.
+    /// before iOS 26, a thick blur.
     private var backgroundEffect: UIVisualEffect {
         if #available(iOS 26.0, *) {
             let glass = UIGlassEffect(style: .regular)
             glass.tintColor = tint.withAlphaComponent(0.9)
             return glass
         }
-        return UIBlurEffect(style: .systemThickMaterialDark)
+        return UIBlurEffect(style: .systemThickMaterial)
     }
 
-    /// Applies the current tint. Before iOS 26, the tint is a translucent color
-    /// on the content view, over the blur, so that it fades in with the
-    /// content. On iOS 26 it is part of the glass, which is replaced only if it
-    /// is already showing; otherwise `animateIn` sets it.
+    /// Applies the current tint, and the style that goes with it. Before iOS
+    /// 26, the tint is a translucent color on the content view, over the blur,
+    /// so that it fades in with the content. On iOS 26 it is part of the glass,
+    /// which is replaced only if it is already showing; otherwise `animateIn`
+    /// sets it.
     private func applyTint() {
+        // Dark over dark cards and light over light ones, as the background is.
+        view.overrideUserInterfaceStyle = TerminalTheme.interfaceStyle(over: cards)
         if #unavailable(iOS 26.0) {
             content.backgroundColor = tint.withAlphaComponent(0.7)
         } else if background.effect != nil {
@@ -506,6 +512,17 @@ final class TTYSwitcherViewController: UIViewController {
                 doneButton.configuration?.baseForegroundColor = Accent.foreground
                 applyTint()
                 reconfigureAll()
+            },
+
+            // A new theme, or the system's appearance changing, recolors the terminals and so the
+            // cards. A turn later, so that the terminals have taken it first.
+            center.addObserver(forName: TerminalThemes.didChange, object: nil, queue: .main) {
+                [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    applyTint()
+                    reconfigureAll()
+                }
             },
         ])
     }
@@ -843,7 +860,7 @@ final class TTYSwitcherViewController: UIViewController {
     /// Shows a pill over the switcher, which would hide one under it.
     func present(_ item: StatusPresenter.Item) {
         if status == nil {
-            status = StatusPresenter(over: view, backdrop: tint)
+            status = StatusPresenter(over: view) { [weak self] in self?.tint ?? .black }
         }
         status?.present(item)
     }
@@ -1334,18 +1351,20 @@ struct ScrollbackMatch {
 ///
 /// - The cards, whose color is the terminal's background: the background is
 ///   far enough from them that they stand out as panels.
-/// - White text, which the switcher's labels use: it stays comfortably
-///   readable.
+/// - The labels' text, white over dark cards and black over light ones: it
+///   stays comfortably readable.
 /// - The accent, which rings the selected card: it stays clearly visible.
 ///
-/// The switcher's interface is always dark, so the background is always dark. A
-/// light terminal's cards stand out against it by being light.
+/// The switcher is dark over dark cards and light over light ones, as the
+/// terminal is. The background is lighter than dark cards and darker than light
+/// ones.
 enum SwitcherBackground {
 
-    /// The contrast ratio the background aims for against dark cards.
+    /// The contrast ratio the background aims for against the cards.
     static let cardContrast = 1.6
 
-    /// The least contrast ratio white text may have against the background.
+    /// The least contrast ratio the labels' text may have against the
+    /// background.
     static let textContrast = 7.0
 
     /// The least contrast ratio the accent may have against the background.
@@ -1360,21 +1379,33 @@ enum SwitcherBackground {
     static let hoverContrast = 1.19
 
     static func color(cards: UIColor, accent: UIColor) -> UIColor {
-        let cardLuminance = luminance(linear(cards))
-        let accentLuminance = luminance(linear(accent))
+        let cardLuminance = ColorMath.luminance(of: cards)
+        let accentLuminance = ColorMath.luminance(of: accent)
 
-        // Aims for `cardContrast` above dark cards, but never so light that white text or the
-        // accent fall below their minimum contrast. Light cards already stand out against any
-        // background dark enough for the text, so for them the target is a low fixed luminance.
-        var target = cardLuminance < 0.18 ? cardContrast * (cardLuminance + 0.05) - 0.05 : 0.05
-        target = min(target, 1.05 / textContrast - 0.05)
-        target = min(target, (accentLuminance + 0.05) / accentContrast - 0.05)
-        target = max(target, 0)
+        // Aims for `cardContrast` from the cards, but never so near the text's color that the text
+        // or the accent fall below their minimum contrast. Over dark cards that means lighter than
+        // the cards, but dark enough for white text; over light ones, darker than the cards, but
+        // light enough for black text.
+        var target: Double
+        if TerminalTheme.interfaceStyle(over: cards) == .dark {
+            target = cardContrast * (cardLuminance + 0.05) - 0.05
+            target = min(target, 1.05 / textContrast - 0.05)
+            target = min(target, (accentLuminance + 0.05) / accentContrast - 0.05)
+        } else {
+            target = (cardLuminance + 0.05) / cardContrast - 0.05
+            target = max(target, 0.05 * textContrast - 0.05)
+            target = max(target, accentContrast * (accentLuminance + 0.05) - 0.05)
+        }
+        target = min(max(target, 0), 1)
 
-        let accentLab = oklab(linear(accent))
+        let accentLab = ColorMath.oklab(ColorMath.linear(accent))
         let accentChroma = (accentLab.a * accentLab.a + accentLab.b * accentLab.b).squareRoot()
         let hue = atan2(accentLab.b, accentLab.a)
         let c = min(chroma, accentChroma)
+
+        func rgb(_ lightness: Double) -> ColorMath.RGB {
+            ColorMath.clamped(ColorMath.fromOklab(lightness, c * cos(hue), c * sin(hue)))
+        }
 
         // Finds the lightness that gives the target luminance by bisection, which works because
         // luminance rises with lightness.
@@ -1382,17 +1413,13 @@ enum SwitcherBackground {
         var high = 1.0
         for _ in 0..<32 {
             let mid = (low + high) / 2
-            if luminance(clamped(fromOklab(mid, c * cos(hue), c * sin(hue)))) < target {
+            if ColorMath.luminance(rgb(mid)) < target {
                 low = mid
             } else {
                 high = mid
             }
         }
-
-        let rgb = clamped(fromOklab(low, c * cos(hue), c * sin(hue)))
-        return UIColor(
-            red: CGFloat(encode(rgb.r)), green: CGFloat(encode(rgb.g)),
-            blue: CGFloat(encode(rgb.b)), alpha: 1)
+        return ColorMath.color(rgb(low))
     }
 
     /// The color and alpha to lay over `base` under the pointer, so that it
@@ -1400,7 +1427,7 @@ enum SwitcherBackground {
     /// lightens `base` as Safari's tabs do, unless even opaque white could not
     /// reach that contrast against `base`; then it is black.
     static func hoverOverlay(over base: UIColor) -> (color: UIColor, alpha: CGFloat) {
-        let baseLuminance = luminance(linear(base)) + 0.05
+        let baseLuminance = ColorMath.luminance(of: base) + 0.05
         let lighten = 1.05 / baseLuminance >= hoverContrast
         let top: UIColor = lighten ? .white : .black
 
@@ -1409,7 +1436,8 @@ enum SwitcherBackground {
         var high = 1.0
         for _ in 0..<24 {
             let mid = (low + high) / 2
-            let luminance = luminance(linear(blend(top, alpha: mid, over: base))) + 0.05
+            let luminance =
+                ColorMath.luminance(of: ColorMath.blend(top, alpha: mid, over: base)) + 0.05
             let ratio = lighten ? luminance / baseLuminance : baseLuminance / luminance
             if ratio < hoverContrast {
                 low = mid
@@ -1418,72 +1446,5 @@ enum SwitcherBackground {
             }
         }
         return (top, CGFloat(high))
-    }
-
-    /// The opaque color of `top` laid over `base` at `alpha`, composited as
-    /// UIKit does: on the encoded sRGB components, not in linear light.
-    static func blend(_ top: UIColor, alpha: Double, over base: UIColor) -> UIColor {
-        var (tr, tg, tb, ta): (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
-        var (br, bg, bb, ba): (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
-        top.getRed(&tr, green: &tg, blue: &tb, alpha: &ta)
-        base.getRed(&br, green: &bg, blue: &bb, alpha: &ba)
-        let a = CGFloat(alpha)
-        return UIColor(
-            red: br + (tr - br) * a, green: bg + (tg - bg) * a, blue: bb + (tb - bb) * a,
-            alpha: 1)
-    }
-
-    private typealias RGB = (r: Double, g: Double, b: Double)
-
-    /// A color's linear sRGB components.
-    private static func linear(_ color: UIColor) -> RGB {
-        var r: CGFloat = 0
-        var g: CGFloat = 0
-        var b: CGFloat = 0
-        var a: CGFloat = 0
-        color.getRed(&r, green: &g, blue: &b, alpha: &a)
-        return (decode(Double(r)), decode(Double(g)), decode(Double(b)))
-    }
-
-    private static func decode(_ v: Double) -> Double {
-        let magnitude = abs(v)
-        let linear =
-            magnitude <= 0.04045 ? magnitude / 12.92 : pow((magnitude + 0.055) / 1.055, 2.4)
-        return v < 0 ? -linear : linear
-    }
-
-    private static func encode(_ v: Double) -> Double {
-        v <= 0.0031308 ? v * 12.92 : 1.055 * pow(v, 1 / 2.4) - 0.055
-    }
-
-    private static func clamped(_ rgb: RGB) -> RGB {
-        (min(max(rgb.r, 0), 1), min(max(rgb.g, 0), 1), min(max(rgb.b, 0), 1))
-    }
-
-    /// Relative luminance, as WCAG defines it.
-    private static func luminance(_ rgb: RGB) -> Double {
-        0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b
-    }
-
-    private static func oklab(_ rgb: RGB) -> (l: Double, a: Double, b: Double) {
-        let l = cbrt(0.4122214708 * rgb.r + 0.5363325363 * rgb.g + 0.0514459929 * rgb.b)
-        let m = cbrt(0.2119034982 * rgb.r + 0.6806995451 * rgb.g + 0.1073969566 * rgb.b)
-        let s = cbrt(0.0883024619 * rgb.r + 0.2817188376 * rgb.g + 0.6299787005 * rgb.b)
-        return (
-            0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
-            1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
-            0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s
-        )
-    }
-
-    private static func fromOklab(_ lightness: Double, _ a: Double, _ b: Double) -> RGB {
-        let l = pow(lightness + 0.3963377774 * a + 0.2158037573 * b, 3)
-        let m = pow(lightness - 0.1055613458 * a - 0.0638541728 * b, 3)
-        let s = pow(lightness - 0.0894841775 * a - 1.2914855480 * b, 3)
-        return (
-            4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
-            -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
-            -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
-        )
     }
 }

@@ -18,12 +18,19 @@ final class FollowButton: UIView {
     var onTap: (() -> Void)?
 
     private let button = UIButton(configuration: .plain())
-    private let capsule = KeyBar.makeCapsule()
+    private let capsule = GlassCapsule()
+
+    /// The tint of the glass, matched to the terminal's theme.
+    var glassTint: UIColor? {
+        get { capsule.tint }
+        set { capsule.tint = newValue }
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
 
-        // Dark, like the floating switcher button, since it sits over the terminal, which is dark.
+        // Styled for the terminal it sits over, like the key bar: dark until ViewController matches
+        // it to the theme.
         overrideUserInterfaceStyle = .dark
         tintColor = Accent.custom
 

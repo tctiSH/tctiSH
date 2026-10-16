@@ -41,6 +41,11 @@
 #                         wakes its login if that is waiting to start. "done
 #                         <id>", or "error <id> shown write-failed" if it
 #                         couldn't say so.
+#   default-command <id> <base64 command, or ->
+#                         records the command the next logins on the app's
+#                         consoles start in place of the shell, or none for -;
+#                         see /etc/profile.d/zz_default_command.sh. "done
+#                         <id>", or "error <id> default-command <reason>".
 #
 # A request that fails gets "error <id> <word> <reason>", and an unknown one
 # "error <id> <word> unknown". Unasked, the agent says
@@ -51,7 +56,9 @@
 #
 # Keep this to named operations: the port is reachable by anything in the app,
 # and a request to run a command would make it a root shell by another name.
-# No argument is ever parsed by a shell as more than one word.
+# No argument is ever parsed by a shell as more than one word. The default
+# command is only recorded here: it runs in a login on one of the app's
+# consoles, in front of whoever opened it, which the app could type into anyway.
 #
 # Started from /etc/inittab as a respawn. Blocked in a read, it costs nothing.
 #
@@ -66,6 +73,10 @@ ZONEINFO="/usr/share/zoneinfo"
 
 # Whether a TTY has shown each console this boot; see tctish-login.
 CONSOLES="/run/tctish/consoles"
+
+# The command for logins on the app's consoles to start, once the app has sent
+# it; see zz_default_command.sh, which reads it.
+DEFAULT_COMMAND="/run/tctish/default-command"
 
 # Find the port by its name, which QEMU gives it, rather than by number. There
 # is no udev, so /dev/virtio-ports/<name> never appears; devtmpfs makes only
@@ -153,6 +164,37 @@ set_zone() {
     else
         rm -f /etc/.localtime.agent /etc/.timezone.agent
         echo "error $id zone write-failed"
+    fi
+}
+
+# default-command <id> <base64 command, or ->
+set_default_command() {
+    id="$1"
+    case "${2:-}" in
+        -) command= ;;
+        "" | *[!A-Za-z0-9+/=]*)
+            echo "error $id default-command bad-command"
+            return
+            ;;
+        *)
+            # A login reads one line.
+            if ! command="$(echo "$2" | base64 -d 2>/dev/null)" ||
+                [ "$(printf '%s\n' "$command" | wc -l)" -ne 1 ]; then
+                echo "error $id default-command bad-command"
+                return
+            fi
+            ;;
+    esac
+
+    # Renamed into place, so that a login never reads half of it. Empty for
+    # none, which a login tells from a missing file: one not sent yet.
+    if mkdir -p "${DEFAULT_COMMAND%/*}" &&
+        { [ -z "$command" ] || printf '%s\n' "$command"; } >"$DEFAULT_COMMAND.agent" &&
+        mv -f "$DEFAULT_COMMAND.agent" "$DEFAULT_COMMAND"; then
+        echo "done $id"
+    else
+        rm -f "$DEFAULT_COMMAND.agent"
+        echo "error $id default-command write-failed"
     fi
 }
 
@@ -374,6 +416,7 @@ while :; do
             reclaim) reclaim "$id" "${1:-}" ;;
             hangup) hang_up "$id" "$@" ;;
             shown) shown "$id" "${1:-}" ;;
+            default-command) set_default_command "$id" "${1:-}" ;;
             *) echo "error ${id:--} $request unknown" ;;
         esac >&3
     done

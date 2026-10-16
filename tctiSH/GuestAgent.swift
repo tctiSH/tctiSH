@@ -22,8 +22,9 @@ import UIKit
 /// `hello` from a boot it hasn't seen.
 ///
 /// Once Linux is up, `request` asks the agent for things only the guest can do:
-/// set its clock and zone, write out dirty data, trim its page cache. Each is a
-/// named operation; there is no way to ask the agent to run a command.
+/// set its clock and zone, write out dirty data, trim its page cache, record
+/// the command new terminals start. The agent cannot be asked to run an
+/// arbitrary command.
 ///
 /// Use it from the main thread.
 final class GuestAgent {

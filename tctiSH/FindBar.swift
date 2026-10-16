@@ -25,7 +25,7 @@ final class FindBar: UIView, UITextFieldDelegate {
     /// Called when the Done button is tapped or Esc is pressed.
     var close: () -> Void = {}
 
-    private let capsule = KeyBar.makeCapsule()
+    private let capsule = GlassCapsule()
     private let field = UISearchTextField()
     private let count = UILabel()
     private let previousButton = UIButton(configuration: .plain())
@@ -36,9 +36,16 @@ final class FindBar: UIView, UITextFieldDelegate {
     /// cancels it and schedules a new one.
     private var pending: DispatchWorkItem?
 
+    /// The tint of the glass, matched to the terminal's theme.
+    var glassTint: UIColor? {
+        get { capsule.tint }
+        set { capsule.tint = newValue }
+    }
+
     override init(frame: CGRect) {
         super.init(frame: frame)
 
+        // Dark until ViewController matches it to the theme.
         overrideUserInterfaceStyle = .dark
         tintColor = Accent.custom
         addSubview(capsule)

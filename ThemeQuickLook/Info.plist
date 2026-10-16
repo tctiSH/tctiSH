@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionAttributes</key>
+		<dict>
+			<!-- In lower case, as iOS gives the type's identifier, though the app declares it
+			     with capitals. -->
+			<key>QLSupportedContentTypes</key>
+			<array>
+				<string>io.ara.tctish.terminal-theme</string>
+			</array>
+			<key>QLSupportsSearchableItems</key>
+			<false/>
+			<key>QLIsDataBasedPreview</key>
+			<false/>
+		</dict>
+		<!-- A storyboard, as Xcode's template for a preview extension has it. -->
+		<key>NSExtensionMainStoryboard</key>
+		<string>MainInterface</string>
+		<!-- The target links QuickLook.framework in its Frameworks phase, though the code
+		     uses none of its symbols, which would leave it unlinked: without it, the
+		     extension stops at launch, in ExtensionFoundation, before its code runs. -->
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.quicklook.preview</string>
+	</dict>
+</dict>
+</plist>

@@ -6,6 +6,22 @@
 	<array>
 		<string>io.ara.tctish.pairing</string>
 	</array>
+	<!-- Terminal themes, which open in Settings from Files or AirDrop. See SceneDelegate. -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>tctiSH Terminal Theme</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>io.ara.tctiSH.terminal-theme</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleExecutable</key>
@@ -129,6 +145,31 @@
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<!-- A terminal theme, shared and imported from Settings > Appearance. See TerminalTheme.swift.
+	     Data rather than text, though it's JSON with comments: Quick Look shows text files itself,
+	     and would show this as its JSON rather than through the ThemeThumbnail and ThemeQuickLook
+	     extensions. -->
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>io.ara.tctiSH.terminal-theme</string>
+			<key>UTTypeDescription</key>
+			<string>tctiSH Terminal Theme</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.content</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>tctheme</string>
+				</array>
+			</dict>
+		</dict>
 	</array>
 </dict>
 </plist>

@@ -197,6 +197,10 @@ final class ConfigServer {
         case "share_cache":
             handleShareCache(message: message, from: client)
 
+        // The command new terminals start in place of the shell, for a login before it's been sent.
+        case "default_command":
+            handleDefaultCommand(message: message, from: client)
+
         // Respond to all other commands with, basically, "idk".
         default:
             sendErrorResponse("command not recognized", to: client)
@@ -273,6 +277,14 @@ final class ConfigServer {
     private func handleShareCache(message: ConfigurationMessage, from client: Client) {
         let mode = AppSetting.sharedFolderWriteBack.bool ? "mmap" : "readahead"
         sendResponse(command: "share_cache", key: "cache", value: mode, to: client)
+    }
+
+    /// Answers with the command set in Settings > Terminals for new terminals
+    /// to start in place of the login shell, or with nothing for the shell.
+    /// Asked only by a login before `DefaultCommand` has sent it.
+    private func handleDefaultCommand(message: ConfigurationMessage, from client: Client) {
+        sendResponse(
+            command: "default_command", key: "command", value: DefaultCommand.current, to: client)
     }
 
     /// Answers with what the host did, or why it didn't.

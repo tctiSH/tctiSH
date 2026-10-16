@@ -6,6 +6,7 @@
 //
 
 import UIKit
+import UniformTypeIdentifiers
 
 // MARK: - The shape of a settings screen
 
@@ -55,6 +56,10 @@ private struct SettingsRow {
     var title: String
     var detail: String?
     var symbol: String?
+
+    /// A picture in place of the symbol, drawn untinted.
+    var image: UIImage?
+
     var accessory: RowAccessory = .none
 
     /// Set when the row carries a text field rather than a fixed value.
@@ -71,6 +76,18 @@ private struct SettingsRow {
 
     /// What tapping does, or nil if the row does nothing.
     var select: (() -> Void)?
+
+    /// Whether what tapping does can't be undone. Turns the row's symbol red,
+    /// and its title too if it's an action row.
+    var isDestructive = false
+
+    /// What swiping the row from its leading edge does: shares what it stands
+    /// for, with the sheet pointing at the view given on iPad. Nil if it can't
+    /// be.
+    var share: ((UIView) -> Void)?
+
+    /// What swiping the row away does, or nil if it can't be.
+    var delete: (() -> Void)?
 }
 
 /// A switch on a row.
@@ -171,32 +188,82 @@ private final class SettingsNavigationController: UINavigationController {
     }
 }
 
-/// A row's icon.
-///
-/// The system symbol, but for the few whose drawing sits off the middle of its
-/// box, which a list centers by the box: those are drawn into one with room
-/// added beneath, so that the part the eye goes to lands on the row's middle
-/// instead. Each is given as where, down its box, that part's middle is.
-private func settingsIcon(_ name: String) -> UIImage? {
-    // The rectangle, whose middle is lower than the box's: the pencil rises out of its corner.
-    let opticalMiddles: [String: CGFloat] = ["rectangle.and.pencil.and.ellipsis": 0.631]
+/// How far above the middle of its box the part of a symbol the eye goes to is,
+/// as a fraction of its height, for the few whose drawing sits off the middle:
+/// the pencil rises out of the rectangle's corner, and the arrow comes down
+/// into the tray from above. `SettingsCell` lifts these by that much.
+private let opticalLifts: [String: CGFloat] = [
+    "rectangle.and.pencil.and.ellipsis": 0.131,
+    "square.and.arrow.down": 0.13,
+]
 
-    guard let middle = opticalMiddles[name] else {
-        return UIImage(systemName: name)
+/// A list row's cell that can draw over its symbol: a picture in its place,
+/// such as a theme's swatch, or the symbol lifted, for one in `opticalLifts`.
+/// The row keeps a cleared symbol so that its title lines up with the others':
+/// a list gives every symbol the same room, but any other image only its width.
+///
+/// The overlay is in the content view, which a swipe moves along with the row.
+private final class SettingsCell: UICollectionViewListCell {
+
+    enum Overlay {
+        /// Drawn centered where the symbol is.
+        case picture(UIImage)
+
+        /// The symbol, lifted by that fraction of its height, in the color
+        /// given, or the tint if nil.
+        case lifted(CGFloat, color: UIColor?)
     }
 
-    let configuration = UIImage.SymbolConfiguration(textStyle: .body)
-    guard let symbol = UIImage(systemName: name, withConfiguration: configuration) else {
+    var overlay: Overlay? {
+        didSet { setNeedsLayout() }
+    }
+
+    private let overlayView = UIImageView()
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        contentView.layoutIfNeeded()
+
+        guard let overlay, let symbol = Self.imageView(in: contentView) else {
+            overlayView.isHidden = true
+            return
+        }
+        if overlayView.superview !== contentView {
+            contentView.addSubview(overlayView)
+        }
+        overlayView.isHidden = false
+
+        let place = contentView.convert(symbol.bounds, from: symbol)
+        switch overlay {
+        case .picture(let picture):
+            overlayView.image = picture
+            overlayView.preferredSymbolConfiguration = nil
+            overlayView.tintColor = nil
+            overlayView.frame = CGRect(
+                x: place.midX - picture.size.width / 2, y: place.midY - picture.size.height / 2,
+                width: picture.size.width, height: picture.size.height)
+        case .lifted(let lift, let color):
+            // The list's drawing of the symbol, at its size, in the color the row would be.
+            overlayView.image = symbol.image
+            overlayView.preferredSymbolConfiguration = symbol.preferredSymbolConfiguration
+            overlayView.contentMode = symbol.contentMode
+            overlayView.tintColor = color
+            overlayView.frame = place.offsetBy(dx: 0, dy: -lift * place.height)
+        }
+    }
+
+    /// The image view the list draws the row's symbol in.
+    private static func imageView(in view: UIView) -> UIImageView? {
+        for subview in view.subviews {
+            if let image = subview as? UIImageView {
+                return image
+            }
+            if let image = imageView(in: subview) {
+                return image
+            }
+        }
         return nil
     }
-
-    let box = symbol.size
-    let size = CGSize(width: box.width, height: box.height * 2 * middle)
-    return UIGraphicsImageRenderer(size: size)
-        .image { _ in
-            symbol.withTintColor(.black).draw(in: CGRect(origin: .zero, size: box))
-        }
-        .withRenderingMode(.alwaysTemplate)
 }
 
 /// The list plumbing, so each screen below is content only.
@@ -263,6 +330,10 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
     /// Fills in `sections`. Overridden by every subclass.
     fileprivate func buildSections() -> [SettingsSection] { [] }
 
+    /// A view kept above the list rather than scrolling with it, such as a
+    /// preview of what the rows below change. None unless overridden.
+    fileprivate func makePinnedHeader() -> UIView? { nil }
+
     // MARK: Setup
 
     override func viewDidLoad() {
@@ -273,10 +344,24 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(collectionView)
 
+        var top = view.topAnchor
+        if let header = makePinnedHeader() {
+            // The list's background, which the header sits on.
+            view.backgroundColor = .systemGroupedBackground
+            header.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(header)
+            NSLayoutConstraint.activate([
+                header.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                header.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                header.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            ])
+            top = header.bottomAnchor
+        }
+
         NSLayoutConstraint.activate([
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            collectionView.topAnchor.constraint(equalTo: view.topAnchor),
+            collectionView.topAnchor.constraint(equalTo: top),
             collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
 
@@ -301,15 +386,52 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
             configuration.headerMode = section?.header == nil ? .none : .supplementary
             configuration.footerMode = section?.footer == nil ? .none : .supplementary
 
+            configuration.trailingSwipeActionsConfigurationProvider = { [weak self] indexPath in
+                guard let self, let id = dataSource.itemIdentifier(for: indexPath),
+                    let delete = rowsById[id]?.delete
+                else { return nil }
+
+                // The swipe closes first, as deleting may reload the list or ask first.
+                let action = UIContextualAction(style: .destructive, title: "Delete") {
+                    _, _, done in
+                    done(true)
+                    delete()
+                }
+                return UISwipeActionsConfiguration(actions: [action])
+            }
+
+            configuration.leadingSwipeActionsConfigurationProvider = { [weak self] indexPath in
+                guard let self, let id = dataSource.itemIdentifier(for: indexPath),
+                    let share = rowsById[id]?.share
+                else { return nil }
+
+                let action = UIContextualAction(style: .normal, title: "Share") {
+                    [weak self] _, _, done in
+                    done(true)
+                    // Looked up again, as another window may have reloaded the list since.
+                    guard let self, let indexPath = dataSource.indexPath(for: id),
+                        let cell = collectionView.cellForItem(at: indexPath)
+                    else { return }
+                    share(cell)
+                }
+                action.image = UIImage(systemName: "square.and.arrow.up")
+                action.backgroundColor = .systemBlue
+                // A full swipe deletes on the other side; here, it would open a sheet by surprise.
+                let actions = UISwipeActionsConfiguration(actions: [action])
+                actions.performsFirstActionWithFullSwipe = false
+                return actions
+            }
+
             return NSCollectionLayoutSection.list(
                 using: configuration, layoutEnvironment: environment)
         }
     }
 
     private func makeDataSource() {
-        let cell = UICollectionView.CellRegistration<UICollectionViewListCell, String> {
+        let cell = UICollectionView.CellRegistration<SettingsCell, String> {
             [weak self] cell, _, id in
             guard let self, let row = rowsById[id] else { return }
+            cell.overlay = nil
 
             // With room, a row like the rest, the slider and its value on the end as switches are;
             // without, the slider beneath.
@@ -317,7 +439,7 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
                 if isWide {
                     var content = UIListContentConfiguration.valueCell()
                     content.text = row.title
-                    content.image = row.symbol.flatMap(settingsIcon)
+                    content.image = row.symbol.flatMap { UIImage(systemName: $0) }
                     content.imageProperties.tintColor = .tintColor
                     cell.contentConfiguration = content
 
@@ -344,14 +466,24 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
             var content = UIListContentConfiguration.valueCell()
             content.text = row.title
             content.secondaryText = row.detail
-            content.image = row.symbol.flatMap(settingsIcon)
-            content.imageProperties.tintColor = .tintColor
+            let color: UIColor? = row.isDestructive ? .systemRed : nil
+            content.image = row.symbol.flatMap { UIImage(systemName: $0) }
+            content.imageProperties.tintColor = color ?? .tintColor
+            if let picture = row.image {
+                // A symbol's room, kept clear for the picture.
+                content.image = UIImage(systemName: "square")
+                content.imageProperties.tintColor = .clear
+                cell.overlay = .picture(picture)
+            } else if let symbol = row.symbol, let lift = opticalLifts[symbol] {
+                content.imageProperties.tintColor = .clear
+                cell.overlay = .lifted(lift, color: color)
+            }
 
             // A row that does something when tapped, with nothing else to say so -- no arrow, no
             // switch, no field -- reads as a label otherwise. Tinted like a button, as the system's
             // action rows are.
             if row.select != nil, row.accessory == .none, row.toggle == nil, row.editable == nil {
-                content.textProperties.color = .tintColor
+                content.textProperties.color = row.isDestructive ? .systemRed : .tintColor
             }
 
             cell.contentConfiguration = content
@@ -451,11 +583,14 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
         field.clearButtonMode = .whileEditing
         field.returnKeyType = .done
 
-        // Mostly machine names -- a disk file and a snapshot tag -- so the keyboard should not be
-        // trying to be helpful about them.
+        // Mostly machine names -- a disk file, a snapshot tag, a command -- so the keyboard should
+        // not be trying to be helpful about them. Smart dashes would turn `--login` into `—login`,
+        // and smart quotes would break a command's quoting.
         field.autocorrectionType = .no
         field.autocapitalizationType = editable.capitalization
         field.spellCheckingType = .no
+        field.smartQuotesType = .no
+        field.smartDashesType = .no
 
         // Sized by its frame and its intrinsic width, *not* by a constraint. Cell accessories
         // require `translatesAutoresizingMaskIntoConstraints` to stay on -- they throw outright if
@@ -601,6 +736,37 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
     ) -> Bool {
         guard let id = dataSource.itemIdentifier(for: indexPath) else { return false }
         return rowsById[id]?.select != nil
+    }
+
+    /// Reloads the list when a theme is chosen, added or deleted, as in another
+    /// window. Only while on screen, since it reloads anyway when it reappears,
+    /// and the editor saves on every move of a color well.
+    fileprivate func reloadOnThemeChanges() {
+        observers.append(
+            NotificationCenter.default.addObserver(
+                forName: TerminalThemes.didChange, object: nil, queue: .main
+            ) { [weak self] _ in
+                guard let self, viewIfLoaded?.window != nil else { return }
+                reload()
+            })
+    }
+
+    /// Scrolls to the row `id` and flashes its highlight, to show where
+    /// something picked out elsewhere on the screen is set.
+    fileprivate func reveal(_ id: String) {
+        guard let indexPath = dataSource.indexPath(for: id) else { return }
+        collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
+
+        // Once the scroll has brought it on screen, the highlight comes on, then fades. The row is
+        // looked up again each time, as another window may have reloaded the list since.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self, let indexPath = dataSource.indexPath(for: id) else { return }
+            collectionView.selectItem(at: indexPath, animated: false, scrollPosition: [])
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                guard let self, let indexPath = dataSource.indexPath(for: id) else { return }
+                collectionView.deselectItem(at: indexPath, animated: true)
+            }
+        }
     }
 
     // MARK: Navigation helpers
@@ -875,7 +1041,7 @@ private final class SliderContentView: UIView, UIContentView {
         var content = UIListContentConfiguration.valueCell()
         content.text = current.title
         content.secondaryText = current.slider.label(current.slider.value)
-        content.image = current.symbol.flatMap(settingsIcon)
+        content.image = current.symbol.flatMap { UIImage(systemName: $0) }
         content.imageProperties.tintColor = .tintColor
         content.directionalLayoutMargins = current.margins
         heading.configuration = content
@@ -978,6 +1144,9 @@ final class SettingsViewController: SettingsListViewController,
     enum Destination {
         case pinnedKeys
         case storage
+
+        /// The editor for one of the user's themes.
+        case theme(TerminalTheme)
     }
 
     /// Puts the settings sheet up over whatever is on screen, open at
@@ -993,6 +1162,9 @@ final class SettingsViewController: SettingsListViewController,
             navigation.pushViewController(PinnedKeysViewController(), animated: false)
         case .storage:
             navigation.pushViewController(StorageSettingsViewController(), animated: false)
+        case .theme(let theme):
+            navigation.pushViewController(AppearanceSettingsViewController(), animated: false)
+            navigation.pushViewController(ThemeEditorViewController(theme: theme), animated: false)
         case nil:
             break
         }
@@ -1010,6 +1182,35 @@ final class SettingsViewController: SettingsListViewController,
         navigation.presentationController?.delegate = root
 
         presenter.present(navigation, animated: true)
+    }
+
+    /// Adds the theme in a file opened from outside tctiSH, as from Files or
+    /// AirDrop, and shows it in Settings: in the sheet if it's open, or in a
+    /// new one if nothing else is up over the terminal. Otherwise, says where
+    /// it went.
+    static func openTheme(at url: URL, inPlace: Bool, from root: UIViewController) {
+        var top = root
+        while let presented = top.presentedViewController {
+            top = presented
+        }
+
+        // A file opened in place needs its security scope to be read. One that isn't is a copy in
+        // Documents/Inbox, which can go once read.
+        let scoped = url.startAccessingSecurityScopedResource()
+        let imported = top.importTheme(from: url)
+        if scoped { url.stopAccessingSecurityScopedResource() }
+        if !inPlace { try? FileManager.default.removeItem(at: url) }
+        guard let theme = imported else { return }
+
+        if let sheet = top as? SettingsNavigationController {
+            sheet.pushViewController(ThemeEditorViewController(theme: theme), animated: true)
+        } else if top === root {
+            present(from: root, showing: .theme(theme))
+        } else {
+            top.showAlert(
+                title: "Theme Imported",
+                message: "'\(theme.title)' is in Settings > Appearance > Custom Themes.")
+        }
     }
 
     // MARK: Being dismissed
@@ -1645,6 +1846,24 @@ private final class TerminalsSettingsViewController: SettingsListViewController 
                 ]),
 
             SettingsSection(
+                header: "Startup",
+                footer:
+                    "Start a program in place of sh when a terminal's session starts. Falls back to sh in case of failure. The Kernel Log's recovery login always uses sh.",
+                rows: [
+                    SettingsRow(
+                        id: "default-command",
+                        title: "Command",
+                        symbol: "apple.terminal",
+                        editable: EditableValue(
+                            text: AppSetting.defaultCommand.string,
+                            placeholder: "sh",
+                            commit: {
+                                AppSetting.defaultCommand.set($0)
+                                DefaultCommand.shared.settingChanged()
+                            }))
+                ]),
+
+            SettingsSection(
                 header: "System Terminals",
                 footer:
                     "Kernel Log streams the kernel log and also provides a recovery login when needed. VM Management is QEMU's monitor. Both run regardless of visibility. Closing the last terminal while both are hidden opens a new one.\n\nSwiping across the Show Terminals button, or pressing ⌘⇧[ and ⌘⇧], moves through open terminals. The system terminals shown can be included.",
@@ -1830,8 +2049,10 @@ private final class KeyboardSettingsViewController: SettingsListViewController {
 
 // MARK: - Appearance
 
-/// How the terminal looks.
-private final class AppearanceSettingsViewController: SettingsListViewController {
+/// How the terminal looks: the accent, the font size, and the themes.
+private final class AppearanceSettingsViewController: SettingsListViewController,
+    UIDocumentPickerDelegate
+{
 
     fileprivate override var isPage: Bool { true }
 
@@ -1842,6 +2063,8 @@ private final class AppearanceSettingsViewController: SettingsListViewController
 
         title = "Appearance"
         navigationItem.largeTitleDisplayMode = .never
+
+        reloadOnThemeChanges()
     }
 
     fileprivate override func buildSections() -> [SettingsSection] {
@@ -1872,6 +2095,36 @@ private final class AppearanceSettingsViewController: SettingsListViewController
                     }))
         }
 
+        let themes = TerminalThemes.Appearance.allCases.map { appearance in
+            SettingsRow(
+                id: "theme-\(appearance)",
+                title: appearance.themeTitle,
+                detail: TerminalThemes.selected(for: appearance).title,
+                symbol: appearance.symbol,
+                accessory: .disclosure,
+                select: { [weak self] in
+                    self?.push(ThemePickerViewController(purpose: .use(appearance)))
+                })
+        }
+
+        let custom = TerminalThemes.custom.map { theme in
+            SettingsRow(
+                id: "custom-theme-\(theme.id)",
+                title: theme.title,
+                image: theme.swatch,
+                accessory: .disclosure,
+                select: { [weak self] in self?.push(ThemeEditorViewController(theme: theme)) },
+                share: { [weak self] cell in self?.share(theme, view: cell) },
+                delete: { [weak self] in
+                    // At once, unless terminals use it, which asks first.
+                    guard TerminalThemes.appearances(using: theme.id).isEmpty else {
+                        self?.confirmDeletion(of: theme) {}
+                        return
+                    }
+                    TerminalThemes.delete(theme.id)
+                })
+        }
+
         return [
             SettingsSection(
                 header: "Interface",
@@ -1882,7 +2135,7 @@ private final class AppearanceSettingsViewController: SettingsListViewController
             SettingsSection(
                 header: "Terminal",
                 footer:
-                    "The default for every terminal. A terminal's menu in the switcher allows overriding it.",
+                    "Font Size is the default for every terminal. A terminal's menu in the switcher allows overriding it. The terminal theme choice (dark or light) matches the OS.",
                 rows: [
                     SettingsRow(
                         id: "font-size",
@@ -1891,6 +2144,31 @@ private final class AppearanceSettingsViewController: SettingsListViewController
                         symbol: "textformat.size",
                         accessory: .disclosure,
                         select: { [weak self] in self?.pushFontSize() })
+                ] + themes),
+
+            SettingsSection(
+                header: "Custom Themes",
+                footer:
+                    "New Custom Theme copies the theme in use and switches to the copy. Share a theme as a .tctheme file from its editor or by swiping it right. Swipe left to delete.",
+                rows: custom + [
+                    SettingsRow(
+                        id: "new-theme",
+                        title: "New Custom Theme",
+                        symbol: "plus",
+                        select: { [weak self] in self?.newTheme() }),
+                    SettingsRow(
+                        id: "new-theme-from",
+                        title: "New Custom Theme From",
+                        symbol: "plus.square.on.square",
+                        accessory: .disclosure,
+                        select: { [weak self] in
+                            self?.push(ThemePickerViewController(purpose: .base))
+                        }),
+                    SettingsRow(
+                        id: "import-theme",
+                        title: "Import Theme…",
+                        symbol: "square.and.arrow.down",
+                        select: { [weak self] in self?.importTheme() }),
                 ]),
         ]
     }
@@ -1903,6 +2181,326 @@ private final class AppearanceSettingsViewController: SettingsListViewController
                 options: Self.fontSizes.map { SettingsOption(title: "\($0)", value: $0) },
                 selected: { AppSetting.fontSize.integer },
                 choose: { AppSetting.fontSize.set($0) }))
+    }
+
+    // MARK: Custom themes
+
+    /// Copies the theme in use for the appearance iOS is in, switches to the
+    /// copy, and opens it, so that every change shows in the terminal at once.
+    private func newTheme() {
+        let appearance = TerminalThemes.Appearance(of: view)
+        let theme = TerminalThemes.copy(TerminalThemes.selected(for: appearance))
+        TerminalThemes.select(theme.id, for: appearance)
+        push(ThemeEditorViewController(theme: theme))
+    }
+
+    private func importTheme() {
+        // JSON and plain text too, for a theme written by hand or renamed on its way here
+        // (theme.tctheme.txt). Anything that isn't a theme is refused with the reason.
+        let picker = UIDocumentPickerViewController(
+            forOpeningContentTypes: [.terminalTheme, .json, .plainText], asCopy: true)
+        picker.delegate = self
+        present(picker, animated: true)
+    }
+
+    /// Adds the theme chosen, and opens it.
+    func documentPicker(
+        _ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]
+    ) {
+        guard let file = urls.first else { return }
+        // A copy, made for the picker, to go once it's read.
+        defer { try? FileManager.default.removeItem(at: file) }
+
+        if let theme = importTheme(from: file) {
+            push(ThemeEditorViewController(theme: theme))
+        }
+    }
+}
+
+/// Picks a theme: the one the terminals use for an appearance, or the one a new
+/// custom theme starts as a copy of.
+private final class ThemePickerViewController: SettingsListViewController {
+
+    enum Purpose {
+        /// The theme the terminals use in this appearance.
+        case use(TerminalThemes.Appearance)
+
+        /// The theme a new custom theme copies.
+        case base
+    }
+
+    private let purpose: Purpose
+
+    init(purpose: Purpose) {
+        self.purpose = purpose
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used; these screens are built in code")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        switch purpose {
+        case .use(let appearance): title = appearance.themeTitle
+        case .base: title = "New Custom Theme From"
+        }
+        navigationItem.largeTitleDisplayMode = .never
+
+        reloadOnThemeChanges()
+    }
+
+    fileprivate override func buildSections() -> [SettingsSection] {
+        let footer =
+            switch purpose {
+            case .use(let appearance):
+                "Every terminal uses this theme while iOS is in \(appearance.title.lowercased())."
+            case .base:
+                "The new theme starts as a copy of the one chosen."
+            }
+
+        let custom = TerminalThemes.custom
+        var sections = [
+            SettingsSection(
+                header: "Built In",
+                footer: custom.isEmpty ? footer : nil,
+                rows: TerminalThemes.builtIn.map(row))
+        ]
+        if !custom.isEmpty {
+            sections.append(
+                SettingsSection(header: "Custom", footer: footer, rows: custom.map(row)))
+        }
+        return sections
+    }
+
+    private func row(for theme: TerminalTheme) -> SettingsRow {
+        let accessory: RowAccessory =
+            switch purpose {
+            case .use(let appearance):
+                TerminalThemes.selected(for: appearance).id == theme.id ? .checkmark : .none
+            case .base:
+                .disclosure
+            }
+
+        return SettingsRow(
+            id: "theme-\(theme.id)",
+            title: theme.title,
+            image: theme.swatch,
+            accessory: accessory,
+            select: { [weak self] in self?.choose(theme) })
+    }
+
+    private func choose(_ theme: TerminalTheme) {
+        switch purpose {
+        case .use(let appearance):
+            TerminalThemes.select(theme.id, for: appearance)
+            popToPage()
+
+        case .base:
+            // The editor in this screen's place, so that Back from it goes to Appearance.
+            guard let navigation = navigationController, navigation.topViewController === self
+            else { return }
+            let editor = ThemeEditorViewController(theme: TerminalThemes.copy(theme))
+            navigation.setViewControllers(
+                navigation.viewControllers.dropLast() + [editor], animated: true)
+        }
+    }
+}
+
+/// Edits one of the user's themes, with a preview above the list that changes
+/// with it. Every change is saved as it's made.
+///
+/// Follows changes made elsewhere, as in another window on an iPad: it shows
+/// another editor's edits, and closes if the theme is deleted.
+private final class ThemeEditorViewController: SettingsListViewController {
+
+    private var theme: TerminalTheme
+    private let preview: ThemePreview
+
+    /// The appearances the Use switches were last shown for.
+    private var shownUses: [TerminalThemes.Appearance] = []
+
+    init(theme: TerminalTheme) {
+        self.theme = theme
+        preview = ThemePreview(theme: theme)
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used; these screens are built in code")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        title = theme.title
+        navigationItem.largeTitleDisplayMode = .never
+
+        let share = UIBarButtonItem(
+            image: UIImage(systemName: "square.and.arrow.up"), style: .plain, target: self,
+            action: #selector(shareTheme(_:)))
+        share.accessibilityLabel = "Share Theme"
+        navigationItem.rightBarButtonItem = share
+
+        observers.append(
+            NotificationCenter.default.addObserver(
+                forName: TerminalThemes.didChange, object: nil, queue: .main
+            ) { [weak self] _ in self?.themesChanged() })
+
+        // A part of the preview tapped shows the row for its color.
+        preview.onTap = { [weak self] role in self?.reveal("color-\(role.key)") }
+
+        // Short of height, as an iPhone on its side is, the preview shrinks to leave room for the
+        // list.
+        preview.isCompact = traitCollection.verticalSizeClass == .compact
+        registerForTraitChanges([UITraitVerticalSizeClass.self]) {
+            (editor: ThemeEditorViewController, _) in
+            editor.preview.isCompact = editor.traitCollection.verticalSizeClass == .compact
+        }
+    }
+
+    /// Catches up with a change made elsewhere. Edits made here are already
+    /// shown, and reloading for them would reset a color well under the finger.
+    private func themesChanged() {
+        guard let saved = TerminalThemes.custom.first(where: { $0.id == theme.id }) else {
+            close()
+            return
+        }
+        let uses = TerminalThemes.appearances(using: theme.id)
+        guard saved != theme || uses != shownUses else { return }
+
+        theme = saved
+        preview.theme = saved
+        title = saved.title
+        reload()
+    }
+
+    /// Closes the editor, for a theme that's gone.
+    private func close() {
+        guard let navigation = navigationController, navigation.viewControllers.contains(self)
+        else { return }
+        navigation.setViewControllers(
+            navigation.viewControllers.filter { $0 !== self },
+            animated: navigation.topViewController === self)
+    }
+
+    /// The preview, inset as the list's rows are.
+    fileprivate override func makePinnedHeader() -> UIView? {
+        let container = UIView()
+        container.backgroundColor = .systemGroupedBackground
+        container.preservesSuperviewLayoutMargins = true
+
+        preview.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(preview)
+        NSLayoutConstraint.activate([
+            preview.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
+            preview.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -4),
+            preview.leadingAnchor.constraint(equalTo: container.layoutMarginsGuide.leadingAnchor),
+            preview.trailingAnchor.constraint(
+                equalTo: container.layoutMarginsGuide.trailingAnchor),
+        ])
+        return container
+    }
+
+    fileprivate override func buildSections() -> [SettingsSection] {
+        shownUses = TerminalThemes.appearances(using: theme.id)
+        let uses = TerminalThemes.Appearance.allCases.map { appearance in
+            SettingsRow(
+                id: "use-\(appearance)",
+                title: "Use in \(appearance.title)",
+                symbol: appearance.symbol,
+                toggle: ToggleValue(
+                    isOn: shownUses.contains(appearance),
+                    commit: { [weak self] on in
+                        guard let self else { return }
+                        if on {
+                            TerminalThemes.select(theme.id, for: appearance)
+                        } else if TerminalThemes.selected(for: appearance).id == theme.id {
+                            // Not if another window has since chosen a different theme.
+                            TerminalThemes.select(nil, for: appearance)
+                        }
+                    }))
+        }
+
+        return [
+            SettingsSection(
+                header: nil,
+                footer:
+                    "Terminals using this theme change as it's edited.",
+                rows: [
+                    SettingsRow(
+                        id: "name",
+                        title: "Name",
+                        symbol: "character.cursor.ibeam",
+                        editable: EditableValue(
+                            text: theme.name,
+                            placeholder: "Untitled Theme",
+                            capitalization: .words,
+                            commit: { [weak self] in self?.rename($0) }))
+                ] + uses),
+
+            SettingsSection(header: "Text", footer: nil, rows: TerminalTheme.Role.text.map(row)),
+            SettingsSection(
+                header: "Colors", footer: nil, rows: TerminalTheme.Role.normal.map(row)),
+            SettingsSection(
+                header: "Bright Colors",
+                footer: "Bold text in one of the colors above is drawn in its bright version.",
+                rows: TerminalTheme.Role.bright.map(row)),
+
+            SettingsSection(
+                header: nil,
+                footer: nil,
+                rows: [
+                    SettingsRow(
+                        id: "delete",
+                        title: "Delete Theme",
+                        symbol: "trash",
+                        select: { [weak self] in self?.confirmDeletion() },
+                        isDestructive: true)
+                ]),
+        ]
+    }
+
+    private func row(for role: TerminalTheme.Role) -> SettingsRow {
+        SettingsRow(
+            id: "color-\(role.key)",
+            title: role.title,
+            color: ColorValue(
+                color: theme[role].uiColor,
+                commit: { [weak self] color in self?.set(role, to: color) }))
+    }
+
+    /// Not reloaded, which would rebuild the list under the picker as it's
+    /// dragged.
+    private func set(_ role: TerminalTheme.Role, to color: UIColor) {
+        theme[role] = ThemeColor(color)
+        save()
+    }
+
+    private func rename(_ name: String) {
+        theme.name = name
+        save()
+        title = theme.title
+    }
+
+    /// Saves the theme, unless it was deleted in another window, which closes
+    /// the editor.
+    private func save() {
+        guard TerminalThemes.update(theme) else {
+            close()
+            return
+        }
+        preview.theme = theme
+    }
+
+    private func confirmDeletion() {
+        confirmDeletion(of: theme) { [weak self] in self?.close() }
+    }
+
+    @objc private func shareTheme(_ item: UIBarButtonItem) {
+        share(theme, from: item)
     }
 }
 
@@ -2040,6 +2638,34 @@ extension UIViewController {
         top.present(alert, animated: true)
     }
 
+    /// Deletes one of the user's themes once the user agrees, then calls
+    /// `deleted`.
+    fileprivate func confirmDeletion(of theme: TerminalTheme, deleted: @escaping () -> Void) {
+        let inUse = !TerminalThemes.appearances(using: theme.id).isEmpty
+        confirm(
+            title: "Delete Theme?",
+            message: "'\(theme.title)' is deleted."
+                + (inUse ? " Terminals using it go back to the default theme." : "")
+                + " This can't be undone.",
+            action: "Delete"
+        ) {
+            TerminalThemes.delete(theme.id)
+            deleted()
+        }
+    }
+
+    /// Adds the theme in `file` to the user's themes and returns it, or says
+    /// why it couldn't and returns nil.
+    fileprivate func importTheme(from file: URL) -> TerminalTheme? {
+        do {
+            return try TerminalThemes.importFile(at: file)
+        } catch {
+            Log.ui.warn("themes: couldn't import \(file.lastPathComponent): \(error)")
+            showAlert(title: "Couldn't Import Theme", message: error.localizedDescription)
+            return nil
+        }
+    }
+
     /// Asks before doing something that can't be taken back.
     func confirm(
         title: String, message: String, action: String, _ perform: @escaping () -> Void
@@ -2114,8 +2740,33 @@ extension UIViewController {
         present(alert, animated: true)
     }
 
-    /// Offers files through the share sheet, anchored to `item` on iPad.
-    fileprivate func share(_ files: [URL], from item: UIBarButtonItem?) {
+    /// Shares `theme` as a `.tctheme` file, which Import Theme reads, from
+    /// `item` or `view` on iPad.
+    fileprivate func share(
+        _ theme: TerminalTheme, from item: UIBarButtonItem? = nil, view: UIView? = nil
+    ) {
+        // A folder for each share, as a sheet in another window, or AirDrop, may still be sending
+        // the last one. The system clears out tmp in time.
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Themes", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let file = folder.appendingPathComponent(theme.fileName)
+
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try theme.fileContents.write(to: file, atomically: true, encoding: .utf8)
+        } catch {
+            Log.ui.warn("themes: couldn't write \(file.lastPathComponent): \(error)")
+            showAlert(title: "Couldn't Share Theme", message: error.localizedDescription)
+            return
+        }
+
+        share([file], from: item, view: view)
+    }
+
+    /// Offers files through the share sheet, anchored to `item` or `view` on
+    /// iPad.
+    fileprivate func share(_ files: [URL], from item: UIBarButtonItem?, view: UIView? = nil) {
         let existing = files.filter { FileManager.default.fileExists(atPath: $0.path) }
         guard !existing.isEmpty else {
             showAlert(title: "Nothing to Share", message: "There are no log files yet.")
@@ -2123,7 +2774,12 @@ extension UIViewController {
         }
 
         let sheet = UIActivityViewController(activityItems: existing, applicationActivities: nil)
-        sheet.popoverPresentationController?.barButtonItem = item
+        if let item {
+            sheet.popoverPresentationController?.barButtonItem = item
+        } else if let view {
+            sheet.popoverPresentationController?.sourceView = view
+            sheet.popoverPresentationController?.sourceRect = view.bounds
+        }
         present(sheet, animated: true)
     }
 }

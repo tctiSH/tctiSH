@@ -49,7 +49,10 @@ final class StatusPresenter {
     /// A view in the parent that a long pill stops short of, such as a button
     /// at the same height.
     weak var keepsClearOf: UIView?
-    private let backdrop: UIColor
+
+    /// What a new pill sits on, read as each is made, since a terminal's
+    /// background changes with its theme.
+    private let backdrop: () -> UIColor
 
     /// The pills on screen, top to bottom, in the order they were added.
     private var pills: [(key: String, pill: StatusPill)] = []
@@ -57,7 +60,7 @@ final class StatusPresenter {
     /// Pending auto-dismissals, by key.
     private var expiries: [String: DispatchWorkItem] = [:]
 
-    init(over parent: UIView, backdrop: UIColor) {
+    init(over parent: UIView, backdrop: @escaping () -> UIColor) {
         self.parent = parent
         self.backdrop = backdrop
     }
@@ -78,7 +81,7 @@ final class StatusPresenter {
             let pill = StatusPill.show(
                 in: parent,
                 title: item.message,
-                over: backdrop,
+                over: backdrop(),
                 topOffset: offset(forRow: pills.count),
                 clearOf: keepsClearOf)
             pill.setState(item.state, animated: false)

@@ -109,6 +109,9 @@ enum LowlevelCommands {
     #[clap(about = "Prints the 9p cache mode tctiSH wants shared folders mounted with")]
     ShareCache {},
 
+    #[clap(about = "Prints the command tctiSH starts in new terminals, or nothing for the shell")]
+    DefaultCommand {},
+
     #[clap(about = "Fetches the host's perspective on our CWD.")]
     GetCWD {},
 
@@ -225,6 +228,10 @@ fn lowlevel(subcommand: LowlevelCommands) {
         }
 
         LowlevelCommands::ShareCache {} => println!("{}", mount::share_cache()),
+
+        LowlevelCommands::DefaultCommand {} => {
+            exit_on_error(simple::default_command().map(|command| println!("{command}")))
+        }
 
         LowlevelCommands::GetCWD {} => {
             let result = simple::handle_getcwd();

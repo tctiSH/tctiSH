@@ -366,14 +366,7 @@ final class StatusPill: UIView {
     /// luminance instead keeps the pill in the same world as the thing behind
     /// it.
     private static func style(toSitOn backdrop: UIColor) -> UIUserInterfaceStyle {
-        var luminance: CGFloat = 0
-        var alpha: CGFloat = 0
-
-        guard backdrop.getWhite(&luminance, alpha: &alpha) else {
-            return .unspecified
-        }
-
-        return luminance < 0.5 ? .dark : .light
+        TerminalTheme.interfaceStyle(over: backdrop)
     }
 }
 

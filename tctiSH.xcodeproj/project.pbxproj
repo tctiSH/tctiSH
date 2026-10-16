@@ -42,6 +42,9 @@
 		AD7C1A4000000040005A2252 /* StikJIT.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AD7C1A0800000008005A2252 /* StikJIT.xcframework */; };
 		AD7C1A4100000041005A2252 /* StikJIT.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = AD7C1A0800000008005A2252 /* StikJIT.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		DCF690CA305583AC0091B7D0 /* JITHelper.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = DCF690C3305583AC0091B7D0 /* JITHelper.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		7E7A000400000000C0DE0004 /* ThemeThumbnail.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 7E7A000300000000C0DE0003 /* ThemeThumbnail.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		7E7A001100000000C0DE0011 /* ThemeQuickLook.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 7E7A001000000000C0DE0010 /* ThemeQuickLook.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		7E7A00FE00000000C0DE00FE /* QuickLook.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7E7A00FF00000000C0DE00FF /* QuickLook.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -51,6 +54,20 @@
 			proxyType = 1;
 			remoteGlobalIDString = DCF690C2305583AC0091B7D0;
 			remoteInfo = JITHelper;
+		};
+		7E7A000500000000C0DE0005 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 49BD1A52224207B4005A2252 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7E7A000200000000C0DE0002;
+			remoteInfo = ThemeThumbnail;
+		};
+		7E7A001200000000C0DE0012 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 49BD1A52224207B4005A2252 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7E7A000F00000000C0DE000F;
+			remoteInfo = ThemeQuickLook;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -94,6 +111,8 @@
 			dstSubfolderSpec = 13;
 			files = (
 				DCF690CA305583AC0091B7D0 /* JITHelper.appex in Embed Foundation Extensions */,
+				7E7A001100000000C0DE0011 /* ThemeQuickLook.appex in Embed Foundation Extensions */,
+				7E7A000400000000C0DE0004 /* ThemeThumbnail.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -124,6 +143,9 @@
 		8DF5F05328C1C18200FB1F1C /* efi-virtio.rom */ = {isa = PBXFileReference; lastKnownFileType = file; name = "efi-virtio.rom"; path = "sysroot-iOS-arm64/share/qemu/efi-virtio.rom"; sourceTree = "<group>"; };
 		AD7C1A0800000008005A2252 /* StikJIT.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = StikJIT.xcframework; path = "build-StikJIT/StikJIT.xcframework"; sourceTree = SOURCE_ROOT; };
 		DCF690C3305583AC0091B7D0 /* JITHelper.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = JITHelper.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		7E7A000300000000C0DE0003 /* ThemeThumbnail.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ThemeThumbnail.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		7E7A001000000000C0DE0010 /* ThemeQuickLook.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ThemeQuickLook.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		7E7A00FF00000000C0DE00FF /* QuickLook.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuickLook.framework; path = System/Library/Frameworks/QuickLook.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -140,6 +162,20 @@
 				Info.plist,
 			);
 			target = DCF690C2305583AC0091B7D0 /* JITHelper */;
+		};
+		7E7A000800000000C0DE0008 /* Exceptions for "ThemeThumbnail" folder in "ThemeThumbnail" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 7E7A000200000000C0DE0002 /* ThemeThumbnail */;
+		};
+		7E7A001500000000C0DE0015 /* Exceptions for "ThemeQuickLook" folder in "ThemeQuickLook" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 7E7A000F00000000C0DE000F /* ThemeQuickLook */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -179,6 +215,41 @@
 			path = JITHelper;
 			sourceTree = "<group>";
 		};
+		7E7A000100000000C0DE0001 /* ThemeShared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			path = ThemeShared;
+			sourceTree = "<group>";
+		};
+		7E7A000700000000C0DE0007 /* ThemeThumbnail */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				7E7A000800000000C0DE0008 /* Exceptions for "ThemeThumbnail" folder in "ThemeThumbnail" target */,
+			);
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			path = ThemeThumbnail;
+			sourceTree = "<group>";
+		};
+		7E7A001400000000C0DE0014 /* ThemeQuickLook */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				7E7A001500000000C0DE0015 /* Exceptions for "ThemeQuickLook" folder in "ThemeQuickLook" target */,
+			);
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			path = ThemeQuickLook;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -210,6 +281,21 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7E7A000A00000000C0DE000A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7E7A001700000000C0DE0017 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7E7A00FE00000000C0DE00FE /* QuickLook.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -217,6 +303,7 @@
 			isa = PBXGroup;
 			children = (
 				AD7C1A0800000008005A2252 /* StikJIT.xcframework */,
+				7E7A00FF00000000C0DE00FF /* QuickLook.framework */,
 				8DF5F03428C1BCEB00FB1F1C /* charset.1.framework */,
 				8DF5F03328C1BCEB00FB1F1C /* ffi.8.framework */,
 				8DF5F03628C1BCEB00FB1F1C /* gio-2.0.0.framework */,
@@ -247,6 +334,9 @@
 				49BD1A5C224207B5005A2252 /* tctiSH */,
 				DCF690C4305583AC0091B7D0 /* JITHelper */,
 				AD7C1A2000000020005A2252 /* JITHelperProtocol */,
+				7E7A000100000000C0DE0001 /* ThemeShared */,
+				7E7A000700000000C0DE0007 /* ThemeThumbnail */,
+				7E7A001400000000C0DE0014 /* ThemeQuickLook */,
 				49BD1A5B224207B5005A2252 /* Products */,
 				49AE019F2410AB0A0051E902 /* Frameworks */,
 			);
@@ -259,6 +349,8 @@
 			children = (
 				49BD1A5A224207B5005A2252 /* tctiSH.app */,
 				DCF690C3305583AC0091B7D0 /* JITHelper.appex */,
+				7E7A001000000000C0DE0010 /* ThemeQuickLook.appex */,
+				7E7A000300000000C0DE0003 /* ThemeThumbnail.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -288,10 +380,13 @@
 			);
 			dependencies = (
 				DCF690C9305583AC0091B7D0 /* PBXTargetDependency */,
+				7E7A001300000000C0DE0013 /* PBXTargetDependency */,
+				7E7A000600000000C0DE0006 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				49BD1A5C224207B5005A2252 /* tctiSH */,
 				AD7C1A2000000020005A2252 /* JITHelperProtocol */,
+				7E7A000100000000C0DE0001 /* ThemeShared */,
 			);
 			name = tctiSH;
 			packageProductDependencies = (
@@ -324,6 +419,48 @@
 			productReference = DCF690C3305583AC0091B7D0 /* JITHelper.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		7E7A000200000000C0DE0002 /* ThemeThumbnail */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7E7A000E00000000C0DE000E /* Build configuration list for PBXNativeTarget "ThemeThumbnail" */;
+			buildPhases = (
+				7E7A000900000000C0DE0009 /* Sources */,
+				7E7A000A00000000C0DE000A /* Frameworks */,
+				7E7A000B00000000C0DE000B /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				7E7A000100000000C0DE0001 /* ThemeShared */,
+				7E7A000700000000C0DE0007 /* ThemeThumbnail */,
+			);
+			name = ThemeThumbnail;
+			productName = ThemeThumbnail;
+			productReference = 7E7A000300000000C0DE0003 /* ThemeThumbnail.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		7E7A000F00000000C0DE000F /* ThemeQuickLook */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7E7A001B00000000C0DE001B /* Build configuration list for PBXNativeTarget "ThemeQuickLook" */;
+			buildPhases = (
+				7E7A001600000000C0DE0016 /* Sources */,
+				7E7A001700000000C0DE0017 /* Frameworks */,
+				7E7A001800000000C0DE0018 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				7E7A000100000000C0DE0001 /* ThemeShared */,
+				7E7A001400000000C0DE0014 /* ThemeQuickLook */,
+			);
+			name = ThemeQuickLook;
+			productName = ThemeQuickLook;
+			productReference = 7E7A001000000000C0DE0010 /* ThemeQuickLook.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -339,6 +476,12 @@
 						LastSwiftMigration = 1400;
 					};
 					DCF690C2305583AC0091B7D0 = {
+						CreatedOnToolsVersion = 27.0;
+					};
+					7E7A000F00000000C0DE000F = {
+						CreatedOnToolsVersion = 27.0;
+					};
+					7E7A000200000000C0DE0002 = {
 						CreatedOnToolsVersion = 27.0;
 					};
 				};
@@ -362,6 +505,8 @@
 			targets = (
 				49BD1A59224207B5005A2252 /* tctiSH */,
 				DCF690C2305583AC0091B7D0 /* JITHelper */,
+				7E7A000200000000C0DE0002 /* ThemeThumbnail */,
+				7E7A000F00000000C0DE000F /* ThemeQuickLook */,
 			);
 		};
 /* End PBXProject section */
@@ -389,6 +534,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7E7A000B00000000C0DE000B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7E7A001800000000C0DE0018 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
@@ -409,6 +568,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7E7A000900000000C0DE0009 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7E7A001600000000C0DE0016 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -416,6 +589,16 @@
 			isa = PBXTargetDependency;
 			target = DCF690C2305583AC0091B7D0 /* JITHelper */;
 			targetProxy = DCF690C8305583AC0091B7D0 /* PBXContainerItemProxy */;
+		};
+		7E7A000600000000C0DE0006 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 7E7A000200000000C0DE0002 /* ThemeThumbnail */;
+			targetProxy = 7E7A000500000000C0DE0005 /* PBXContainerItemProxy */;
+		};
+		7E7A001300000000C0DE0013 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 7E7A000F00000000C0DE000F /* ThemeQuickLook */;
+			targetProxy = 7E7A001200000000C0DE0012 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -692,6 +875,108 @@
 			};
 			name = Release;
 		};
+		7E7A000C00000000C0DE000C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = SU8B32Z5KR;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ThemeThumbnail/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Theme Thumbnail";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.ara.tctiSH.ThemeThumbnail;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		7E7A000D00000000C0DE000D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = SU8B32Z5KR;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ThemeThumbnail/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Theme Thumbnail";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.ara.tctiSH.ThemeThumbnail;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		7E7A001900000000C0DE0019 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = SU8B32Z5KR;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ThemeQuickLook/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Theme Quick Look";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.ara.tctiSH.ThemeQuickLook;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		7E7A001A00000000C0DE001A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = SU8B32Z5KR;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ThemeQuickLook/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Theme Quick Look";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.ara.tctiSH.ThemeQuickLook;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -718,6 +1003,24 @@
 			buildConfigurations = (
 				DCF690CC305583AC0091B7D0 /* Debug */,
 				DCF690CD305583AC0091B7D0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7E7A000E00000000C0DE000E /* Build configuration list for PBXNativeTarget "ThemeThumbnail" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7E7A000C00000000C0DE000C /* Debug */,
+				7E7A000D00000000C0DE000D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7E7A001B00000000C0DE001B /* Build configuration list for PBXNativeTarget "ThemeQuickLook" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7E7A001900000000C0DE0019 /* Debug */,
+				7E7A001A00000000C0DE001A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

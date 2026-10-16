@@ -118,7 +118,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             "boot_snapshot": "",
             "disk_name": "disk",
             "font_size": 14,
-            "theme": "solzarizedDark",
+            "dark_terminal_theme": TerminalThemes.Appearance.dark.defaultID,
+            "light_terminal_theme": TerminalThemes.Appearance.light.defaultID,
             "attempting_boot": false,
             "jit_mode": ExecutionMode.dynamicAuto.rawValue,
             "flush_jit_buffers": false,
@@ -141,6 +142,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             "show_kernel_log": false,
             "show_vm_management": false,
             "keep_programs_when_closing_window": true,
+            "default_command": "",
         ])
 
         // Before anything reads it.
@@ -197,6 +199,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
         // The menu bar lists the windows, so it rebuilds as their number changes.
         MenuBar.watchWindows()
+        MenuBar.watchThemes()
 
         // Settings First holds the boot until settings is closed.
         NotificationCenter.default.addObserver(
