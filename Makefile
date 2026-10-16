@@ -44,7 +44,7 @@ HOST_QEMU_ROOT    := $(HOST_QEMU_BUILD)/nix-gc-root
 
 # Checked only for the targets that use it, so that a BACKEND some other tool left in the
 # environment cannot stop every other target from running.
-ifneq ($(filter host-qemu boot-guest,$(MAKECMDGOALS)),)
+ifneq ($(filter host-qemu boot-guest bench,$(MAKECMDGOALS)),)
     ifeq ($(filter $(BACKEND),jit tcti),)
         $(error BACKEND must be jit or tcti, not '$(BACKEND)')
     endif
@@ -190,6 +190,52 @@ kernel-config: ## Resolve the guest kernel config and report the delta, without 
 .PHONY: boot-guest
 boot-guest: $(if $(or $(TCTISH_QEMU),$(filter --help -h,$(ARGS))),,$(call HOST_QEMU,$(BACKEND))) ## Boot the guest image locally on our QEMU (BACKEND=jit|tcti; ARGS=--help for options)
 	./assets/boot_guest.sh --backend $(BACKEND) $(ARGS)
+
+# -- Benchmarking ---------------------------------------------------------------------------------
+
+# The suite in utils/bench: real programs, timed in the guest on our QEMU, built for this Mac. See
+# utils/bench/README.md for the workloads and how to read the results. It runs the hybrid build, the
+# one QEMU with both backends that the app ships, started on BACKEND; BENCH_QEMU runs another build
+# instead, such as a baseline, and skips building the hybrid.
+#
+# Everything it makes is in build-bench/: the disk, the results and each round's logs.
+BENCH_DISK  := build-bench/bench.qcow
+BENCH_QEMU  ?=
+HYBRID_QEMU := $(call HOST_QEMU,hybrid)
+
+# Installs the workloads' programs onto a copy of the app's empty disk, on the JIT, over the
+# network. Not rebuilt when the guest image changes: results are only comparable on one disk, so
+# making a new one is a decision, made with `make clean-bench bench-disk`.
+$(BENCH_DISK): | $(if $(BENCH_QEMU),,$(HYBRID_QEMU))
+	python3 utils/bench/bench.py prepare $(if $(BENCH_QEMU),--qemu $(BENCH_QEMU))
+
+.PHONY: bench-disk
+bench-disk: $(BENCH_DISK) ## Build build-bench/bench.qcow, the disk the benchmarks run on (needs the network)
+
+# Timing wants a quiet Mac: each round's times are as noisy as whatever else is running.
+.PHONY: bench
+bench: $(BENCH_DISK) $(if $(BENCH_QEMU),,$(HYBRID_QEMU)) ## Run the benchmarks (BACKEND=jit|tcti; WORKLOADS="a b"; ROUNDS=n; LABEL=name; ARGS=more options)
+	python3 utils/bench/bench.py run --backend $(BACKEND) \
+		$(if $(BENCH_QEMU),--qemu $(BENCH_QEMU)) $(if $(WORKLOADS),--workloads "$(WORKLOADS)") \
+		$(if $(ROUNDS),--rounds $(ROUNDS)) $(if $(LABEL),--label $(LABEL)) $(ARGS)
+
+# A build of the hybrid from another fork commit, beside the default build, for `make bench
+# BENCH_QEMU=...` to time against: build-macOS-arm64/qemu_hybrid-<NAME>, NAME defaulting to the
+# commit. A full QEMU build, as long as `host-qemu`'s.
+.PHONY: bench-baseline
+bench-baseline: ## Build the hybrid QEMU from a fork commit to compare against (COMMIT=sha; NAME=suffix)
+	@test -n "$(COMMIT)" || { echo "error: name the fork commit: COMMIT=<sha>" >&2; exit 1; }
+	python3 utils/bench/bench.py baseline $(COMMIT) $(if $(NAME),--name $(NAME))
+
+.PHONY: bench-compare
+bench-compare: ## Tabulate benchmark results against the first label (LABELS="a b ...")
+	@test -n "$(LABELS)" || { echo "error: name the results to compare: LABELS=\"a b\"" >&2; \
+		ls build-bench/results 2>/dev/null | sed 's/\.jsonl$$//; s/^/  /' >&2; exit 1; }
+	@python3 utils/bench/bench.py compare $(LABELS)
+
+.PHONY: bench-list
+bench-list: ## Name the benchmark workloads
+	@python3 utils/bench/bench.py list
 
 .PHONY: rootfs-lock
 rootfs-lock: ## Re-resolve the guest's Alpine packages and rewrite assets/rootfs.lock
@@ -399,6 +445,11 @@ clean-kernel: ## Remove the kernel build tree and the pinned toolchain volume
 .PHONY: clean-deps
 clean-deps: ## Remove the QEMU sysroot and its build tree (~6 minutes to rebuild, plus downloads)
 	rm -rf $(QEMU_SYSROOT) build-iOS-arm64
+
+# Results are only comparable on the disk they ran on, so this removes them along with it.
+.PHONY: clean-bench
+clean-bench: ## Remove the benchmark disk, results and logs in build-bench/
+	rm -rf build-bench
 
 # Both backends at once, and the GC root with them. Also what a change to build_host_qemu.sh's
 # configure flags needs, since a configured build tree is kept and only rebuilt.

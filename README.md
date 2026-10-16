@@ -299,6 +299,20 @@ Running the guest on our QEMU cannot exercise the iOS-specific code paths, inclu
 blessing of the code buffer, the purgeable code cache, and iOS's refusal to run unblessed code, as
 well as the app's launcher. Testing those still needs to be done on a real device.
 
+### Benchmarking
+
+`utils/bench` times real programs in the guest on our QEMU fork, built for the Mac as above, to
+measure changes to the emulator:
+
+```sh
+make bench-disk                                      # once: installs the workloads onto a disk
+make bench BACKEND=tcti ROUNDS=3                     # every workload, three rounds
+make bench-compare LABELS="tcti-base tcti-change"    # medians, ratios and output checks
+```
+
+The workloads range from a Cycles render and a Lean build to typing into xonsh and running Node.js,
+and each also checks that each run computes the same results as the others.
+
 ### Formatting
 
 We have comprehensive code and documentation formatting set up in the repository, which must be run

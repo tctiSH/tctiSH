@@ -5,6 +5,9 @@ UserInterfaceState.xcuserstate
 *.userdatad
 xcuserdata
 
+# Python's bytecode caches, which the host-side scripts in utils/ leave beside themselves.
+__pycache__/
+
 # Linux assets.
 *.qcow*
 assets/boot_guest.log
@@ -17,3 +20,4 @@ build-StikJIT/
 build-idevice/
 build-kernel/
 build-macOS-arm64/
+build-bench/

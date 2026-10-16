@@ -12,6 +12,9 @@ interpretable using the base environment.
 
 These run on the development machine rather than inside tctiSH.
 
+- `bench` is the benchmark suite: real programs (Blender, Lean, sympy, xonsh, gcc, Node.js) timed in
+  the guest on our QEMU, built for this Mac, so that emulator changes can be measured and checked
+  for correctness. `make bench-disk`, then `make bench`; see [its README](./bench/README.md)
 - `jit-bless` is an LLDB script implementing the iOS 26+ JIT breakpoint protocol, so the JIT path
   can be debugged under Xcode without StikJIT in the loop
 - `reflow-comments` refills Swift and Rust comment paragraphs -- doc comments to 80 columns, the

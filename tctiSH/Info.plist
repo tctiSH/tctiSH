@@ -6,7 +6,8 @@
 	<array>
 		<string>io.ara.tctish.pairing</string>
 	</array>
-	<!-- Terminal themes, which open in Settings from Files or AirDrop. See SceneDelegate. -->
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -22,8 +23,6 @@
 			</array>
 		</dict>
 	</array>
-	<key>CFBundleDevelopmentRegion</key>
-	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -45,15 +44,12 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_remotepairing-pairable-host._tcp</string>
-		<!-- Exists only to raise the Local Network prompt deliberately. See LocalNetworkPermission.swift. -->
 		<string>_tctishprobe._tcp</string>
 	</array>
-	<!-- tctiSH's UIApplication, which sees every key whatever has the keyboard. See TctiApplication.swift. -->
-	<key>NSPrincipalClass</key>
-	<string>TctiApplication</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>tctiSH advertises itself on your local network so this device can pair with it, which is what lets the VM run with JIT.</string>
-	<!-- A TTY moving to a new window, by menu or by dragging its card out. See WindowScenes. -->
+	<key>NSPrincipalClass</key>
+	<string>TctiApplication</string>
 	<key>NSUserActivityTypes</key>
 	<array>
 		<string>io.ara.tctish.tty</string>
@@ -146,22 +142,18 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-	<!-- A terminal theme, shared and imported from Settings > Appearance. See TerminalTheme.swift.
-	     Data rather than text, though it's JSON with comments: Quick Look shows text files itself,
-	     and would show this as its JSON rather than through the ThemeThumbnail and ThemeQuickLook
-	     extensions. -->
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
-			<key>UTTypeIdentifier</key>
-			<string>io.ara.tctiSH.terminal-theme</string>
-			<key>UTTypeDescription</key>
-			<string>tctiSH Terminal Theme</string>
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>public.data</string>
 				<string>public.content</string>
 			</array>
+			<key>UTTypeDescription</key>
+			<string>tctiSH Terminal Theme</string>
+			<key>UTTypeIdentifier</key>
+			<string>io.ara.tctiSH.terminal-theme</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>
