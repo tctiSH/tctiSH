@@ -1,0 +1,60 @@
+# created by pngn7105 02.10.2026
+# tree in step 6 is installed for debugging
+name: Build tctiSH IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build IPA
+    runs-on: xcode-27
+    env:
+      UPLOAD_IPA: ${{ vars.UPLOAD_IPA || 'true' }}
+
+    steps:
+      - name: 1. Fetch Source Code
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: 2. Set Up Nix
+        run: |
+          curl --proto '=https' --tlsv1.2 -L https://nixos.org/nix/install | sh
+          echo "/nix/var/nix/profiles/default/bin" >> "$GITHUB_PATH"
+          mkdir -p "$HOME/.config/nix"
+          echo "experimental-features = nix-command flakes" >> "$HOME/.config/nix/nix.conf"
+
+      - name: 3. Configure Xcode Environment
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "latest"
+
+      - name: 4. Build App and Dependencies
+        run: |
+          make build GUEST=prebuilt SKIP_CODESIGNING=1 XCARCHIVE_BUILD=1
+
+
+      - name: 5. Package .app into .ipa
+        env:
+          IPA_PATH: ${{ runner.temp }}/tctiSH.ipa
+        run: |
+          APP_PATH="$HOME/tctiSH.xcarchive/Products/Applications/tctiSH.app"
+          brew install tree
+          tree
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP_PATH" "$RUNNER_TEMP/Payload/"
+          cd "$RUNNER_TEMP"
+          zip -qry tctiSH.ipa Payload
+
+      - name: 6. Store IPA as Workflow Artifact
+        if: env.UPLOAD_IPA == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tctiSH.ipa
+          path: ${{ runner.temp }}/tctiSH.ipa
+          retention-days: 90
+          if-no-files-found: error
