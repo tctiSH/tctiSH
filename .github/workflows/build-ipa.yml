@@ -36,13 +36,14 @@ jobs:
       - name: 4. Build App and Dependencies
         run: |
           make build GUEST=prebuilt SKIP_CODESIGNING=1 XCARCHIVE_BUILD=1
+          mv "$HOME/tctiSH.xcarchive" "$RUNNER_TEMP/tctiSH.xcarchive"
 
 
       - name: 5. Package .app into .ipa
         env:
           IPA_PATH: ${{ runner.temp }}/tctiSH.ipa
+          APP_PATH: ${{ runner.temp }}/tctiSH.xcarchive/Products/Applications/tctiSH.app
         run: |
-          APP_PATH="$HOME/tctiSH.xcarchive/Products/Applications/tctiSH.app"
           brew install tree
           tree
           mkdir -p "$RUNNER_TEMP/Payload"
