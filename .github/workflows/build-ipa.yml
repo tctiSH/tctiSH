@@ -18,6 +18,7 @@ jobs:
     runs-on: xcode-27
     env:
       UPLOAD_IPA: ${{ vars.UPLOAD_IPA || 'true' }}
+      UPLOAD_ARCHIVE: ${{ vars.UPLOAD_ARCHIVE || 'true' }}
 
     steps:
       - name: 1. Fetch Source Code
@@ -62,5 +63,14 @@ jobs:
         with:
           name: tctiSH.ipa
           path: ${{ runner.temp }}/tctiSH.ipa
+          retention-days: 90
+          if-no-files-found: error
+          
+      - name: 7. Store xcarchive as Workflow Artifact
+        if: env.UPLOAD_ARCHIVE == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tctiSH.xcarchive
+          path: ${{ runner.temp }}/tctiSH.xcarchive
           retention-days: 90
           if-no-files-found: error
