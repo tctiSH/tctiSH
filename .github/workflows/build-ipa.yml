@@ -39,6 +39,7 @@ jobs:
 
       - name: 4. Build App and Dependencies
         run: |
+          xcodebuild -downloadComponent MetalToolchain
           make build GUEST=prebuilt SKIP_CODESIGNING=1 XCARCHIVE_BUILD=1
           mv "$HOME/tctiSH.xcarchive" "$RUNNER_TEMP/tctiSH.xcarchive"
 
