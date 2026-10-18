@@ -274,10 +274,21 @@ endif
 # SwiftTerm generates its version information with a build-tool plugin, which Xcode will only run
 # once someone has trusted it in the IDE. A command-line build has nobody to ask, so skips the check
 # instead.
+XCODEBUILD_ACTION := build
+XCODEBUILD_ARCHIVE_ARGS :=
+XCODEBUILD_CODESIGN_ARGS :=
+ifeq ($(XCARCHIVE_BUILD),1)
+    XCODEBUILD_ACTION := archive
+    XCODEBUILD_ARCHIVE_ARGS := -archivePath "$(HOME)/tctiSH.xcarchive"
+endif
+ifeq ($(SKIP_CODESIGNING),1)
+    XCODEBUILD_CODESIGN_ARGS := CODE_SIGNING_ALLOWED=NO
+endif
+
 .PHONY: build
-build: $(QEMU_LIBRARY) $(STIKJIT_FRAMEWORK) $(GUEST_IMAGES) ## Build the app for a generic iOS device (GUEST=prebuilt to skip rebuilding the guest images)
+build: $(QEMU_LIBRARY) $(STIKJIT_FRAMEWORK) $(GUEST_IMAGES) ## Build the app for a generic iOS device (XCARCHIVE_BUILD=1 to create ~/tctiSH.xcarchive)
 	xcodebuild -project tctiSH.xcodeproj -scheme tctiSH -destination 'generic/platform=iOS' \
-		-skipPackagePluginValidation build
+		-skipPackagePluginValidation $(XCODEBUILD_ARCHIVE_ARGS) $(XCODEBUILD_CODESIGN_ARGS) $(XCODEBUILD_ACTION)
 
 .PHONY: tctictl
 tctictl: $(TCTICTL_BINARY) ## Build the guest-side tctictl, which `make guest` consumes
