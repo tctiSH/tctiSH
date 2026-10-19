@@ -37,9 +37,10 @@ to [use](#basic-usage) it on your phone.
 
 ### Building
 
-It is not a goal of this project to provide prebuild binaries that can be re-signed, at least for
-the moment. Instead, we provide a fairly simple method to build the app yourself. You will need to
-have the following dependencies:
+CI builds an IPA from every push to `main`, which you can download from the run as long as you have
+a GitHub account. These builds will need to be re-signed with the tool of your choice for
+sideloading. They are explicitly **not** releases and are only kept for 14 days. You can also build
+the app yourself using a simple process and the following dependencies:
 
 - `nix`, the declarative package manager, installed and available on your `$PATH`.
 - [Xcode](https://apps.apple.com/nl/app/xcode/id497799835) installed, with `xcrun` available on your
