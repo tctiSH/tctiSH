@@ -1,0 +1,40 @@
+name: Feature Request
+description: Suggest something tctiSH should do, or do differently.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If it is about the emulator itself, such as its speed under TCTI or the JIT, or a CPU
+        feature a program needs, the [QEMU fork's tracker](https://github.com/tctiSH/qemu/issues)
+        may suit it better.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: >
+        Explain the problem you want to solve, rather than what you think the solution is. What do
+        you use tctiSH for, and what is missing or awkward about it today? A concrete example is
+        worth far more than a general description.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to happen?
+      description: >
+        Explain what you think would solve this (e.g. a setting, a gesture, a guest tool, or a
+        change to how the app behaves in the background). If you mean to contribute the change,
+        please mention that too.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What have you tried?
+      description: >
+        A workaround with what exists today, another app, or why none of them fits. This often shows
+        where the real gap is.

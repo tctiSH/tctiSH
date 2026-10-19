@@ -12,11 +12,18 @@ import StikJIT
 /// Matches the host's `Log.jit`, so one Console filter catches both processes.
 ///
 /// Not the host's `Log` type itself: that lives in the app target and this is a
-/// separate binary. The subsystem string is the contract between the two.
+/// separate binary. The subsystem is the contract between the two: the app's
+/// bundle identifier and `.jit`. An extension's identifier is its app's with
+/// one more component, so dropping that gives the app's.
 ///
 /// Public because the unified log otherwise redacts every interpolated value to
 /// `<private>`, which makes the messages useless for diagnosis.
-private let jitLogger = Logger(subsystem: "io.ara.tctish.jit", category: "jit")
+private let jitLogger: Logger = {
+    let helper = Bundle.main.bundleIdentifier ?? "io.ara.tctiSH.JITHelper"
+    let parts = helper.split(separator: ".")
+    let app = parts.count > 1 ? parts.dropLast().joined(separator: ".") : helper
+    return Logger(subsystem: "\(app).jit", category: "jit")
+}()
 private func jitNote(_ message: String) {
     jitLogger.notice("\(message, privacy: .public)")
 }

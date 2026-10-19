@@ -136,19 +136,40 @@ $(STIKJIT_FRAMEWORK): build_stikjit.sh $(wildcard patches/*.patch) $(IDEVICE_LIB
 # filter would take Homebrew's `container` away from them -- the scripts look in Homebrew's prefix
 # themselves so that running under `nix develop` works anyway, but there is nothing here they want
 # from the devshell.
-$(TCTICTL_BINARY): $(wildcard utils/tctictl/src/*.rs) utils/tctictl/Cargo.toml
-	$(SHELL_WRAPPER) cargo build --release --manifest-path utils/tctictl/Cargo.toml \
+# What each checked-in image is built from, which the rules below and `check-images` both use. Each
+# rule stamps its image into assets/images.sha256 with a digest of these, which is how CI knows an
+# image is still what its inputs build; see assets/image_stamps.sh. tctictl's include its Cargo.lock
+# and the flake's lock, which pins the Rust it is built with. The overlay and the scripts are what
+# git has; the initrd rule refuses to build with anything else in them, which would go into the
+# image without being in its digest.
+TCTICTL_SOURCES     := $(wildcard utils/tctictl/src/*.rs) utils/tctictl/Cargo.toml \
+                       utils/tctictl/Cargo.lock flake.lock
+GUEST_INITRD_INPUTS := assets/build_rootfs.sh assets/rootfs.lock $(TCTICTL_SOURCES) \
+                       $(shell git ls-files assets/overlay assets/scripts)
+GUEST_DISK_INPUTS   := assets/build_disk.sh
+GUEST_KERNEL_INPUTS := assets/build_kernel.sh assets/kernel/tctish.config assets/kernel/flake.lock \
+                       assets/kernel/flake.nix
+
+$(TCTICTL_BINARY): $(TCTICTL_SOURCES)
+	$(SHELL_WRAPPER) cargo build --release --locked --manifest-path utils/tctictl/Cargo.toml \
 		--target $(TCTICTL_TARGET)
 
 # tctictl is an input to the image rather than something copied in afterwards, so it is a
 # prerequisite and not a separate step.
-$(GUEST_INITRD): assets/build_rootfs.sh assets/rootfs.lock $(TCTICTL_BINARY) \
-                 $(shell find assets/overlay assets/scripts -type f 2>/dev/null)
+$(GUEST_INITRD): $(filter-out $(TCTICTL_SOURCES),$(GUEST_INITRD_INPUTS)) $(TCTICTL_BINARY)
+	@stray="$$(git ls-files --others assets/overlay assets/scripts)"; \
+	if [ -n "$$stray" ]; then \
+		echo "error: these would go into the image without being in git:" >&2; \
+		echo "$$stray" >&2; \
+		exit 1; \
+	fi
 	./assets/build_rootfs.sh
+	./assets/image_stamps.sh stamp $@ $(GUEST_INITRD_INPUTS)
 
 # Nothing but the script decides what this contains.
-$(GUEST_DISK): assets/build_disk.sh
+$(GUEST_DISK): $(GUEST_DISK_INPUTS)
 	./assets/build_disk.sh
+	./assets/image_stamps.sh stamp $@ $(GUEST_DISK_INPUTS)
 
 # The kernel is deliberately *not* a prerequisite of `build`, which is where it parts company with
 # the two rules above. Those take about a second, so depending on them is free insurance against
@@ -157,8 +178,9 @@ $(GUEST_DISK): assets/build_disk.sh
 #
 # The consequence is real and worth knowing: after editing tctish.config you must run `make guest`
 # (or this target) yourself. `make build` will not notice.
-$(GUEST_KERNEL): assets/build_kernel.sh assets/kernel/tctish.config assets/kernel/flake.lock assets/kernel/flake.nix
+$(GUEST_KERNEL): $(GUEST_KERNEL_INPUTS)
 	./assets/build_kernel.sh
+	./assets/image_stamps.sh stamp $@ $(GUEST_KERNEL_INPUTS)
 
 .PHONY: deps
 deps: $(QEMU_LIBRARY) ## Build QEMU and its libraries into sysroot-iOS-arm64/ (slow)
@@ -281,9 +303,10 @@ endef
 #   third-party             submodules and vendored sources, including QEMU
 #   assets                  the guest's files, but for its shell scripts; see SHELL_SOURCES
 #   patches                 context lines are literal, so reformatting silently breaks them
+#   utils/bench/guest/aok   aok-vm's benchmarks, kept as they were written; see its NOTICE
 #
 # Everything is found through `git ls-files`, which also keeps build output out by construction.
-NOT_OURS := ^(third-party|assets|patches)/
+NOT_OURS := ^(third-party|assets|patches|utils/bench/guest/aok)/
 
 SWIFT_SOURCES  := $(shell git ls-files '*.swift' | grep -Ev '$(NOT_OURS)')
 C_SOURCES      := $(shell git ls-files '*.c' '*.h' '*.m' '*.mm' | grep -Ev '$(NOT_OURS)')
@@ -404,7 +427,15 @@ format-check: format-check-swift format-check-c format-check-rust format-check-s
 .PHONY: clippy
 clippy: ## Lint the Rust sources with clippy
 	$(SHELL_WRAPPER) cargo clippy --manifest-path utils/tctictl/Cargo.toml --all-targets \
-		--target $(CARGO_TARGET)
+		--target $(CARGO_TARGET) -- -D warnings
+
+.PHONY: check-images
+check-images: ## Check the checked-in guest images are what their inputs build, as stamped
+	@status=0; \
+	./assets/image_stamps.sh check $(GUEST_INITRD) $(GUEST_INITRD_INPUTS) || status=1; \
+	./assets/image_stamps.sh check $(GUEST_DISK) $(GUEST_DISK_INPUTS) || status=1; \
+	./assets/image_stamps.sh check $(GUEST_KERNEL) $(GUEST_KERNEL_INPUTS) || status=1; \
+	exit $$status
 
 .PHONY: lint
 lint: format-check clippy ## Run all the linting tasks

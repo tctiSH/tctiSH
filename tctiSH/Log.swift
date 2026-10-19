@@ -11,7 +11,8 @@ import os
 /// One area of the app's logging.
 ///
 /// Each area gets a separate subsystem, so Console can be pointed at a single
-/// concern, while filtering on the root still catches the lot.
+/// concern, while filtering on the root still catches the lot. The root is the
+/// app's bundle identifier, so it is whatever the app was signed as.
 ///
 /// Every line also goes to `LogFile`, so it can be read back on the device.
 ///
@@ -37,12 +38,16 @@ struct Log {
     /// The app itself -- lifecycle, screens, what the user is being shown.
     static let ui = Log("ui")
 
+    /// What every area's subsystem starts with. The JIT helper derives the same
+    /// one from its own identifier, which is this with one more component.
+    static let root = Bundle.main.bundleIdentifier ?? "io.ara.tctiSH"
+
     private let logger: Logger
     private let area: String
 
     private init(_ area: String) {
         self.area = area
-        logger = Logger(subsystem: "io.ara.tctish.\(area)", category: area)
+        logger = Logger(subsystem: "\(Log.root).\(area)", category: area)
     }
 
     /// Something happened that's worth being able to read back later.

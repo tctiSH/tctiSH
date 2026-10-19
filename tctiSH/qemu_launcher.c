@@ -7,6 +7,7 @@
 //  Copyright (c) 2020 osy.
 //
 
+#include <CoreFoundation/CoreFoundation.h>
 #include <dlfcn.h>
 #include <os/log.h>
 #include <stdatomic.h>
@@ -60,12 +61,20 @@ struct qemu_args {
     char *smp_args;
 };
 
-/// Matches `Log.qemu` on the Swift side, so one filter catches both.
+/// Matches `Log.qemu` on the Swift side, so one filter catches both: the app's
+/// bundle identifier and `.qemu`.
 static os_log_t QemuLauncherLog(void) {
     static os_log_t log;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        log = os_log_create("io.ara.tctish.qemu", "qemu");
+        static char subsystem[256];
+        CFStringRef bundle = CFBundleGetIdentifier(CFBundleGetMainBundle());
+        if (bundle == NULL ||
+            !CFStringGetCString(bundle, subsystem, sizeof(subsystem), kCFStringEncodingUTF8)) {
+            strlcpy(subsystem, "io.ara.tctiSH", sizeof(subsystem));
+        }
+        strlcat(subsystem, ".qemu", sizeof(subsystem));
+        log = os_log_create(subsystem, "qemu");
     });
     return log;
 }

@@ -1,0 +1,12 @@
+blank_issues_enabled: false
+contact_links:
+  - name: The Emulator
+    url: https://github.com/tctiSH/qemu/issues
+    about: >
+      Wrong results, crashes or hangs inside the guest that the fork's QEMU also shows on a Mac,
+      bugs in TCTI or the JIT, and the emulator's performance belong in the QEMU fork's tracker.
+  - name: Alpine Linux Packages
+    url: https://gitlab.alpinelinux.org/alpine/aports/-/issues
+    about: >
+      A package in the guest that is broken or missing everywhere, not only under tctiSH, belongs
+      upstream with Alpine.

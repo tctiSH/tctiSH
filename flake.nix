@@ -220,8 +220,14 @@
           # spelled differently to nix's `aarch64-darwin`.
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER = "${rustToolchain}/lib/rustlib/aarch64-apple-darwin/bin/rust-lld";
 
-          # See filterPath above.
-          shellHook = filterPath;
+          # See filterPath above. Then a cargo home of our own: cargo looks for the helpers behind
+          # `cargo clippy` and `cargo fmt` in $CARGO_HOME/bin before $PATH, and with rustup that is
+          # ~/.cargo/bin, whose proxies run rustup's toolchain rather than ours. On GitHub's macOS
+          # runners that was a stable clippy with no musl std and a stable rustfmt. This one has no
+          # bin, so the tools on $PATH are the ones that run.
+          shellHook = filterPath + ''
+            export CARGO_HOME="''${XDG_CACHE_HOME:-$HOME/.cache}/tctish/cargo"
+          '';
         };
 
         # Building our QEMU for this Mac: build_host_qemu.sh enters this shell by

@@ -1374,6 +1374,19 @@ final class SettingsViewController: SettingsListViewController,
                         accessory: .disclosure,
                         select: { Self.openSystemSettings() })
                 ]),
+
+            SettingsSection(
+                header: nil,
+                footer:
+                    "System Info describes tctiSH and this device. Copy it for bug reports using the share button.",
+                rows: [
+                    SettingsRow(
+                        id: "system-info",
+                        title: "System Info",
+                        symbol: "info.circle",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.push(SystemInfoViewController()) })
+                ]),
         ]
 
         if Self.debugToolsRevealed {
@@ -2918,17 +2931,11 @@ private final class DebugToolsViewController: SettingsListViewController {
                 footer: nil,
                 rows: [
                     SettingsRow(
-                        id: "system-info",
-                        title: "System Info",
-                        symbol: "cpu",
-                        accessory: .disclosure,
-                        select: { [weak self] in self?.push(SystemInfoViewController()) }),
-                    SettingsRow(
                         id: "logs",
                         title: "Logs",
                         symbol: "doc.text",
                         accessory: .disclosure,
-                        select: { [weak self] in self?.push(LogsViewController()) }),
+                        select: { [weak self] in self?.push(LogsViewController()) })
                 ]),
         ]
     }
@@ -3177,9 +3184,10 @@ private final class JitStatusViewController: SettingsListViewController {
     }
 }
 
-// MARK: - Debug tools: system info
+// MARK: - System info
 
-/// The device, its CPU and the features QEMU looks for; see `SystemInfo`.
+/// The app, the device, its CPU and the features QEMU looks for; see
+/// `SystemInfo`.
 ///
 /// Opening it also writes the report to the log, so it can be read off a device
 /// with the rest of the log.
@@ -3196,7 +3204,7 @@ private final class SystemInfoViewController: SettingsListViewController {
             image: UIImage(systemName: "square.and.arrow.up"),
             primaryAction: UIAction { [weak self] _ in self?.shareReport() })
 
-        Log.ui.note("debug: system info\n\(info.text)")
+        Log.ui.note("settings: system info\n\(info.text)")
     }
 
     override func viewWillAppear(_ animated: Bool) {

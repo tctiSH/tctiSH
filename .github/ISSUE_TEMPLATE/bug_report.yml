@@ -1,0 +1,80 @@
+name: Bug Report
+description: tctiSH behaves incorrectly, crashes, or will not build.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. This tracker is for the tctiSH app specifically. If a program in the
+        guest gives a wrong result and you can confirm that our QEMU does the same on a Mac, please
+        report it in the [QEMU fork's tracker](https://github.com/tctiSH/qemu/issues) instead.
+
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where does it happen?
+      options:
+        - Using the app on a device
+        - Building the app
+        - Booting the guest on a Mac (`make boot-guest`)
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what you got instead.
+      placeholder: |
+        After the app had been in the background for a few minutes, it came back to a blank
+        terminal instead of the running session …
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How can we reproduce it?
+      description: >
+        Numbered steps, starting from a freshly launched app where possible. For a build problem,
+        the `make` command you ran.
+      placeholder: |
+        1. Launch the app with JIT.
+        2. Run `apk add python3`, then switch to another app for five minutes.
+        3. Come back to the app.
+    validations:
+      required: true
+
+  - type: textarea
+    id: system-info
+    attributes:
+      label: System Info
+      description: >
+        From the app: Settings > System Info, at the bottom of Settings, then the share button at
+        its top right and Copy. It says which device, iOS version and build of tctiSH this is, and
+        whether it was running with JIT or TCTI; if you tried the other one too, say so in the
+        steps above. For a build problem, your Mac and its macOS and Xcode versions instead.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >
+        From Console.app on a Mac with the device connected, filtered on the app's bundle ID as
+        the subsystem (`io.ara.tctiSH` unless you changed it); the README's Logs section lists the
+        subsystems by area. For a build problem, the end of its output.
+      render: text
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: It happens on the latest commit of `main`, or I have said above which commit I used.
+          required: true
+        - label: I searched the existing issues.
+          required: true

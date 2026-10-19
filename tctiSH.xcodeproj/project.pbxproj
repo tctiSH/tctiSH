@@ -311,6 +311,7 @@
 				49BD1A58224207B5005A2252 /* Resources */,
 				8DF5F02B28C1BCC900FB1F1C /* Embed Frameworks */,
 				DCF690CB305583AC0091B7D0 /* Embed Foundation Extensions */,
+				7E7A00C100000000C0DE00C1 /* Record the Commit */,
 			);
 			buildRules = (
 			);
@@ -485,6 +486,30 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		7E7A00C100000000C0DE00C1 /* Record the Commit */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)",
+			);
+			name = "Record the Commit";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# The commit the app was built from, for System Info and bug reports. It runs on every\n# build, as the commit changes without any input changing, and needs the sandbox off to\n# read the repository.\nplist=\"$TARGET_BUILD_DIR/$INFOPLIST_PATH\"\ncommit=$(git -C \"$SRCROOT\" describe --always --dirty 2>/dev/null || echo Unknown)\n/usr/libexec/PlistBuddy -c \"Delete :TctishCommit\" \"$plist\" 2>/dev/null || true\n/usr/libexec/PlistBuddy -c \"Add :TctishCommit string $commit\" \"$plist\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		49BD1A56224207B5005A2252 /* Sources */ = {
@@ -669,6 +694,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = SU8B32Z5KR;
 				ENABLE_BITCODE = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/sysroot-iOS-arm64/Frameworks",
@@ -708,6 +734,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = SU8B32Z5KR;
 				ENABLE_BITCODE = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/sysroot-iOS-arm64/Frameworks",

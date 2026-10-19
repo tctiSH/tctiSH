@@ -1,6 +1,6 @@
 //
 //  SystemInfo.swift
-//  What this device is, for the System Info debug page.
+//  What this app and device are, for the System Info page and bug reports.
 //
 //  Copyright © 2026 Ara Adkins.
 //
@@ -8,8 +8,8 @@
 import Foundation
 import UIKit
 
-/// A report on the device: model, CPU, memory, storage and the CPU features
-/// QEMU cares about.
+/// A report on the app and the device: how tctiSH is running, and the model,
+/// CPU, memory, storage and the CPU features QEMU cares about.
 struct SystemInfo {
 
     struct Section {
@@ -21,7 +21,7 @@ struct SystemInfo {
 
     static func gather() -> SystemInfo {
         SystemInfo(sections: [
-            device(), cpu(), memory(), storage(), qemu(), featureSection(features()),
+            app(), device(), cpu(), memory(), storage(), qemu(), featureSection(features()),
         ])
     }
 
@@ -34,6 +34,23 @@ struct SystemInfo {
     }
 
     // MARK: Sections
+
+    private static func app() -> Section {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+
+        return Section(
+            title: "tctiSH",
+            rows: [
+                ("Version", "\(version) (\(build))"),
+                // Written by the Record the Commit build phase; "-dirty" for uncommitted changes.
+                ("Commit", info?["TctishCommit"] as? String ?? "Unknown"),
+                ("Execution Mode", ExecutionMode.current.title),
+                ("Running With", Backend.current?.name ?? "Not started"),
+                ("Guest Images", VmSnapshots.guestEpoch),
+            ])
+    }
 
     private static func device() -> Section {
         let device = UIDevice.current

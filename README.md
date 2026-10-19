@@ -325,7 +325,7 @@ make format-check   # report, change nothing
 
 ### Logs
 
-Console.app, filtered on subsystem `<bundle-id>` (e.g. `io.ara.tctish`) for everything, or one of:
+Console.app, filtered on subsystem `<bundle-id>` (e.g. `io.ara.tctiSH`) for everything, or one of:
 
 | Subsystem             | What it Logs                                        |
 | --------------------- | --------------------------------------------------- |

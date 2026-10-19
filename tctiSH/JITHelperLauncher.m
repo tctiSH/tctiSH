@@ -10,12 +10,16 @@
 #import <os/log.h>
 #import <time.h>
 
-/// Matches `Log.jit` on the Swift side, so one filter catches both.
+/// Matches `Log.jit` on the Swift side, so one filter catches both: the app's
+/// bundle identifier and `.jit`.
 static os_log_t JITHelperLog(void) {
     static os_log_t log;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        log = os_log_create("io.ara.tctish.jit", "jit");
+        NSString *bundle = NSBundle.mainBundle.bundleIdentifier ?: @"io.ara.tctiSH";
+        // Kept for good: the log may hold on to the string, and UTF8String's lives only as long
+        // as the autoreleased NSString.
+        log = os_log_create(strdup([bundle stringByAppendingString:@".jit"].UTF8String), "jit");
     });
     return log;
 }
