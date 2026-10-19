@@ -174,10 +174,6 @@ echo -e "${GREEN}Generating the Xcode project...${NC}"
 # Info.plist". tctiSH embeds it in the app -- the extension links that copy -- so
 # it has to have one.
 echo -e "${GREEN}Archiving...${NC}"
-CODE_SIGNING_ARGS=()
-if [[ "${SKIP_CODESIGNING:-0}" == 1 ]]; then
-  CODE_SIGNING_ARGS+=(CODE_SIGNING_ALLOWED=NO)
-fi
 xcodebuild archive \
   -project "$WORK_DIR/StikJIT.xcodeproj" \
   -scheme StikJIT \
@@ -186,8 +182,7 @@ xcodebuild archive \
   BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
   SKIP_INSTALL=NO \
   GENERATE_INFOPLIST_FILE=YES \
-  IPHONEOS_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET" \
-  "${CODE_SIGNING_ARGS[@]}"
+  IPHONEOS_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET"
 
 if [ ! -d "$FRAMEWORK_PATH" ]; then
   echo -e "${RED}Archive produced no framework at $FRAMEWORK_PATH.${NC}" >&2

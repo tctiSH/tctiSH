@@ -50,7 +50,7 @@ ifneq ($(filter host-qemu boot-guest bench,$(MAKECMDGOALS)),)
     endif
 endif
 
-ifneq ($(filter build,$(MAKECMDGOALS)),)
+ifneq ($(filter build ipa,$(MAKECMDGOALS)),)
     ifeq ($(filter $(GUEST),build prebuilt),)
         $(error GUEST must be build or prebuilt, not '$(GUEST)')
     endif
@@ -274,21 +274,35 @@ endif
 # SwiftTerm generates its version information with a build-tool plugin, which Xcode will only run
 # once someone has trusted it in the IDE. A command-line build has nobody to ask, so skips the check
 # instead.
-XCODEBUILD_ACTION := build
-XCODEBUILD_ARCHIVE_ARGS :=
-XCODEBUILD_CODESIGN_ARGS :=
-ifeq ($(XCARCHIVE_BUILD),1)
-    XCODEBUILD_ACTION := archive
-    XCODEBUILD_ARCHIVE_ARGS := -archivePath "$(HOME)/tctiSH.xcarchive"
-endif
-ifeq ($(SKIP_CODESIGNING),1)
-    XCODEBUILD_CODESIGN_ARGS := CODE_SIGNING_ALLOWED=NO
-endif
-
 .PHONY: build
-build: $(QEMU_LIBRARY) $(STIKJIT_FRAMEWORK) $(GUEST_IMAGES) ## Build the app for a generic iOS device (XCARCHIVE_BUILD=1 to create ~/tctiSH.xcarchive)
+build: $(QEMU_LIBRARY) $(STIKJIT_FRAMEWORK) $(GUEST_IMAGES) ## Build the app for a generic iOS device (GUEST=prebuilt to skip rebuilding the guest images)
 	xcodebuild -project tctiSH.xcodeproj -scheme tctiSH -destination 'generic/platform=iOS' \
-		-skipPackagePluginValidation $(XCODEBUILD_ARCHIVE_ARGS) $(XCODEBUILD_CODESIGN_ARGS) $(XCODEBUILD_ACTION)
+		-skipPackagePluginValidation build
+
+# An IPA for sideloading, intended to be re-signed by the installing tool. It is built with no 
+# account at all, and then has the app's entitlements signed again onto it so they can be read back. 
+# These are the tctiSH.entitlements excepting the key-value store ID which does need a team, as well 
+# as get-task-allow which is needed to attaching JIT.
+IPA_BUILD   := build-ipa
+IPA_ARCHIVE := $(IPA_BUILD)/tctiSH.xcarchive
+IPA_APP     := $(IPA_ARCHIVE)/Products/Applications/tctiSH.app
+
+.PHONY: ipa
+ipa: $(QEMU_LIBRARY) $(STIKJIT_FRAMEWORK) $(GUEST_IMAGES) ## Build an ad hoc signed build-ipa/tctiSH.ipa for sideloading (takes GUEST like build)
+	rm -rf $(IPA_BUILD)
+	xcodebuild -project tctiSH.xcodeproj -scheme tctiSH -destination 'generic/platform=iOS' \
+		-skipPackagePluginValidation -archivePath $(IPA_ARCHIVE) \
+		CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= AD_HOC_CODE_SIGNING_ALLOWED=YES \
+		PROVISIONING_PROFILE_REQUIRED=NO CODE_SIGN_ENTITLEMENTS= archive
+	cp tctiSH/tctiSH.entitlements $(IPA_BUILD)/tctiSH.entitlements
+	/usr/libexec/PlistBuddy -c 'Delete :com.apple.developer.ubiquity-kvstore-identifier' \
+		-c 'Add :get-task-allow bool true' $(IPA_BUILD)/tctiSH.entitlements
+	codesign --force --sign - --entitlements $(IPA_BUILD)/tctiSH.entitlements \
+		--generate-entitlement-der $(IPA_APP)
+	codesign --verify --deep --strict $(IPA_APP)
+	mkdir $(IPA_BUILD)/Payload
+	cp -R $(IPA_APP) $(IPA_BUILD)/Payload/
+	cd $(IPA_BUILD) && zip -qry tctiSH.ipa Payload
 
 .PHONY: tctictl
 tctictl: $(TCTICTL_BINARY) ## Build the guest-side tctictl, which `make guest` consumes
@@ -456,6 +470,7 @@ lint: format-check clippy ## Run all the linting tasks
 .PHONY: clean-app
 clean-app: ## Remove the app's build output
 	xcodebuild -project tctiSH.xcodeproj -scheme tctiSH clean
+	rm -rf $(IPA_BUILD)
 
 .PHONY: clean-rust
 clean-rust: ## Remove tctictl's build output

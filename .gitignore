@@ -21,3 +21,6 @@ build-idevice/
 build-kernel/
 build-macOS-arm64/
 build-bench/
+
+# Sideloading package.
+build-ipa/
