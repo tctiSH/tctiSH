@@ -187,6 +187,10 @@
         unset _tctish_path _tctish_oldifs _tctish_dir
       '';
 
+      # The QEMU fork's shells, from its flake's outputs, given our nixpkgs.
+      qemuShells =
+        ((import ./third-party/qemu/flake.nix).outputs { inherit nixpkgs; }).devShells.${system};
+
       # Everything `make format` drives, minus swift-format and clang-format,
       # which come from the active Xcode toolchain via `xcrun` so that they match
       # what the IDE applies on save.
@@ -228,9 +232,13 @@
         # we cannot let those leak to iOS builds. The nixpkgs derivation for
         # QEMU already knows how to build QEMU on Darwin, we steal its inputs;
         # the configure flags in build_host_qemu.sh pick what is used from them.
+        #
+        # The fork's flake defines that shell, which its CI builds and tests in
+        # too; this is it, from our nixpkgs, with our PATH filter. As it comes
+        # from the submodule, the flake has to be entered with ?submodules=1,
+        # as build_host_qemu.sh does: without it, the submodule is empty here.
         host-qemu = pkgs.mkShell {
-          inputsFrom = [ pkgs.qemu ];
-          packages = [ pkgs.git ];
+          inputsFrom = [ qemuShells.default ];
           TCTISH_DEVSHELL = "host-qemu";
           shellHook = filterPath;
         };

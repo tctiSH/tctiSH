@@ -302,6 +302,16 @@ class Machine:
     def put(self, local, remote):
         self.guest.put(Path(local).read_bytes(), remote)
 
+    def put_suite(self):
+        """Copies guest/ and workloads/, subdirectories included, to GUEST_DIR."""
+        for sub in ("guest", "workloads"):
+            files = [f for f in sorted((HERE / sub).rglob("*")) if f.is_file()]
+            files = [f for f in files if "__pycache__" not in f.parts]
+            dirs = {f"{GUEST_DIR}/{f.parent.relative_to(HERE)}" for f in files}
+            self.run("mkdir -p " + " ".join(sorted(dirs)))
+            for f in files:
+                self.put(f, f"{GUEST_DIR}/{f.relative_to(HERE)}")
+
     def power_down(self):
         """Shuts the guest down cleanly, for a disk that is kept."""
         self.run("sync")
@@ -361,7 +371,8 @@ def prepare(args):
 
     note(f"booting {build.path} on the JIT to install the workloads")
     with Machine(build, partial, run_dir) as m, open(run_dir / "prepare.log", "wb") as log:
-        m.put(HERE / "guest" / "prepare.sh", "/tmp/prepare.sh")
+        # The whole suite, for the sources prepare.sh builds.
+        m.put_suite()
 
         class Tee:
             def write(self, data):
@@ -372,7 +383,9 @@ def prepare(args):
                 log.flush()
                 sys.stdout.buffer.flush()
 
-        status, _, err = m.run("sh /tmp/prepare.sh", timeout=4 * 3600, out=Tee())
+        status, _, err = m.run(
+            f"BENCH_DIR={GUEST_DIR} sh {GUEST_DIR}/guest/prepare.sh", timeout=4 * 3600, out=Tee()
+        )
         if status != 0:
             sys.stderr.write(err)
             die(f"preparing the disk failed (status {status}); the log is {run_dir}")
@@ -418,8 +431,10 @@ def baseline(args):
     shutil.rmtree(src, ignore_errors=True)
     src.mkdir(parents=True)
     note(f"extracting {commit} into {src.relative_to(REPO)}")
+    # -m: files dated now, not at the commit, so that a tree built from a newer commit is rebuilt
+    # in full rather than looking up to date.
     archive = subprocess.Popen(["git", "-C", qemu, "archive", commit], stdout=subprocess.PIPE)
-    subprocess.run(["tar", "-x", "-C", src], stdin=archive.stdout, check=True)
+    subprocess.run(["tar", "-x", "-m", "-C", src], stdin=archive.stdout, check=True)
     if archive.wait() != 0:
         die(f"git archive {commit} failed")
     for entry in (qemu / "subprojects").iterdir():
@@ -430,6 +445,15 @@ def baseline(args):
             shutil.copytree(entry, dest, symlinks=True)
         else:
             shutil.copy2(entry, dest)
+
+    # build_host_qemu.sh keeps a configured tree's source directory, so a tree of this name from
+    # another checkout would build that checkout instead.
+    info = build.parent / "meson-info" / "meson-info.json"
+    if info.exists():
+        configured = Path(json.loads(info.read_text())["directories"]["source"])
+        if configured.resolve() != src.resolve():
+            note(f"removing {build.parent.relative_to(REPO)}, which was built from {configured}")
+            shutil.rmtree(build.parent)
 
     note(f"building {build.parent.relative_to(REPO)}")
     env = dict(os.environ, HOST_QEMU_SRC=str(src), HOST_QEMU_TREE=name)
@@ -564,11 +588,7 @@ def run_workload(build, name, rnd, run_dir):
         started = time.time()
         with Machine(build, disk, run_dir / name) as m:
             boot = time.time() - started
-            m.run(f"mkdir -p {GUEST_DIR}/guest {GUEST_DIR}/workloads")
-            for sub in ("guest", "workloads"):
-                for f in sorted((HERE / sub).iterdir()):
-                    if f.is_file():
-                        m.put(f, f"{GUEST_DIR}/{sub}/{f.name}")
+            m.put_suite()
             try:
                 return measure(m, name, rnd, run_dir, boot)
             except gx.Unreachable as e:

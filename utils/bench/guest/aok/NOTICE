@@ -1,0 +1,3 @@
+nbody.c, pybench.py and gen_data.py are from aok-vm by Mike Miller
+(https://github.com/emkey1/aok-vm, aok/bench, commit c73453282690d8dc3f1efc3c5bf62e4aabbb23b8),
+unchanged, under the Apache License 2.0 in LICENSE beside this file.

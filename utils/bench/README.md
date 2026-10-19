@@ -20,18 +20,25 @@ network I/O.
 
 ## Workloads
 
-| Workload         | Runs                                 | Exercises                          |
-| ---------------- | ------------------------------------ | ---------------------------------- |
-| `blender_render` | A small Cycles render                | Float and AVX2 SIMD, threaded      |
-| `sympy`          | Integrate, differentiate, solve      | A large Python program             |
-| `lean_plausible` | Lean 4 builds a library              | Short compiler processes, threaded |
-| `xonsh_startup`  | `xonsh -c exit`                      | CPython startup and imports        |
-| `xonsh_keys`     | Typing a line into xonsh, key by key | CPython's interpreter; typing lag  |
-| `lua_build`      | gcc builds Lua at `-O2`              | A large amount of guest code       |
-| `configure`      | GNU make's `./configure`             | fork, exec, page faults            |
-| `node_startup`   | `node -e 0`                          | V8 and Node startup                |
-| `node_prettier`  | prettier formats 155 KB of JS and TS | Fresh guest JIT code               |
-| `node_compute`   | Hot JS loops                         | Settled guest JIT code             |
+| Workload         | Runs                                         | Exercises                          |
+| ---------------- | -------------------------------------------- | ---------------------------------- |
+| `blender_render` | A small Cycles render                        | Float and AVX2 SIMD, threaded      |
+| `sympy`          | Integrate, differentiate, solve              | A large Python program             |
+| `lean_plausible` | Lean 4 builds a library                      | Short compiler processes, threaded |
+| `xonsh_startup`  | `xonsh -c exit`                              | CPython startup and imports        |
+| `xonsh_keys`     | Typing a line into xonsh, key by key         | CPython's interpreter; typing lag  |
+| `lua_build`      | gcc builds Lua at `-O2`                      | A large amount of guest code       |
+| `configure`      | GNU make's `./configure`                     | fork, exec, page faults            |
+| `node_startup`   | `node -e 0`                                  | V8 and Node startup                |
+| `node_prettier`  | prettier formats 155 KB of JS and TS         | Fresh guest JIT code               |
+| `node_compute`   | Hot JS loops                                 | Settled guest JIT code             |
+| `code_reuse`     | Hot JS loops after the page cache is dropped | Invalidating code in reused memory |
+| `coremark`       | EEMBC's CoreMark                             | Small integer kernels              |
+| `nbody`          | An n-body simulation in C                    | Scalar double-precision floats     |
+| `pybench`        | Pure-Python loops, objects and strings       | CPython's interpreter, few imports |
+| `xz`             | `xz -3` compresses generated text            | Branchy integer code, one thread   |
+| `sha256sum`      | busybox `sha256sum` over the same text       | Integer rotates in a hot loop      |
+| `awk_words`      | busybox awk counts its words                 | An interpreter, hashing, strings   |
 
 Every metric is a time; lower is better. A round took 5 minutes on the JIT and 23 on TCTI (M2 Max,
 busy).
@@ -58,10 +65,13 @@ at the same address in both builds (`nm -n <binary> | grep -m1 _gadget_`).
 
 ## The Disk
 
-`guest/prepare.sh` installs the programs: Blender, sympy, gcc, Node.js and xonsh from Alpine edge,
-and pinned versions of Lean, Lua, GNU make and prettier. Alpine packages can't be pinned, so the
-disk is kept, and every result records which disk it used. To make a new one, run
+`guest/prepare.sh` installs the programs: Blender, sympy, gcc, Node.js, xonsh and xz from Alpine
+edge, and pinned versions of Lean, Lua, GNU make, prettier and CoreMark. Alpine packages can't be
+pinned, so the disk is kept, and every result records which disk it used. To make a new one, run
 `make clean-bench bench-disk`, which also deletes all results.
+
+`nbody`, `pybench` and the text that `xz`, `sha256sum` and `awk_words` read come from aok-vm, as
+`guest/aok/NOTICE` says.
 
 ## Adding a Workload
 

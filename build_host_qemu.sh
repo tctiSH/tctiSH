@@ -81,8 +81,14 @@ if [ "${TCTISH_DEVSHELL:-}" != "host-qemu" ]; then
   done
   [ -n "$NIX" ] || die "cannot find nix, which this build needs for its host libraries"
 
+  # The shell comes from the submodule, so it must be checked out, and the
+  # flake taken with its submodules.
+  if [ ! -f "$BASEDIR/third-party/qemu/flake.nix" ]; then
+    git -C "$BASEDIR" submodule update --init third-party/qemu
+  fi
   mkdir -p "$BUILD_ROOT"
-  exec "$NIX" develop --profile "$GC_ROOT" "$BASEDIR#host-qemu" --command "$0" "$@"
+  exec "$NIX" develop --profile "$GC_ROOT" "git+file://$BASEDIR?submodules=1#host-qemu" \
+    --command "$0" "$@"
 fi
 
 # The flags follow QEMU_PLATFORM_BUILD_FLAGS in build_dependencies.sh, so that

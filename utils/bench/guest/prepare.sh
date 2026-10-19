@@ -3,10 +3,11 @@
 # Installs the workloads' programs onto a guest booted from assets/empty.qcow, which becomes
 # build-bench/bench.qcow. `bench.py prepare` runs it on the JIT, as it installs a few gigabytes.
 #
-# Lean, plausible, Lua, GNU make and prettier are pinned by version, and checked against the digests
-# below where they are files. Alpine's packages (Python, sympy, Blender, Node.js, gcc, xonsh) can't
-# be pinned: the guest tracks edge, which drops old versions within weeks. So the disk is kept, the
-# manifest written at the end lists every version, and bench.py records its digest with each result.
+# Lean, plausible, Lua, GNU make, prettier and CoreMark are pinned by version, and checked against
+# the digests below where they are files. Alpine's packages (Python, sympy, Blender, Node.js, gcc,
+# xonsh, xz) can't be pinned: the guest tracks edge, which drops old versions within weeks. So the
+# disk is kept, the manifest written at the end lists every version, and bench.py records its
+# digest with each result.
 
 set -eu
 
@@ -21,11 +22,13 @@ MAKE_VERSION=4.4.1
 MAKE_SHA256=dd16fb1d67bfab79a72f5e8390735c49e3e8e70b4945a15ab1f81ddb78658fb3
 # Has no dependencies, so this one version is all npm installs.
 PRETTIER_VERSION=3.6.2
+# main as of 2025-05: the last release, v1.01, predates the posix port built with below.
+COREMARK_COMMIT=1f483d5b8316753a742cbf5590caf5bd0a4e4777
 
 # Blender's remote-asset code imports cattrs and requests, which Alpine's package does not depend
 # on; without them it fails at startup. gcompat runs Lean's glibc binaries on musl.
 PACKAGES="bash curl git tar zstd gcompat python3 py3-sympy blender py3-cattrs py3-requests
-  gcc make musl-dev nodejs npm"
+  gcc make musl-dev nodejs npm xz"
 # xonsh is in edge's testing repository rather than community.
 TESTING_PACKAGES="xonsh"
 TESTING=https://dl-cdn.alpinelinux.org/alpine/edge/testing
@@ -109,6 +112,19 @@ mkdir -p /opt/prettier
 (cd /opt/prettier &&
   quietly npm install --no-audit --no-fund --no-update-notifier "prettier@$PRETTIER_VERSION")
 
+# The compiled workloads, at -O2, and the text that xz, sha256sum and awk_words read: 8 MB from
+# guest/aok/gen_data.py, which is deterministic.
+step "CoreMark at $COREMARK_COMMIT, n-body and the text"
+mkdir -p /opt/bench/bin
+rm -rf /opt/src/coremark
+git clone -q https://github.com/eembc/coremark /opt/src/coremark
+git -C /opt/src/coremark checkout -q "$COREMARK_COMMIT"
+(cd /opt/src/coremark && gcc -O2 -I. -Iposix -DFLAGS_STR='"-O2"' -DPERFORMANCE_RUN=1 \
+  -DITERATIONS=0 core_list_join.c core_main.c core_matrix.c core_state.c core_util.c \
+  posix/core_portme.c -o /opt/bench/bin/coremark -lrt)
+gcc -O2 -o /opt/bench/bin/nbody "$BENCH_DIR/guest/aok/nbody.c" -lm
+python3 "$BENCH_DIR/guest/aok/gen_data.py" /opt/bench/data.bin 8
+
 # xonsh shows a welcome screen at every start until there is a configuration file, which costs
 # seconds under emulation and is not what anyone who uses xonsh sees. An empty one, then.
 step "xonsh's configuration"
@@ -132,6 +148,16 @@ xonsh --version
 echo "node $(node --version)"
 /opt/prettier/node_modules/.bin/prettier --version | sed 's/^/prettier /'
 gcc --version | head -1
+xz --version | head -1
+# CoreMark counts any run under 10 s as an error, so check its three algorithms' CRCs instead: the
+# ones core_main.c expects of the 2K performance run.
+/opt/bench/bin/coremark 0x0 0x0 0x66 100 7 1 2000 >/tmp/coremark.out
+for crc in "crclist *: 0xe714" "crcmatrix *: 0x1fd7" "crcstate *: 0x8e3a"; do
+  grep -q "$crc" /tmp/coremark.out || {
+    echo "CoreMark's ${crc%% *} is wrong" >&2
+    exit 1
+  }
+done
 
 # The manifest: every input a result depends on. bench.py digests it to name the disk.
 step "writing the manifest"
@@ -142,6 +168,9 @@ mkdir -p /opt/bench
   echo "lua $LUA_VERSION $LUA_SHA256"
   echo "make $MAKE_VERSION $MAKE_SHA256"
   echo "prettier $PRETTIER_VERSION"
+  echo "coremark $COREMARK_COMMIT"
+  echo "aok-bench $(cat "$BENCH_DIR"/guest/aok/* | sha256sum | cut -c1-16)"
+  echo "data $(sha256sum </opt/bench/data.bin | cut -c1-16)"
   echo "alpine $(cat /etc/alpine-release)"
   apk info -v 2>/dev/null | sort
 } >/opt/bench/manifest
