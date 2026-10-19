@@ -43,9 +43,50 @@ jobs:
         with:
           submodules: true
       - uses: cachix/install-nix-action@v31
+
       # SwiftTerm draws with a Metal shader, and Xcode downloads the Metal toolchain separately.
       - name: Install the Metal Toolchain
         run: xcodebuild -downloadComponent MetalToolchain
+
+      # QEMU and idevice are most of the build time, so both are cached. Each key names everything
+      # that build is made from: its scripts, the flake that supplies its tools, the Xcode it was
+      # built with, and for QEMU the fork commit the submodule points at.
+      - name: Key the Dependency Caches
+        id: keys
+        run: |
+          echo "xcode=$(xcodebuild -version | awk '/Build version/ { print $3 }')" >> "$GITHUB_OUTPUT"
+          echo "qemu=$(git rev-parse HEAD:third-party/qemu)" >> "$GITHUB_OUTPUT"
+      - name: Restore QEMU
+        id: qemu
+        uses: actions/cache@v6
+        with:
+          path: |
+            sysroot-iOS-arm64/Frameworks
+            sysroot-iOS-arm64/share/qemu
+          key: qemu-${{ steps.keys.outputs.xcode }}-${{ steps.keys.outputs.qemu }}-${{ hashFiles('build_dependencies.sh', 'qemu_source.sh', 'third-party/dependencies/**', 'flake.nix', 'flake.lock') }}
+      - name: Restore idevice
+        id: idevice
+        uses: actions/cache@v6
+        with:
+          path: build-idevice/out
+          key: idevice-${{ steps.keys.outputs.xcode }}-${{ hashFiles('build_idevice.sh', 'flake.nix', 'flake.lock') }}
+
+      # A checkout dates every file to when it was checked out, so restored builds look older than
+      # what they were built from, and make would build them again. With no restore-keys, a hit
+      # means the key matched exactly, so the restored builds are dated after their inputs instead.
+      # The QEMU stamp comes first, as make writes it fresh when it is missing.
+      - name: Use the Cached Builds
+        env:
+          QEMU_HIT: ${{ steps.qemu.outputs.cache-hit }}
+          IDEVICE_HIT: ${{ steps.idevice.outputs.cache-hit }}
+        run: |
+          if [ "$QEMU_HIT" = true ]; then
+            make build-iOS-arm64/qemu-source.stamp
+            touch sysroot-iOS-arm64/Frameworks/qemu-x86_64-softmmu.framework/qemu-x86_64-softmmu
+          fi
+          if [ "$IDEVICE_HIT" = true ]; then
+            touch build-idevice/out/libidevice_ffi.a
+          fi
       - name: Build
         run: make ipa GUEST=prebuilt
       - name: Upload the IPA
