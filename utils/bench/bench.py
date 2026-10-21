@@ -67,6 +67,11 @@ TB_SIZE = 1024
 #: an M2 Max; this is for a build that has gone wrong, not a slow one.
 WORKLOAD_TIMEOUT = 3600
 
+#: The network, as qemu_launcher.c spells it, before the options only our QEMU has (Build.nic and
+#: Build.netdev add them when the QEMU has them).
+NIC = "virtio-net-pci,id=net1,netdev=net0"
+NETDEV = "user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100"
+
 #: Where the workloads and the files they use are copied to in the guest, at every boot.
 GUEST_DIR = "/tmp/bench"
 
@@ -116,15 +121,28 @@ class Build:
         if not self.bios.is_dir():
             die(f"no pc-bios directory next to {self.path}")
         self.hybrid = self._is_hybrid()
-        # The app asks the console device to carry the terminal's size, which the fork added on
-        # 2026-10-13. It has no bearing on speed, so a build from before it, such as a baseline,
-        # runs without.
+
+        # The app asks the console device to carry the terminal's size. It has no bearing on speed,
+        # so a build from before it, such as a baseline, runs without it.
         device = subprocess.run(
             [self.path, "-device", "virtio-serial-pci,help"], capture_output=True, text=True
         )
         self.serial = "virtio-serial-pci,id=vser0" + (
             ",console-size=on" if "console-size=" in device.stdout else ""
         )
+
+        # The app gives the network a 65520-byte MTU and offloads. Workloads don't use the network,
+        # so a QEMU without them, such as a baseline, runs without. A bad value for offload is
+        # rejected by a build that has it and the option by one that doesn't.
+        probe = subprocess.run(
+            [self.path, "-M", "none", "-display", "none", "-netdev", "user,id=n,offload=probe"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        fast_net = "expects 'on' or 'off'" in probe.stderr
+        self.nic = NIC + (",host_mtu=65520" if fast_net else "")
+        self.netdev = NETDEV + (",mtu=65520,offload=on" if fast_net else "")
         if not self.hybrid:
             # build_host_qemu.sh names a standalone build after its backend.
             name = self.path.parent.name
@@ -247,8 +265,8 @@ class Machine:
             "-kernel", ASSETS / "bzImage",
             "-initrd", ASSETS / "initrd.img",
             "-display", "none",
-            "-device", "virtio-net-pci,id=net1,netdev=net0",
-            "-netdev", "user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100",
+            "-device", b.nic,
+            "-netdev", b.netdev,
             "-device", b.serial,
             "-device", "virtconsole,id=hvc0,chardev=hvc0-socket,bus=vser0.0",
             "-chardev", f"socket,id=hvc0-socket,path={self.hvc0},server=on,wait=off",

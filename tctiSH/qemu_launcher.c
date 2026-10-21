@@ -385,9 +385,16 @@ _Static_assert(TCTISH_CONSOLE_COUNT == 12, "TCTISH_MACHINE_ARGS and qemu_thread 
     /* We're a terminal; we don't display anything. */                                             \
     "-display", "none",                                                                            \
                                                                                                    \
-    /* Networking, for the guest's own use. Nothing on the host reaches in through it. */          \
-    "-device", "virtio-net-pci,id=net1,netdev=net0",                                               \
-    "-netdev", "user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100",                      \
+    /* Networking, for the guest's use. Nothing on the host reaches in through it.                 \
+                                                                                                   \
+       mtu= and offload= are our QEMU's. With them, the guest's TCP moves data in segments of      \
+       tens of KiB rather than 1460 bytes (host_mtu gives eth0 the same MTU), and QEMU finishes    \
+       the guest's checksums and large sends in native code. Each segment costs the emulated       \
+       guest a trip through its network stack, so under TCTI this makes bulk transfers several     \
+       times faster. */                                                                            \
+    "-device", "virtio-net-pci,id=net1,netdev=net0,host_mtu=65520",                                \
+    "-netdev", "user,id=net0,net=192.168.100.0/24,dhcpstart=192.168.100.100,"                      \
+               "mtu=65520,offload=on",                                                             \
                                                                                                    \
     /* The terminals, the agent the app asks things of, and tctictl's port.                        \
                                                                                                    \

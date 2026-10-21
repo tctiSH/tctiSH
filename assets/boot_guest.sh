@@ -248,8 +248,8 @@ main() {
     -cpu Haswell-v4,-pcid,-tsc-deadline,-invpcid,-spec-ctrl
     -kernel "$ASSETS/bzImage"
     -initrd "$ASSETS/initrd.img"
-    -device virtio-net-pci,id=net1,netdev=net0
-    -netdev "user,id=net0,net=192.168.100.0/24,dhcpstart=$GUEST_IP"
+    -device virtio-net-pci,id=net1,netdev=net0,host_mtu=65520
+    -netdev "user,id=net0,net=192.168.100.0/24,dhcpstart=$GUEST_IP,mtu=65520,offload=on"
     -device virtio-serial-pci,id=vser0,console-size=on
     -device virtconsole,id=hvc0,chardev=hvc0-socket,bus=vser0.0
     -device virtserialport,id=agent,chardev=agent-socket,bus=vser0.0,name=io.ara.tctish.agent
