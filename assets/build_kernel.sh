@@ -43,8 +43,8 @@ REPO="$(cd "$ASSETS/.." && pwd)"
 # 6.18.x and change lines only deliberately.
 #
 # The hash is from https://cdn.kernel.org/pub/linux/kernel/v6.x/sha256sums.asc.
-KERNEL_VERSION="6.18.53"
-KERNEL_SHA256="4d6fba95c2244b08a7b4144a4d38b9be4fb31abb5e7682ae40bb5cb11374cfe0"
+KERNEL_VERSION="6.18.60"
+KERNEL_SHA256="3c2f44ef6acc021a7ad444d9a2e6ec1ef488ff09368793d0004a6080f69d621e"
 KERNEL_MIRROR="https://cdn.kernel.org/pub/linux/kernel/v6.x"
 
 # The image the build runs in, pinned by digest -- the same one `nixos/nix:latest`
@@ -211,6 +211,10 @@ NIX_FLAGS="experimental-features = nix-command flakes"
 # any named volume that does not exist, silently -- while the host stamp still
 # said "seeded". The build then mounted an empty /nix and died without a word of
 # explanation. A stamp stored with the data cannot claim data that is not there.
+#
+# Only a stamp that is missing or different may delete the volume. A failure to
+# run the image, say because the runtime's image store has lost its layers, or to
+# read the stamp, says nothing about what the volume holds.
 seed_nix_store() {
   local want have
   # All three: the image supplies the `sh` the store must contain, flake.lock
@@ -221,11 +225,20 @@ seed_nix_store() {
     cat "$FLAKE/flake.lock" "$FLAKE/flake.nix"
   } | sha256_stdin)"
 
+  if ! "$CONTAINER" run --rm --progress none "$BUILDER_IMAGE" sh -c true; then
+    warn "could not run the builder image; pulling it again"
+    "$CONTAINER" image pull "$BUILDER_IMAGE" ||
+      die "could not pull the builder image; the toolchain volume is untouched"
+    "$CONTAINER" run --rm --progress none "$BUILDER_IMAGE" sh -c true ||
+      die "could not run the builder image; the toolchain volume is untouched"
+  fi
+
   # Mounted beside /nix rather than over it, so that an empty or half-seeded
-  # volume cannot take the image's `cat` away. Only stdout is kept; the
-  # runtime reports progress on stderr.
-  have="$("$CONTAINER" run --rm -v "$NIX_VOLUME:/seed" "$BUILDER_IMAGE" \
-    cat "/seed/$NIX_STAMP_NAME" 2>/dev/null || true)"
+  # volume cannot take the image's `sh` and `cat` away. A missing stamp prints
+  # nothing and succeeds; a stamp that cannot be read fails.
+  have="$("$CONTAINER" run --rm --progress none -v "$NIX_VOLUME:/seed" "$BUILDER_IMAGE" \
+    sh -c "[ ! -e '/seed/$NIX_STAMP_NAME' ] || cat '/seed/$NIX_STAMP_NAME'")" ||
+    die "could not read the toolchain volume; --clean-all removes it, and the next build seeds it again"
 
   if [ "$want" = "$have" ]; then
     return 0

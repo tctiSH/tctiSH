@@ -112,8 +112,9 @@ def workloads():
 class Build:
     """A QEMU binary, and how to start it on a backend."""
 
-    def __init__(self, path, backend):
+    def __init__(self, path, backend, accel_props=None):
         self.path = Path(path).resolve()
+        self.accel_props = accel_props
         if not os.access(self.path, os.X_OK):
             die(f"no QEMU at {self.path}; `make bench` builds the hybrid, or ./build_host_qemu.sh")
         self.backend = backend
@@ -167,10 +168,12 @@ class Build:
         # the JIT uses split-wx.
         if self.hybrid:
             tcti = "on" if self.backend == "tcti" else "off"
-            return f"tcg,tcti={tcti},split-wx=on,tb-size={TB_SIZE}"
-        if self.backend == "tcti":
-            return f"tcg,tb-size={TB_SIZE}"
-        return f"tcg,split-wx=on,tb-size={TB_SIZE}"
+            accel = f"tcg,tcti={tcti},split-wx=on,tb-size={TB_SIZE}"
+        elif self.backend == "tcti":
+            accel = f"tcg,tb-size={TB_SIZE}"
+        else:
+            accel = f"tcg,split-wx=on,tb-size={TB_SIZE}"
+        return accel + (f",{self.accel_props}" if self.accel_props else "")
 
     def identity(self):
         """What a result depends on, beside the disk and the workloads."""
@@ -533,7 +536,7 @@ def wait_for_quiet(load):
 
 
 def run(args):
-    build = Build(args.qemu, args.backend)
+    build = Build(args.qemu, args.backend, args.accel_props)
     known = workloads()
     chosen = list(known) if not args.workloads else args.workloads.replace(",", " ").split()
     for name in chosen:
@@ -797,6 +800,11 @@ def main():
     p.add_argument("--workloads", help="which workloads, comma- or space-separated (default: all)")
     p.add_argument("--rounds", type=int, default=1, help="how many times to run each workload")
     p.add_argument("--label", help="what to record the results as (default: backend and build)")
+    p.add_argument(
+        "--accel-props",
+        metavar="PROPS",
+        help="more -accel tcg properties for the QEMU, such as rcg=on",
+    )
     p.add_argument(
         "--wait-quiet",
         type=float,
