@@ -19,7 +19,9 @@ mount -t devpts none /dev/pts
 mount -t proc none /proc
 mount -t sysfs none /sys
 
-# Set up networking.
+# Set up networking. Linux gives lo its addresses, 127.0.0.1 and ::1, as it comes
+# up, but nothing brings it up unless we do.
+ip link set lo up
 ifconfig eth0 192.168.100.100
 ip route add default via 192.168.100.2 dev eth0
 
