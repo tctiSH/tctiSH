@@ -123,6 +123,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             "attempting_boot": false,
             "jit_mode": ExecutionMode.dynamicAuto.rawValue,
             "flush_jit_buffers": false,
+            "rcg": false,
             "images": default_images,
             "memory": "1G",
             "code_cache_mode": CodeCache.defaultMode.rawValue,
@@ -152,6 +153,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // recovery boot.
         if UserDefaults.standard.bool(forKey: "attempting_boot") {
             AppDelegate.forceRecoveryBoot = true
+
+            // RCG is less tested, so it may be the cause.
+            if AppSetting.rcg.bool {
+                AppSetting.rcg.set(false)
+                Log.jit.note("backend: RCG off, as the last boot failed")
+            }
         }
 
         // Under the scene life cycle the item usually comes with the scene instead, which

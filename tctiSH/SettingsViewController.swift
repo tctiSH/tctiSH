@@ -2866,6 +2866,24 @@ private final class DebugToolsViewController: SettingsListViewController {
                 ]),
 
             SettingsSection(
+                header: "TCTI",
+                footer: "RCG runs x86 instructions that have a dedicated gadget as just that "
+                    + "gadget: faster, but less tested. It applies at once under TCTI, and at the "
+                    + "next switch to TCTI under JIT. It's turned off after a failed boot.",
+                rows: [
+                    SettingsRow(
+                        id: "rcg",
+                        title: "RCG",
+                        symbol: "cpu",
+                        toggle: ToggleValue(
+                            isOn: AppSetting.rcg.bool,
+                            commit: {
+                                AppSetting.rcg.set($0)
+                                Backend.rcgChanged()
+                            }))
+                ]),
+
+            SettingsSection(
                 header: "Developer Disk Image",
                 footer:
                     "Uninstalls every DDI from this device and deletes tctiSH's downloaded copy, "

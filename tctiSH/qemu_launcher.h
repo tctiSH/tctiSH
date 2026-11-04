@@ -54,6 +54,7 @@ unsigned int qemu_max_vcpus(void);
 ///
 /// `start_native` picks the backend QEMU starts on: native code, or TCTI. The
 /// other can be switched to while the VM runs; see `qemu_backend_switch`.
+/// `rcg` starts RCG on; see `qemu_rcg_set`.
 /// `bless_jit_regions` says whether native code's buffer is handed to a
 /// debugger, whichever backend the VM starts on, since it is read whenever that
 /// buffer is mapped.
@@ -77,8 +78,8 @@ void run_background_qemu(const char *qemu_path, const char *kernel_path, const c
                          const char *const *console_socket_paths, const char *agent_socket_path,
                          const char *control_socket_path, const char *serial_socket_path,
                          const char *serial_log_path, const char *management_socket_path,
-                         bool start_native, bool bless_jit_regions, unsigned int tb_size_mib,
-                         unsigned int chunk_mib, unsigned int vcpus);
+                         bool start_native, bool rcg, bool bless_jit_regions,
+                         unsigned int tb_size_mib, unsigned int chunk_mib, unsigned int vcpus);
 
 /// The running VM's code cache, in bytes. All report 0 before QEMU is up.
 ///
@@ -186,6 +187,15 @@ size_t qemu_backend_switches(void);
 
 /// Why the last preparation or switch failed, or NULL. The caller frees it.
 char *qemu_backend_last_error(void);
+
+/// Asks for RCG on (`on`) or off, and returns whether the request was taken,
+/// which it is not before QEMU is up. It applies within milliseconds under
+/// TCTI, discarding all translated code, and from the next switch to TCTI under
+/// native code.
+bool qemu_rcg_set(bool on);
+
+/// Whether RCG is on, once a request has taken effect. False before QEMU is up.
+bool qemu_rcg_enabled(void);
 
 /// Puts every vCPU thread, and any plugged in later, in `qos_class`, and returns
 /// whether that was taken. `QOS_CLASS_UNSPECIFIED` puts each back in the class

@@ -714,7 +714,7 @@ enum CodeCacheMonitor {
             }
         }
 
-        // A drop means TCG ran out of room and threw everything away.
+        // A drop means a flush: TCG ran out of room, or the backend or RCG changed.
         if used < lastLoggedUsed {
             Log.jit.note(
                 "code cache: flushed at \(mib(lastLoggedUsed)); re-translating from nothing")

@@ -300,6 +300,22 @@ char *qemu_backend_last_error(void) {
     return fn ? fn() : NULL;
 }
 
+bool qemu_rcg_set(bool on) {
+    static bool (*fn)(bool);
+    if (!fn) {
+        fn = qemu_symbol("tctish_rcg_set");
+    }
+    return fn ? fn(on) : false;
+}
+
+bool qemu_rcg_enabled(void) {
+    static bool (*fn)(void);
+    if (!fn) {
+        fn = qemu_symbol("tctish_rcg_enabled");
+    }
+    return fn ? fn() : false;
+}
+
 bool qemu_vcpu_set_qos(qos_class_t qos_class) {
     static bool (*fn)(int);
     if (!fn) {
@@ -639,8 +655,8 @@ void run_background_qemu(const char *qemu_path, const char *kernel_path, const c
                          const char *const *console_socket_paths, const char *agent_socket_path,
                          const char *control_socket_path, const char *serial_socket_path,
                          const char *serial_log_path, const char *management_socket_path,
-                         bool start_native, bool bless_jit_regions, unsigned int tb_size_mib,
-                         unsigned int chunk_mib, unsigned int vcpus) {
+                         bool start_native, bool rcg, bool bless_jit_regions,
+                         unsigned int tb_size_mib, unsigned int chunk_mib, unsigned int vcpus) {
     pthread_t thread;
     pthread_attr_t qosAttribute;
 
@@ -712,14 +728,14 @@ void run_background_qemu(const char *qemu_path, const char *kernel_path, const c
     //
     // QEMU starts the named backend: TCTI (tcti=on), which needs no JIT, or the native JIT. It can
     // be switched dynamically while it runs. split-wx is for the native code's buffer, which is
-    // mapped split whenever it is mapped.
+    // mapped split whenever it is mapped. rcg=on starts RCG on; it can change while the VM runs.
     //
     // tb_size_mib is passed regardless of size: QEMU reads `tb-size=0` as "use the default", which
     // is the same decision size_code_gen_buffer() makes when the property is left off entirely. One
     // line, and no branch whose other half nothing ever takes.
     args->accel_args = calloc(ARGUMENT_MAX, sizeof(char));
-    snprintf(args->accel_args, ARGUMENT_MAX, "tcg,tcti=%s,split-wx=on,tb-size=%u",
-             start_native ? "off" : "on", tb_size_mib);
+    snprintf(args->accel_args, ARGUMENT_MAX, "tcg,tcti=%s,split-wx=on,tb-size=%u%s",
+             start_native ? "off" : "on", tb_size_mib, rcg ? ",rcg=on" : "");
 
     // Create our vCPU argument. Plugged in in order from core 0, which is how
     // the app keeps them, so that a snapshot taken with this many loads with

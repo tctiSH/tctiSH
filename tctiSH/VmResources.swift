@@ -613,6 +613,7 @@ enum AppSetting: String {
     case diskName = "disk_name"
     case jitMode = "jit_mode"
     case flushJitBuffers = "flush_jit_buffers"
+    case rcg = "rcg"
     case fontSize = "font_size"
     case codeCacheNotifications = "code_cache_notifications"
     case parkInBackground = "park_in_background"

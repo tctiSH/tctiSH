@@ -179,9 +179,14 @@ enum Backend {
 
     // MARK: - Starting
 
-    /// Begins watching for JIT. Main thread, once the VM has been started.
+    /// Begins watching for JIT and for Linux coming up. Main thread, once the
+    /// VM has been started.
     static func booted() {
         startWatching()
+
+        NotificationCenter.default.addObserver(
+            forName: GuestAgent.linuxDidComeUp, object: nil, queue: .main
+        ) { _ in matchRcgSetting() }
     }
 
     /// Whether the VM is here to be switched: the app is in front, and the
@@ -659,6 +664,25 @@ enum Backend {
     /// Flush JIT Buffers was changed in Settings. Main thread.
     static func flushSettingChanged() {
         if AppSetting.flushJitBuffers.bool { releaseNative() }
+    }
+
+    /// RCG was changed in Debug Tools. Main thread.
+    static func rcgChanged() {
+        let on = AppSetting.rcg.bool
+
+        // Refused before QEMU is up; `matchRcgSetting` applies it later.
+        let taken = qemu_rcg_set(on)
+        Log.jit.note("backend: RCG \(on ? "on" : "off")\(taken ? "" : ", once QEMU is up")")
+    }
+
+    /// Applies a change that came too early for QEMU to take. Main thread.
+    private static func matchRcgSetting() {
+        let on = AppSetting.rcg.bool
+        guard qemu_rcg_enabled() != on else { return }
+
+        if qemu_rcg_set(on) {
+            Log.jit.note("backend: RCG \(on ? "on" : "off"), to match the setting")
+        }
     }
 
     // MARK: - Publishing

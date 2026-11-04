@@ -119,13 +119,17 @@ public class QEMUInterface {
         }
         defer { consoleSocketPaths.forEach { free(UnsafeMutablePointer(mutating: $0)) } }
 
+        // Read once, so the log matches the launch.
+        let rcg = AppSetting.rcg.bool
+
         // Say what we're about to run. A hung VM looks identical whichever build and boot image
         // produced it, and those are exactly the two things that determine whether it *can* boot --
         // a snapshot taken under one QEMU build is not necessarily loadable by the other.
         Log.qemu.note(
             "\(getAppropriateQemuFramework().lastPathComponent), "
                 + "accel tcg,tcti=\(AppDelegate.startsNative ? "off" : "on"),split-wx=on,"
-                + "tb-size=\(tbSize), bless \(AppDelegate.blessJitRegions)")
+                + "tb-size=\(tbSize)\(rcg ? ",rcg=on" : ""), "
+                + "bless \(AppDelegate.blessJitRegions)")
         Log.qemu.note(
             "\(bootImageName.map { "resuming from '\($0)'" } ?? "cold boot"), "
                 + "memory \(memoryValue), code cache \(CodeCache.summary), "
@@ -137,7 +141,7 @@ public class QEMUInterface {
             memoryValue, monitorSocketPath, consoleSocketPaths, Self.agentSocketPath,
             Self.controlSocketPath, ChardevTransport.kernelLog.socketPath, serialLogPath,
             ChardevTransport.vmManagement.socketPath, AppDelegate.startsNative,
-            AppDelegate.blessJitRegions,
+            rcg, AppDelegate.blessJitRegions,
             UInt32(tbSize), UInt32(CodeCache.initialSize), UInt32(vcpus));
         Vcpus.launched(with: vcpus)
         DispatchQueue.main.async { ChardevTransport.kernelLog.followLog() }
