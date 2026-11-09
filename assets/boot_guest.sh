@@ -43,6 +43,7 @@ GUEST_IP="192.168.100.100"
 MONITOR_PORT="10045"
 
 BACKEND="jit"
+RCG="on"
 MEMORY="1G"
 CPUS="4"
 
@@ -81,6 +82,8 @@ usage() {
 usage: boot_guest.sh [options]
 
   --backend NAME    jit (the default) or tcti: which build of our QEMU to run.
+  --rcg on|off      Under TCTI, with RCG (on, the default, as in the app) or
+                    without it.
   --serial          Use the serial console, with the kernel's log, rather than
                     hvc0, the console the app shows.
   --fresh           Recreate the working disk from assets/empty.qcow first.
@@ -199,6 +202,14 @@ main() {
         BACKEND="${2:-}"
         shift
         ;;
+      --rcg)
+        RCG="${2:-}"
+        case "$RCG" in
+          on | off) ;;
+          *) die "--rcg is on or off, not '$RCG'" ;;
+        esac
+        shift
+        ;;
       --serial) USE_SERIAL=1 ;;
       --fresh) FRESH=1 ;;
       --snapshot)
@@ -262,6 +273,11 @@ main() {
     -monitor "tcp:localhost:$MONITOR_PORT,server=on,wait=off"
     -no-reboot
   )
+
+  # Only a build that can run TCTI has the property.
+  if [ "$BACKEND" = tcti ]; then
+    argv+=(-accel "tcg,rcg=$RCG")
+  fi
 
   # The consoles of the app's other TTYs, hvc1 to hvc11, connected to nothing here.
   local n

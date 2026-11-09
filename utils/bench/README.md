@@ -14,9 +14,10 @@ python3 utils/bench/bench.py run --help           # all options; pass them with 
 ```
 
 Each workload boots the app's guest and machine on `build-macOS-arm64/qemu_hybrid` (or
-`BENCH_QEMU=`), on a fresh copy of the disk. One boot per workload, because a shared boot slowed
-later workloads by up to 4x. It does not measure device speed, iOS-only code paths, or disk and
-network I/O.
+`BENCH_QEMU=`), on a fresh copy of the disk. Under TCTI it runs with RCG, as the app does; `RCG=off`
+runs plain TCTI, and is needed for a build from before RCG. One boot per workload, because a shared
+boot slowed later workloads by up to 4x. It does not measure device speed, iOS-only code paths, or
+disk and network I/O.
 
 ## Workloads
 
@@ -45,9 +46,10 @@ busy).
 
 ## Comparing Builds
 
-Results are stored per label in `build-bench/results/`. The default label is the backend and fork
-commit, such as `tcti-3c64b6a7a8`. Running a label again adds rounds; a label refuses results from a
-different QEMU, guest or disk (`ARGS=--replace` starts it over).
+Results are stored per label in `build-bench/results/`. The default label is the backend, with
+`-rcg` under RCG, and the fork commit, such as `tcti-rcg-3c64b6a7a8`. Running a label again adds
+rounds; a label refuses results from a different QEMU, guest or disk (`ARGS=--replace` starts it
+over).
 
 ```sh
 make bench-baseline COMMIT=3c64b6a7a8 NAME=base

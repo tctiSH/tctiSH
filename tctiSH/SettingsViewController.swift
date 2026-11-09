@@ -2867,9 +2867,9 @@ private final class DebugToolsViewController: SettingsListViewController {
 
             SettingsSection(
                 header: "TCTI",
-                footer: "RCG runs x86 instructions that have a dedicated gadget as just that "
-                    + "gadget: faster, but less tested. It applies at once under TCTI, and at the "
-                    + "next switch to TCTI under JIT. It's turned off after a failed boot.",
+                footer:
+                    "RCG runs x86 instructions as single gadgets where possible, and everything else under plain TCTI. It applies at once "
+                    + "under TCTI, and at the next switch to TCTI under JIT.",
                 rows: [
                     SettingsRow(
                         id: "rcg",

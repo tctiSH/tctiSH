@@ -4,7 +4,7 @@
     bench.py prepare [--qemu PATH]
     bench.py baseline COMMIT [--name NAME]
     bench.py run --backend tcti|jit [--workloads A,B,...] [--rounds N] [--label NAME]
-                 [--qemu PATH] [--wait-quiet LOAD] [--replace]
+                 [--qemu PATH] [--rcg on|off] [--wait-quiet LOAD] [--replace]
     bench.py compare LABEL [LABEL...]
     bench.py list
 
@@ -112,9 +112,10 @@ def workloads():
 class Build:
     """A QEMU binary, and how to start it on a backend."""
 
-    def __init__(self, path, backend, accel_props=None):
+    def __init__(self, path, backend, accel_props=None, rcg=None):
         self.path = Path(path).resolve()
         self.accel_props = accel_props
+        self.rcg = rcg
         if not os.access(self.path, os.X_OK):
             die(f"no QEMU at {self.path}; `make bench` builds the hybrid, or ./build_host_qemu.sh")
         self.backend = backend
@@ -173,6 +174,9 @@ class Build:
             accel = f"tcg,tb-size={TB_SIZE}"
         else:
             accel = f"tcg,split-wx=on,tb-size={TB_SIZE}"
+        # Off is QEMU's default, so a run with RCG off has the same -accel as one that says nothing.
+        if self.rcg == "on":
+            accel += ",rcg=on"
         return accel + (f",{self.accel_props}" if self.accel_props else "")
 
     def identity(self):
@@ -536,7 +540,9 @@ def wait_for_quiet(load):
 
 
 def run(args):
-    build = Build(args.qemu, args.backend, args.accel_props)
+    if args.rcg and args.accel_props and "rcg=" in args.accel_props:
+        die("give RCG once: --rcg, or rcg= in --accel-props")
+    build = Build(args.qemu, args.backend, args.accel_props, args.rcg)
     known = workloads()
     chosen = list(known) if not args.workloads else args.workloads.replace(",", " ").split()
     for name in chosen:
@@ -582,9 +588,10 @@ def run(args):
 
 
 def default_label(build, identity):
+    what = f"{build.backend}-rcg" if build.rcg == "on" else build.backend
     if "fork" in identity:
-        return f"{build.backend}-{identity['fork']}"
-    return f"{build.backend}-{build.path.parent.name}"
+        return f"{what}-{identity['fork']}"
+    return f"{what}-{build.path.parent.name}"
 
 
 def run_round(build, label, rnd, chosen, results_path):
@@ -801,9 +808,14 @@ def main():
     p.add_argument("--rounds", type=int, default=1, help="how many times to run each workload")
     p.add_argument("--label", help="what to record the results as (default: backend and build)")
     p.add_argument(
+        "--rcg",
+        choices=("on", "off"),
+        help="RCG on or off (default: QEMU's, off; `make bench` passes on under TCTI)",
+    )
+    p.add_argument(
         "--accel-props",
         metavar="PROPS",
-        help="more -accel tcg properties for the QEMU, such as rcg=on",
+        help="more -accel tcg properties for the QEMU, such as tcti-ordered=off",
     )
     p.add_argument(
         "--wait-quiet",

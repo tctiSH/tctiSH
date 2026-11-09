@@ -278,10 +278,11 @@ When working directly on the kernel for paravirtualisation or feature-enablement
 very useful to boot the guest kernel locally. This can be done as follows:
 
 ```sh
-make boot-guest                   # JIT, hvc0 as the app shows it, guest logs in as root
-make boot-guest BACKEND=tcti      # the same, under TCTI
-make boot-guest ARGS=--serial     # the serial console, with the kernel's log, instead
-make boot-guest ARGS=--help       # the other options
+make boot-guest                        # JIT, hvc0 as the app shows it, guest logs in as root
+make boot-guest BACKEND=tcti           # the same, under TCTI with RCG, as the app runs it
+make boot-guest BACKEND=tcti RCG=off   # under TCTI without RCG
+make boot-guest ARGS=--serial          # the serial console, with the kernel's log, instead
+make boot-guest ARGS=--help            # the other options
 ```
 
 `assets/boot_guest.sh` boots the shipped `bzImage`, `initrd.img` and a writable copy of `empty.qcow`

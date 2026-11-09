@@ -38,6 +38,8 @@ GUEST             ?= build
 # build-macOS-arm64/qemu_{jit,tcti}. BACKEND picks which one a target means. The GC root keeps the
 # nix libraries those builds link against; see build_host_qemu.sh.
 BACKEND           ?= jit
+# Whether TCTI runs with RCG, as the app does unless it's switched off in Debug Tools.
+RCG               ?= on
 HOST_QEMU_BUILD   := build-macOS-arm64
 HOST_QEMU          = $(HOST_QEMU_BUILD)/qemu_$(1)/qemu-system-x86_64
 HOST_QEMU_ROOT    := $(HOST_QEMU_BUILD)/nix-gc-root
@@ -47,6 +49,9 @@ HOST_QEMU_ROOT    := $(HOST_QEMU_BUILD)/nix-gc-root
 ifneq ($(filter host-qemu boot-guest bench,$(MAKECMDGOALS)),)
     ifeq ($(filter $(BACKEND),jit tcti),)
         $(error BACKEND must be jit or tcti, not '$(BACKEND)')
+    endif
+    ifeq ($(filter $(RCG),on off),)
+        $(error RCG must be on or off, not '$(RCG)')
     endif
 endif
 
@@ -205,20 +210,20 @@ kernel-config: ## Resolve the guest kernel config and report the delta, without 
 	./assets/build_kernel.sh --config-only
 
 # Boots on our QEMU, built for this Mac, so the kernel is tested against the emulator the app ships.
-# BACKEND=tcti for TCTI. Setting TCTISH_QEMU to some other qemu-system-x86_64 runs that instead, and
-# skips the build, as does asking for --help.
+# BACKEND=tcti for TCTI, with RCG unless RCG=off. Setting TCTISH_QEMU to some other
+# qemu-system-x86_64 uses that instead while skipping the build. --help also skips the build.
 #
 # No $(SHELL_WRAPPER): nothing it runs comes from the devshell any more.
 .PHONY: boot-guest
-boot-guest: $(if $(or $(TCTISH_QEMU),$(filter --help -h,$(ARGS))),,$(call HOST_QEMU,$(BACKEND))) ## Boot the guest image locally on our QEMU (BACKEND=jit|tcti; ARGS=--help for options)
-	./assets/boot_guest.sh --backend $(BACKEND) $(ARGS)
+boot-guest: $(if $(or $(TCTISH_QEMU),$(filter --help -h,$(ARGS))),,$(call HOST_QEMU,$(BACKEND))) ## Boot the guest image locally on our QEMU (BACKEND=jit|tcti; RCG=on|off; ARGS=--help for options)
+	./assets/boot_guest.sh --backend $(BACKEND) --rcg $(RCG) $(ARGS)
 
 # -- Benchmarking ---------------------------------------------------------------------------------
 
 # The suite in utils/bench: real programs, timed in the guest on our QEMU, built for this Mac. See
 # utils/bench/README.md for the workloads and how to read the results. It runs the hybrid build, the
-# one QEMU with both backends that the app ships, started on BACKEND; BENCH_QEMU runs another build
-# instead, such as a baseline, and skips building the hybrid.
+# one QEMU with both backends that the app ships, started on BACKEND, with RCG under TCTI unless
+# RCG=off; BENCH_QEMU runs another build instead, such as a baseline, and skips building the hybrid.
 #
 # Everything it makes is in build-bench/: the disk, the results and each round's logs.
 BENCH_DISK  := build-bench/bench.qcow
@@ -236,8 +241,8 @@ bench-disk: $(BENCH_DISK) ## Build build-bench/bench.qcow, the disk the benchmar
 
 # Timing wants a quiet Mac: each round's times are as noisy as whatever else is running.
 .PHONY: bench
-bench: $(BENCH_DISK) $(if $(BENCH_QEMU),,$(HYBRID_QEMU)) ## Run the benchmarks (BACKEND=jit|tcti; WORKLOADS="a b"; ROUNDS=n; LABEL=name; ARGS=more options)
-	python3 utils/bench/bench.py run --backend $(BACKEND) \
+bench: $(BENCH_DISK) $(if $(BENCH_QEMU),,$(HYBRID_QEMU)) ## Run the benchmarks (BACKEND=jit|tcti; RCG=on|off; WORKLOADS="a b"; ROUNDS=n; LABEL=name; ARGS=more options)
+	python3 utils/bench/bench.py run --backend $(BACKEND) $(if $(filter tcti,$(BACKEND)),--rcg $(RCG)) \
 		$(if $(BENCH_QEMU),--qemu $(BENCH_QEMU)) $(if $(WORKLOADS),--workloads "$(WORKLOADS)") \
 		$(if $(ROUNDS),--rounds $(ROUNDS)) $(if $(LABEL),--label $(LABEL)) $(ARGS)
 

@@ -123,7 +123,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             "attempting_boot": false,
             "jit_mode": ExecutionMode.dynamicAuto.rawValue,
             "flush_jit_buffers": false,
-            "rcg": false,
+            "rcg": true,
             "images": default_images,
             "memory": "1G",
             "code_cache_mode": CodeCache.defaultMode.rawValue,
@@ -149,16 +149,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Before anything reads it.
         ExecutionMode.migrate()
 
+        // RCG was off by default before, and a failed boot turned it off, so a stored off may not
+        // be the user's choice. Every install starts from the new default once.
+        if !UserDefaults.standard.bool(forKey: "rcg_default_on") {
+            UserDefaults.standard.removeObject(forKey: AppSetting.rcg.rawValue)
+            UserDefaults.standard.set(true, forKey: "rcg_default_on")
+        }
+
         // If we attempted a boot, but did not finish one, something went wrong last time. Force a
         // recovery boot.
         if UserDefaults.standard.bool(forKey: "attempting_boot") {
             AppDelegate.forceRecoveryBoot = true
-
-            // RCG is less tested, so it may be the cause.
-            if AppSetting.rcg.bool {
-                AppSetting.rcg.set(false)
-                Log.jit.note("backend: RCG off, as the last boot failed")
-            }
         }
 
         // Under the scene life cycle the item usually comes with the scene instead, which
