@@ -908,6 +908,21 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         super.send(source: source, data: data)
     }
 
+    /// Empties the terminal's screen and scrollback for a new session, forgets
+    /// its working directory, and goes back to following new output. Fed as
+    /// output, so the view redraws and drops its selection and search, but not
+    /// through `receive`, so it doesn't count as unseen output.
+    func resetForNewSession() {
+        // CAN abandons an OSC or APC the old session left unfinished, where ESC would end it and
+        // act on it; any other unfinished sequence ends at the ESC that follows, and only a DCS's
+        // data is still acted on. Then leave the alternate screen, which a full reset (ESC c)
+        // doesn't clear; then the full reset; then show the cursor, which SwiftTerm keeps hidden
+        // across a reset.
+        feed(text: "\u{18}\u{1b}[?1049l\u{1b}c\u{1b}[?25h")
+        _cwd = nil
+        follow()
+    }
+
     /// Callback that occurs when we receive OSC 7, which indicates the current
     /// working directory. The default tctiSH setup's shell integration
     /// generates OSC-7 each time the prompt is issue.

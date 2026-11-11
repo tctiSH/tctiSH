@@ -167,6 +167,14 @@ final class AppStatus: NSObject {
         ) { [weak self] _ in
             self?.reportFailedSaveIfNeeded()
         }
+
+        // And once a save still running when the app came back has finished. One past its deadline
+        // is marked failed but may still succeed, so only then is the outcome known.
+        NotificationCenter.default.addObserver(
+            forName: AppDelegate.machineIsBack, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.reportFailedSaveIfNeeded()
+        }
     }
 
     /// Called each time a window appears, since an alert can be presented only
@@ -263,11 +271,12 @@ final class AppStatus: NSObject {
     /// Says why the terminal isn't answering yet: the machine is stopped until
     /// the save finishes.
     ///
-    /// Shares the boot pill's key, so it inherits the stall watch: a save that
-    /// never finishes is as much of a dead end as a boot that never finishes,
-    /// and offers the same way out.
+    /// Shares the boot pill's key, but not its stall watch: a save can run for
+    /// minutes past its deadline and still keep the session, and a recovery
+    /// boot is refused while it runs anyway. A save that never finishes gives
+    /// up after `lateSaveWait`, and says so.
     @objc private func returnedDuringSave() {
-        showBootProgress(message: "Finishing session save")
+        showBootProgress(message: "Finishing session save", watchingForStall: false)
     }
 
     /// The machine is running again, after a save or a park that the app came
@@ -349,8 +358,9 @@ final class AppStatus: NSObject {
         presenter.present(alert, animated: true)
     }
 
-    /// Puts the boot pill up as a spinner, and starts the clock on it.
-    private func showBootProgress(message: String) {
+    /// Puts the boot pill up as a spinner and starts the clock on it, or, with
+    /// `watchingForStall` false, stops any clock already running.
+    private func showBootProgress(message: String, watchingForStall: Bool = true) {
         present(
             .init(
                 key: Self.bootStatusKey,
@@ -358,6 +368,11 @@ final class AppStatus: NSObject {
                 state: .indeterminate,
                 duration: nil))
 
+        guard watchingForStall else {
+            bootStallWatch?.cancel()
+            bootStallWatch = nil
+            return
+        }
         bootStallCounted = 0
         bootStallLastTick = ProcessInfo.processInfo.systemUptime
         scheduleBootStallTick()
@@ -425,11 +440,62 @@ final class AppStatus: NSObject {
         ViewController.active?.present(alert, animated: true)
     }
 
-    /// Starts Linux again from nothing, and waits for it as for a boot.
-    func performRecoveryBoot() {
-        let qemu = (UIApplication.shared.delegate as? AppDelegate)?.qemu
+    /// Starts Linux again from nothing, and waits for it as for a boot. Returns
+    /// whether it started; if not, the status pill says why.
+    @discardableResult
+    func performRecoveryBoot() -> Bool {
+        let appDelegate = UIApplication.shared.delegate as? AppDelegate
 
-        guard qemu?.requestRecoveryBoot() == true else {
+        // Not while a save is running, preparation included: it would snapshot the machine as it
+        // resets, and point the next launch at that.
+        guard appDelegate?.saving != true else {
+            Log.qemu.note("recovery boot requested during a save; not resetting")
+            present(
+                .init(
+                    key: Self.saveStatusKey,
+                    message: "Still saving; try again when it's done",
+                    state: .symbol("clock"),
+                    duration: 4))
+            return false
+        }
+
+        // A parked machine starts afresh by the way out of a park, which prepares the code cache
+        // and stops anything bringing the old session back. One on its way back is allowed to
+        // finish.
+        if appDelegate?.machineIsAway == true {
+            let started = appDelegate?.recoverFromFailedUnpark(.startAfresh) == true
+            if started {
+                showBootProgress(message: "Starting Linux")
+            } else {
+                Log.qemu.note("recovery boot requested while restoring the session; not resetting")
+                present(
+                    .init(
+                        key: Self.saveStatusKey,
+                        message: "Still restoring; try again when it's done",
+                        state: .symbol("clock"),
+                        duration: 4))
+            }
+            return started
+        }
+
+        switch appDelegate?.qemu?.requestRecoveryBoot() {
+        case .started:
+            break
+
+        case .monitorBusy:
+            // The session is still there, so reopening the app would only resume it: offer to try
+            // again instead.
+            present(
+                .init(
+                    key: Self.bootStatusKey,
+                    message: "Busy; tap to try again",
+                    state: .failed,
+                    duration: 6,
+                    tint: .systemOrange,
+                    onTap: { [weak self] in self?.performRecoveryBoot() }))
+            return false
+
+        case .stuck, nil:
             // QEMU itself isn't answering, so there's nothing further to try from in here.
             // Relaunching will recovery-boot on its own.
             present(
@@ -439,12 +505,13 @@ final class AppStatus: NSObject {
                     state: .failed,
                     duration: nil,
                     tint: .systemRed))
-            return
+            return false
         }
 
         // Back to waiting, with the clock restarted -- so a recovery boot that also stalls offers
         // itself again rather than hanging silently.
         showBootProgress(message: "Restarting Linux")
+        return true
     }
 
     // MARK: - Quick actions
@@ -567,6 +634,9 @@ final class AppStatus: NSObject {
         // background, and putting the pill up there would let its few seconds expire on a screen
         // nobody is looking at, taking the flag with it.
         guard UIApplication.shared.applicationState == .active else { return }
+
+        // Nor while a save is running: one past its deadline is marked failed, but may yet work.
+        guard (UIApplication.shared.delegate as? AppDelegate)?.saving != true else { return }
 
         guard QEMUInterface.lastSaveFailed else { return }
         QEMUInterface.lastSaveFailed = false
@@ -1269,7 +1339,8 @@ final class AppStatus: NSObject {
     // MARK: - VM Management
 
     /// Has VM Management ask before submitting a command that would end,
-    /// restart or rearrange the VM under the app; see `MonitorGuard`.
+    /// restart or rearrange the VM under the app; see `MonitorGuard`. A
+    /// confirmed `system_reset` is done as a recovery boot.
     private func guardMonitorCommands() {
         ChardevTransport.vmManagement.confirm = { [weak self] risk, answer in
             guard let self else {
@@ -1277,6 +1348,15 @@ final class AppStatus: NSObject {
                 return
             }
             ask(about: risk, answer: answer)
+        }
+        ChardevTransport.vmManagement.recoveryBoot = { [weak self] in
+            let started = self?.performRecoveryBoot() ?? false
+            // Below the emptied prompt, as it lands before QEMU's next one.
+            ChardevTransport.vmManagement.note(
+                "\r\n"
+                    + (started
+                        ? "Doing a recovery boot in place of system_reset."
+                        : "Not reset; the status at the top right says why."))
         }
     }
 

@@ -123,6 +123,23 @@ final class ChardevSocket {
         }
     }
 
+    /// Throws away what has arrived and not been read yet, for a console whose
+    /// old output no longer belongs on screen. Call it on the main queue, where
+    /// what arrives is delivered, so that none is delivered in the middle of
+    /// this. A connection that throws away what arrives has nothing pending,
+    /// and nothing is done for it. The socket doesn't block, so this stops once
+    /// nothing is left.
+    func discardPending() {
+        guard !discardsOutput else { return }
+        dispatchPrecondition(condition: .onQueue(readQueue))
+        guard let connection else { return }
+        var buffer = [UInt8](repeating: 0, count: Self.readSize)
+        var count: Int
+        repeat {
+            count = buffer.withUnsafeMutableBytes { read(connection.fd, $0.baseAddress, $0.count) }
+        } while count > 0 || (count < 0 && errno == EINTR)
+    }
+
     /// Makes one attempt to connect, and says whether it succeeded.
     private func connect() -> Bool {
         let opened = SocketConnection.open(path)

@@ -660,6 +660,25 @@ final class TTYs {
 
     // MARK: Terminals
 
+    /// Resets every user TTY's terminal for a recovery boot, emptying its
+    /// screen and scrollback: what they show belongs to the session that's
+    /// gone. Kernel Log and VM Management keep theirs, as the record of what
+    /// led up to the boot.
+    ///
+    /// What the old session wrote and the app hasn't read yet is thrown away
+    /// first, so none of it lands in an emptied terminal. Unseen-output and
+    /// bell statuses are cleared, and the switcher redraws the thumbnails.
+    func resetUserTerminals() {
+        for tty in users {
+            if let number = tty.number {
+                ConsoleTransport.consoles[number].discardPending()
+            }
+            tty.view?.resetForNewSession()
+            tty.outputCount &+= 1
+            clearStatus(of: tty)
+        }
+    }
+
     /// Makes a terminal view, at `frame`, for every TTY that lacks one, and
     /// gives `window`'s terminals that frame. A view controller calls this
     /// once, as it loads.
@@ -706,6 +725,14 @@ final class TTYs {
         !tty.isSystem || Self.isShown(tty.kind)
     }
 
+    /// Clears a TTY's unseen-output and bell statuses, if it has either.
+    private func clearStatus(of tty: TTY) {
+        guard tty.hasBelled || tty.hasUnseenOutput else { return }
+        tty.hasBelled = false
+        tty.hasUnseenOutput = false
+        postStatus(of: tty)
+    }
+
     private func noteOutput(on tty: TTY) {
         tty.outputCount &+= 1
 
@@ -747,11 +774,7 @@ final class TTYs {
         let previous = window.selected
         window.selected = tty
 
-        if tty.hasBelled || tty.hasUnseenOutput {
-            tty.hasBelled = false
-            tty.hasUnseenOutput = false
-            postStatus(of: tty)
-        }
+        clearStatus(of: tty)
 
         save()
         NotificationCenter.default.post(
@@ -972,11 +995,7 @@ final class TTYs {
             } else if window.selected === tty {
                 select(window.users.first ?? fallback(in: window))
             }
-            if tty.hasBelled || tty.hasUnseenOutput {
-                tty.hasBelled = false
-                tty.hasUnseenOutput = false
-                postStatus(of: tty)
-            }
+            clearStatus(of: tty)
         }
         changed()
         if let emptied {

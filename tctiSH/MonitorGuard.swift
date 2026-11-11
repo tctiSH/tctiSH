@@ -16,7 +16,9 @@ import SwiftTerm
 /// A Return is looked at only once the monitor has echoed what was typed before
 /// it, since the line is read off the screen, and nothing typed later overtakes
 /// it while it waits or while the question is open: what follows a Return goes
-/// in order behind it, and is dropped with it if the answer is no.
+/// in order behind it, and is dropped with it if the answer is no. A confirmed
+/// command whose risk says so is erased and done as a recovery boot instead;
+/// see `recoveryBoot`.
 ///
 /// Use it from the main thread.
 final class MonitorGate {
@@ -30,6 +32,14 @@ final class MonitorGate {
     /// Asks whether to submit a flagged command, and calls back with the
     /// answer. It must call back, or VM Management stops sending.
     var confirm: ((MonitorGuard.Risk, @escaping (Bool) -> Void) -> Void)?
+
+    /// Does a recovery boot in place of a confirmed command whose risk says to,
+    /// such as `system_reset`; the command is erased rather than submitted. A
+    /// recovery boot resets the machine the same way, but refuses during a save
+    /// and empties the old session's terminals, neither of which the app can do
+    /// for a reset it only learns of afterwards. If nil, the command is
+    /// submitted.
+    var recoveryBoot: (() -> Void)?
 
     private let deliver: (ArraySlice<UInt8>) -> Void
     private let screen: () -> Terminal?
@@ -71,8 +81,14 @@ final class MonitorGate {
     /// reconnection but shows a bare prompt, so a Return would submit text that
     /// isn't on screen: go to the end of the line and erase it.
     func connected() {
-        typed.removeAll()
         echoOwed = false
+        eraseLine()
+    }
+
+    /// Goes to the end of the monitor's line and erases it, Ctrl-E then Ctrl-U,
+    /// and forgets what was typed.
+    private func eraseLine() {
+        typed.removeAll()
         deliver([0x05, 0x15])
     }
 
@@ -92,7 +108,16 @@ final class MonitorGate {
                         asking = false
                         if submit {
                             queue.removeFirst()
-                            pass(next)
+                            if risk.doneAsRecoveryBoot, let recoveryBoot {
+                                // Erase the command and submit an empty line in its place, which
+                                // brings back a prompt for what comes next and adds nothing to the
+                                // history.
+                                eraseLine()
+                                pass([0x0d])
+                                recoveryBoot()
+                            } else {
+                                pass(next)
+                            }
                         } else {
                             // The command stays typed; what was sent behind it goes.
                             queue.removeAll()
@@ -141,11 +166,16 @@ final class MonitorGate {
 /// screen hasn't caught up.
 enum MonitorGuard {
 
-    /// What submitting a command would do, as an alert puts it.
+    /// What submitting a command would do, as an alert puts it, and whether the
+    /// app does it another way.
     struct Risk {
         let title: String
         let message: String
         let action: String
+
+        /// Whether a confirmed command is done as a recovery boot instead; see
+        /// `MonitorGate.recoveryBoot`.
+        var doneAsRecoveryBoot = false
     }
 
     /// The prompt QEMU's monitor ends each of its prompts with.
@@ -316,8 +346,11 @@ enum MonitorGuard {
                 title: "Reset the Machine?",
                 message:
                     "Linux starts again at once, without shutting down. Everything running in it "
-                    + "ends, and anything it hadn't written to the disk is lost.",
-                action: "Reset")
+                    + "ends, the terminals are emptied, and anything it hadn't written to the disk "
+                    + "is lost.",
+                action: "Reset",
+                // Only the bare command: QEMU refuses it with anything more on the line.
+                doneAsRecoveryBoot: words.count == 1)
 
         case "stop", "s":
             return Risk(

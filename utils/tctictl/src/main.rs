@@ -35,7 +35,10 @@ enum Commands {
         value: Option<String>,
     },
 
-    #[clap(about = "Mount an iOS folder, picked on the device, into tctiSH")]
+    #[clap(
+        about = "Mount an iOS folder into tctiSH, picked on the device; --name with a folder \
+                    picked before mounts it again"
+    )]
     Mount {
         #[clap(help = "The linux path where the folder should be mounted")]
         mountpoint: String,
@@ -45,6 +48,17 @@ enum Commands {
             help = "What to call it under /ios_host; the mountpoint's name if not given"
         )]
         name: Option<String>,
+    },
+
+    #[clap(about = "List the iOS folders this disk mounts again at boot")]
+    Mounts {},
+
+    #[clap(
+        about = "Forget an iOS folder from `mount -t ios`: unmount it, and don't mount it again"
+    )]
+    Forget {
+        #[clap(help = "Its name under /ios_host")]
+        name: String,
     },
 
     #[clap(about = "Save, load and list snapshots of the whole machine")]
@@ -109,6 +123,15 @@ enum LowlevelCommands {
     #[clap(about = "Prints the 9p cache mode tctiSH wants shared folders mounted with")]
     ShareCache {},
 
+    #[clap(about = "Mount the remembered iOS folders again, without the picker")]
+    RestoreMounts {
+        #[clap(
+            long,
+            help = "File descriptor of the restore lock to release when done (for mount_shared.sh)"
+        )]
+        release_lock_fd: Option<i32>,
+    },
+
     #[clap(about = "Prints the command tctiSH starts in new terminals, or nothing for the shell")]
     DefaultCommand {},
 
@@ -137,6 +160,7 @@ fn main() {
 
         // Mount a host folder into the guest.
         Commands::Mount { mountpoint, name } => {
+            let named = name.is_some();
             let name = name.unwrap_or_else(|| mount::default_name(&mountpoint));
 
             // Before the picker, so that a name the app won't take doesn't cost a trip through it.
@@ -148,28 +172,62 @@ fn main() {
                 std::process::exit(1);
             }
 
+            // If the boot is still mounting the remembered folders, wait, so this doesn't mount on
+            // top of one of them.
+            mount::wait_for_restore();
+
             if let Err(err) = mount::check_mountpoint(&mountpoint) {
                 eprintln!("Failed to mount: {err:#}");
                 std::process::exit(1);
             }
 
-            let folder = ui::select_folder_as_bookmark();
-            match folder {
-                // If we got a path in response, mount it.
-                Ok(bookmark) => {
-                    let result = mount::mount_from_host(bookmark, name, mountpoint);
-                    if let Err(result) = result {
-                        eprintln!("Failed to mount: {:#}", result);
+            // A name made up from the mountpoint can clash with a folder already shared under that
+            // name. Mounting would then switch that folder for everyone using it, so refuse.
+            let state = mount::share_state(&name).unwrap_or(mount::ShareState::Unknown);
+            if !named && state != mount::ShareState::Unknown {
+                eprintln!(
+                    "A folder is already shared as '{name}'; pass --name {name} to mount that one, \
+                     or another --name to pick a new one"
+                );
+                std::process::exit(1);
+            }
+
+            // A name given explicitly for a folder that can still be reached mounts that folder
+            // again, without the picker. The app would refuse a different folder under the name
+            // anyway.
+            let remembered = named && state == mount::ShareState::Reachable;
+            let tag = if remembered {
+                mount::mount_remembered(&name, &mountpoint).map(|()| {
+                    eprintln!(
+                        "Mounted '{name}', the folder picked last time; run `tctictl forget {name}` \
+                         to pick another."
+                    );
+                    name
+                })
+            } else {
+                match ui::select_folder_as_bookmark() {
+                    Ok(bookmark) => mount::mount_from_host(bookmark, name, mountpoint.clone()),
+                    Err(err) => {
+                        eprintln!("Couldn't select a folder to mount: {}", err);
                         std::process::exit(1);
                     }
                 }
+            };
 
-                // Otherwise, error out.
-                Err(err) => {
-                    eprintln!("Couldn't select a folder to mount: {}", err);
-                }
+            let tag = tag.unwrap_or_else(|err| {
+                eprintln!("Failed to mount: {err:#}");
+                std::process::exit(1);
+            });
+
+            // The mount has worked. If this fails, it just won't come back after a reboot.
+            if let Err(err) = mount::record_mountpoint(&tag, &mountpoint) {
+                eprintln!("Mounted, but it won't come back after a reboot: {err:#}");
             }
         }
+
+        Commands::Mounts {} => exit_on_error(mount::list_remembered()),
+
+        Commands::Forget { name } => exit_on_error(mount::forget(&name)),
 
         Commands::Snapshot { subcommand } => {
             let result = match subcommand {
@@ -228,6 +286,10 @@ fn lowlevel(subcommand: LowlevelCommands) {
         }
 
         LowlevelCommands::ShareCache {} => println!("{}", mount::share_cache()),
+
+        LowlevelCommands::RestoreMounts { release_lock_fd } => {
+            exit_on_error(mount::restore_remembered(release_lock_fd))
+        }
 
         LowlevelCommands::DefaultCommand {} => {
             exit_on_error(simple::default_command().map(|command| println!("{command}")))

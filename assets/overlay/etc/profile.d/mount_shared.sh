@@ -1,4 +1,4 @@
-# Mounts the 9p tag `shared` at /ios_host, once.
+# Mounts the 9p tag `shared` at /ios_host, once, and then the folders `mount -t ios` mounted.
 #
 # Every login reads this, and the logins on hvc0 and ttyS0 start together at boot. The tag takes
 # only one mount at a time, and a second gets "Resource busy", so the logins take turns and only the
@@ -20,6 +20,16 @@
 # the host in larger pieces by ordinary writeback. That's safe because the app has Linux write out
 # dirty data before each background save. tctictl asks the app which mode to use; without the app,
 # or with no answer within a few seconds, it's readahead, which writes straight through.
+#
+# Once /ios_host is mounted, `tctictl lowlevel restore-mounts` mounts again each folder that
+# `mount -t ios` mounted, where it was mounted: the app remembers both for this disk, and shares
+# the folders again at each launch. It never brings up the picker: a folder that can't be reached
+# stays unmounted. It runs in the background, so that no login waits for the app or a slow share,
+# and without /run/lock/tctish-share, which the other logins would otherwise wait on. From before
+# /ios_host is mounted until the restore is done, /run/lock/tctish-restore is held, and
+# `mount -t ios` and `tctictl forget` wait for it, so that they never race the restore. What it
+# says goes to the kernel log, which the app shows as Kernel Log. A resume doesn't run it: the
+# mounts carry across a saved session, as /ios_host does.
 if [ "$(id -u)" = 0 ]; then
   (
     # busybox's flock can't time out, so timeout runs it. The lock belongs to the open file,
@@ -32,6 +42,26 @@ if [ "$(id -u)" = 0 ]; then
 
     cache="$(timeout 3 tctictl lowlevel share-cache 2>/dev/null)"
     [ "$cache" = mmap ] || cache=readahead
-    mount -t 9p -o "trans=virtio,cache=$cache" shared /ios_host -oversion=9p2000.L
+
+    # The restore lock. The restore below inherits fd 8, and holds the lock after this subshell has
+    # exited, until it gives it back: tctictl when done, or the shell if tctictl fails or is out
+    # of time. Not left to the process ending, which a folder that never answers can hold up. If
+    # /ios_host doesn't mount, the lock goes with the subshell. Nothing else holds it for long.
+    exec 8>>/run/lock/tctish-restore
+    flock 8
+
+    # In a new session, so that a hangup on this console doesn't kill it partway, with its output
+    # sent to the kernel log a line at a time, since each write there is one record. It can wait
+    # for the app behind another tctictl, such as a `mount -t ios` showing the picker, so a line
+    # says so if it fails or runs out of time. (tctictl's RESTORE_WAIT is sized past the 60 s.)
+    if mount -t 9p -o "trans=virtio,cache=$cache" shared /ios_host -oversion=9p2000.L; then
+      setsid sh -c '{ timeout 60 tctictl lowlevel restore-mounts --release-lock-fd 8 2>&1 ||
+        {
+          status=$?
+          flock -u 8
+          echo "tctiSH: restoring mounts did not finish (status $status)"
+        }; } |
+        while IFS= read -r line; do echo "$line" >/dev/kmsg; done' </dev/null >/dev/null 2>&1 9>&- &
+    fi
   ) 9>>/run/lock/tctish-share
 fi

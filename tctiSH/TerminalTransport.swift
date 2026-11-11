@@ -94,6 +94,12 @@ final class ConsoleTransport: TerminalTransport {
         socket.send(data)
     }
 
+    /// Throws away what the guest has written to the console and the app hasn't
+    /// read yet: for a recovery boot, after which it belongs to no session.
+    func discardPending() {
+        socket.discardPending()
+    }
+
     func resize(cols: Int, rows: Int) {
         resize(cols: cols, rows: rows, redrawing: false)
     }
@@ -151,6 +157,13 @@ final class ChardevTransport: TerminalTransport {
     var confirm: ((MonitorGuard.Risk, @escaping (Bool) -> Void) -> Void)? {
         get { gate?.confirm }
         set { gate?.confirm = newValue }
+    }
+
+    /// Does a recovery boot in place of a confirmed command whose risk says to;
+    /// see `MonitorGate.recoveryBoot`. Set for VM Management.
+    var recoveryBoot: (() -> Void)? {
+        get { gate?.recoveryBoot }
+        set { gate?.recoveryBoot = newValue }
     }
 
     /// Called with the terminal's size whenever it changes.

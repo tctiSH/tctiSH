@@ -43,8 +43,9 @@ if [ $# != 2 ]; then
   exit -1
 fi
 
-# Perform the actual mount: tctictl asks for the folder, shares it as /ios_host/$1, and binds that
-# at $2.
+# Perform the actual mount: tctictl shares the folder as /ios_host/$1 and binds that at $2. It asks
+# for the folder unless this disk already shares one as $1 that can still be reached. The app
+# remembers the mount, and the boot mounts it again; `tctictl forget $1` undoes both.
 if [ $FAKE == 1 ]; then
   echo tctictl mount --name "$1" "$2"
 else

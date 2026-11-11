@@ -350,10 +350,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         returnedMidSave = false
         away.store(true, ordering: .relaxed)
         Vcpus.enteredBackground()
+        GuestPreparation.stopTrimmingWhileIdle()
+
+        // A save still running from an earlier time away asks for background time again: what it
+        // had has most likely run out, and without more the OS will suspend it very quickly.
+        if saving {
+            holdForRunningSave()
+            return
+        }
 
         // An unpark in flight saves again when it finishes, seeing that we are away; a parked
         // machine is already saved, and there is nothing running to save.
-        if saving || unparking || parkedTag != nil {
+        if unparking || parkedTag != nil {
             return
         }
 
@@ -372,6 +380,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let application = UIApplication.shared
 
         saving = true
+        saveRoundStarted = Date()
 
         // Off the main thread, with the assertion held until the save is really finished.
         //
@@ -394,8 +403,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         task = application.beginBackgroundTask(withName: "Saving Linux state") { [weak self] in
             // Not `reportSaveFailure`: expiry means "hand the assertion back", not "the save
             // failed". The work carries on and often finishes, so the announcement is deferred and
-            // withdrawn if it does; see `reportSaveRanOutOfTime`.
-            self?.qemu?.reportSaveRanOutOfTime()
+            // withdrawn if it does.
+            if let self, let started = saveRoundStarted {
+                qemu?.reportSaveRanOutOfTime(unlessSavedSince: started)
+            }
             releaseAssertion()
         }
 
@@ -474,6 +485,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         away.store(false, ordering: .relaxed)
         Vcpus.willEnterForeground()
+        GuestPreparation.startTrimmingWhileIdle()
 
         if parkedTag == nil {
             Backend.conditionsMayHaveChanged()
@@ -490,6 +502,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
             returnedMidSave = true
             NotificationCenter.default.post(name: AppDelegate.returnedDuringSave, object: nil)
+
+            // Someone is watching the save now, so the alert queued at expiry isn't needed: a save
+            // that then fails says so in the app.
+            qemu?.withdrawSaveFailureAlert()
             return
         }
 
@@ -504,6 +520,39 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     /// Whether the app came back while a save was running, and is waiting for
     /// it to finish.
     private var returnedMidSave = false
+
+    /// When the running save's round began: the app leaving, before the guest's
+    /// preparation. Each expiry asks whether a save has worked since, as the
+    /// park that follows a save can run past the background time, and a save
+    /// that worked needs no alert. Main thread.
+    private var saveRoundStarted: Date?
+
+    /// The background time asked for when the app leaves again while a save is
+    /// still running, held until the save finishes. Main thread.
+    private var runningSaveHold = UIBackgroundTaskIdentifier.invalid
+
+    /// Asks for background time for a save still running as the app leaves
+    /// again. Its expiry queues the "Session not saved" alert, as the first
+    /// expiry did, since coming back in between took that one down.
+    private func holdForRunningSave() {
+        guard runningSaveHold == .invalid else { return }
+        runningSaveHold = UIApplication.shared.beginBackgroundTask(
+            withName: "Finishing Linux save"
+        ) { [weak self] in
+            if let self, let started = saveRoundStarted {
+                qemu?.reportSaveRanOutOfTime(unlessSavedSince: started)
+            }
+            self?.releaseRunningSaveHold()
+        }
+    }
+
+    /// Gives back the background time `holdForRunningSave` asked for, if any.
+    /// Main thread.
+    private func releaseRunningSaveHold() {
+        guard runningSaveHold != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(runningSaveHold)
+        runningSaveHold = .invalid
+    }
 
     /// Whether the machine is being saved, is parked, or is coming back from a
     /// park, any of which a switch of backend must wait out. Main thread.
@@ -530,6 +579,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     /// Marks a save finished, and does whatever was waiting on it.
     private func saveDidFinish(parkedOn tag: String? = nil, codeReleased: Bool = false) {
         saving = false
+        releaseRunningSaveHold()
         parkedTag = tag
         codeCacheNeedsPreparing = codeReleased
 
@@ -649,7 +699,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
                 // Parked until the reset has actually been asked for. Let go of before then, a
                 // failure would leave a parked machine that nothing ever tries to bring back.
-                guard self.qemu?.requestRecoveryBoot() == true else {
+                guard self.qemu?.requestRecoveryBoot() == .started else {
                     Log.qemu.fail("park: the reset didn't go through; asking again")
                     NotificationCenter.default.post(name: AppDelegate.unparkDidFail, object: nil)
                     return

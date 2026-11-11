@@ -95,6 +95,9 @@ basic tools installed. How you use this is beyond the scope of this document.
   will pop up a folder picker that lets you pick from any files app location. Once you submit, the
   folder you picked will be mounted at the specified mount point with the given name, but the mount
   point must exist first.
+- Each such mount is remembered and comes back after a reboot. They can be listed using
+  `tctictl mounts`, and unmounted using `tctictl forget <mount-name>`. A simple `unmount` will only
+  last until the next boot.
 - You can long-press on the app icon to get options to run with or without JIT, or to trigger a
   recovery boot if you are having problems. With the app already running, the JIT options switch the
   running session's mode rather than restarting it.

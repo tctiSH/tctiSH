@@ -172,6 +172,11 @@ final class ConfigServer {
         case "prepare_mount":
             handlePrepareMountCommand(message: message, from: client)
 
+        // The folders this disk remembers sharing, which `tctictl` mounts again without the picker:
+        // whether one can be reached, the list, where one is mounted, and forgetting one.
+        case "share_state", "remembered_shares", "record_mountpoint", "forget_share":
+            handleRememberedShare(message: message, from: client)
+
         // Font configuration command.
         case "font":
             handleFontConfig(message: message, from: client)
@@ -426,6 +431,60 @@ final class ConfigServer {
         switch mounted {
         case .success(let tag):
             sendResponse(command: "prepare_mount", key: "tag", value: tag, to: client)
+        case .failure(let refusal):
+            sendErrorResponse(refusal.reason, to: client)
+        }
+    }
+
+    /// Answers `tctictl` about the folders this disk remembers sharing.
+    ///
+    /// - `share_state`, with the name in `key`: "reachable", "unreachable" or
+    ///   "unknown"; see `QEMUInterface.ShareState`.
+    /// - `remembered_shares`: a JSON array of `{name, mountpoints, reachable}`.
+    /// - `record_mountpoint`, with the name in `key` and an absolute guest path
+    ///   in `value`: remembers that the guest mounts it there.
+    /// - `forget_share`, with the name in `key`.
+    private func handleRememberedShare(message: ConfigurationMessage, from client: Client) {
+        let command = message.command
+        if command == "remembered_shares" {
+            guard let data = try? JSONEncoder().encode(qemu.rememberedShares()) else {
+                sendErrorResponse("couldn't list the remembered folders", to: client)
+                return
+            }
+            sendResponse(
+                command: command, key: "shares", value: String(decoding: data, as: UTF8.self),
+                to: client)
+            return
+        }
+
+        guard let name = message.key, Self.isShareName(name) else {
+            sendErrorResponse("'\(message.key ?? "")' isn't a name for a shared folder", to: client)
+            return
+        }
+
+        let outcome: Result<Void, QEMUInterface.GuestRefusal>
+        switch command {
+        case "share_state":
+            sendResponse(
+                command: command, key: "state", value: qemu.shareState(name).rawValue, to: client)
+            return
+
+        case "record_mountpoint":
+            guard let mountpoint = message.value, mountpoint.hasPrefix("/"),
+                !mountpoint.contains(where: \.isNewline)
+            else {
+                sendErrorResponse("a mountpoint must be an absolute path", to: client)
+                return
+            }
+            outcome = qemu.recordMountpoint(mountpoint, forShare: name)
+
+        default:
+            outcome = qemu.forgetShare(name)
+        }
+
+        switch outcome {
+        case .success:
+            sendAckResponse(command: command, to: client)
         case .failure(let refusal):
             sendErrorResponse(refusal.reason, to: client)
         }

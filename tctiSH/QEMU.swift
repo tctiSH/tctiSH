@@ -20,6 +20,10 @@ struct DiskMountInfo: Codable {
 
     /// The tag used for mounting the device into the VM.
     var mount_tag: String
+
+    /// Where the guest mounts it, so that the next boot mounts it there again.
+    /// Nil in slots saved before mountpoints were kept.
+    var mountpoints: [String]?
 }
 
 /// Provides an interface for running / controlling a QEMU VM.
@@ -199,12 +203,16 @@ public class QEMUInterface {
     /// is going into the background, so there is often nobody looking at the
     /// screen to be told. By the time anyone is, this process may be gone. The
     /// UI clears it once it has said so.
+    ///
+    /// Also set once a save runs past its deadline, in case it never finishes;
+    /// a save that works clears it.
     static var lastSaveFailed: Bool {
         get { UserDefaults.standard.bool(forKey: "last_save_failed") }
         set { UserDefaults.standard.set(newValue, forKey: "last_save_failed") }
     }
 
-    /// When a save last succeeded, on any disk. For Debug Tools.
+    /// When a save last succeeded, on any disk: for Debug Tools, and to tell at
+    /// a background task's expiry whether its save has worked already.
     static var lastSavedAt: Date? {
         get { UserDefaults.standard.object(forKey: "last_saved_at") as? Date }
         set { UserDefaults.standard.set(newValue, forKey: "last_saved_at") }
@@ -261,7 +269,7 @@ public class QEMUInterface {
 
         let tag = getNextInstantResumeTag()
 
-        guard saveSession(as: tag) else {
+        guard saveSession(as: tag, waitingPastDeadline: true) else {
             if stopped {
                 continueStopped()
             }
@@ -605,12 +613,25 @@ public class QEMUInterface {
 
     /// Writes the snapshot, checks it, and points the next launch at it. Call
     /// with `snapshotWorkLock` held.
-    private func saveSession(as tag: String) -> Bool {
+    ///
+    /// With `waitingPastDeadline`, a save past its deadline is reported as
+    /// failed, but still waited for: QEMU carries on with it, and a snapshot
+    /// that finishes is as good as any other, so it's checked and used as
+    /// usual. Only the background save waits past the deadline: every save
+    /// holds `snapshotWorkLock`, and a background save queued behind, say, a
+    /// compaction's save would wait as long as that one did.
+    private func saveSession(as tag: String, waitingPastDeadline: Bool = false) -> Bool {
         let started = Date()
 
-        guard let reply = runMonitorCommand("savevm \(tag)", timeout: Self.saveDeadline) else {
+        guard
+            let reply = runMonitorCommand(
+                "savevm \(tag)", timeout: Self.saveDeadline,
+                lateWait: waitingPastDeadline ? Self.lateSaveWait : nil,
+                whenLate: { self.reportSaveRunningLate(tag) })
+        else {
+            let waited = Self.saveDeadline + (waitingPastDeadline ? Self.lateSaveWait : 0)
             reportSaveFailure(
-                "'savevm \(tag)' did not finish within \(Int(Self.saveDeadline))s")
+                "'savevm \(tag)' did not finish within \(Int(waited))s of the app running")
             return false
         }
 
@@ -643,8 +664,8 @@ public class QEMUInterface {
         Self.lastSaveFailed = false
         Self.lastSavedAt = Date()
 
-        // Including anything `reportSaveRanOutOfTime` left queued. The assertion running out did
-        // not stop the work, and the work went on to succeed.
+        // Including any alert `reportSaveRanOutOfTime` queued. The assertion running out did not
+        // stop the work, and the work went on to succeed, perhaps past its deadline.
         LocalAlert.withdraw(id: Self.saveFailureAlertId)
 
         Log.qemu.note("session save: resuming from '\(tag)' next time")
@@ -662,13 +683,29 @@ public class QEMUInterface {
         Self.lastSaveFailedAt = Date()
 
         LocalAlert.post(
-            title: "Session not saved",
+            title: Self.saveFailureTitle,
             body: Self.saveFailureBody,
             id: Self.saveFailureAlertId)
 
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: Self.saveDidFail, object: nil)
         }
+    }
+
+    /// Records that `savevm` has missed its deadline, while it is still waited
+    /// for. The flag is set now, in case the process is killed before the save
+    /// finishes: it's what the next launch has to go on. A save that works
+    /// clears it.
+    ///
+    /// No alert: in the background, the background task's expiry queues one
+    /// (`reportSaveRanOutOfTime`), and in front, someone is watching the
+    /// terminal wait for the save. Nor `saveDidFail`, which would tell them a
+    /// save still running has failed.
+    private func reportSaveRunningLate(_ tag: String) {
+        Log.qemu.warn(
+            "session save: 'savevm \(tag)' did not finish within \(Int(Self.saveDeadline))s; "
+                + "waiting for it")
+        Self.lastSaveFailed = true
     }
 
     /// Records that the save has run out of time, and says so unless it
@@ -679,21 +716,45 @@ public class QEMUInterface {
     /// not stopping the work, which carries on under its deadlines and quite
     /// often succeeds.
     ///
-    /// The delay is the save's deadline, so it fires at the moment the save has
-    /// definitively run out of road rather than at some guess.
-    func reportSaveRanOutOfTime() {
+    /// The alert waits `saveAlertGrace` first, a last chance for the save to
+    /// finish. It can still finish after that, and withdraws the alert if it
+    /// does.
+    ///
+    /// Does nothing if a save has worked since `since`, when this round of
+    /// saving began, since no later save would withdraw the alert; nor if one
+    /// has failed since, which has said so already. Checks again after posting,
+    /// in case a save finished in between.
+    func reportSaveRanOutOfTime(unlessSavedSince since: Date) {
+        let savedSince = { Self.lastSavedAt.map { $0 >= since } ?? false }
+        let failedSince = Self.lastSaveFailedAt.map { $0 >= since } ?? false
+        guard !savedSince(), !failedSince else { return }
+
         Log.qemu.warn("session save: ran out of time in the background")
         Self.lastSaveFailed = true
 
         LocalAlert.post(
-            title: "Session not saved",
+            title: Self.saveFailureTitle,
             body: Self.saveFailureBody,
             id: Self.saveFailureAlertId,
-            after: Self.saveDeadline)
+            after: Self.saveAlertGrace)
+
+        if savedSince() {
+            Self.lastSaveFailed = false
+            LocalAlert.withdraw(id: Self.saveFailureAlertId)
+        }
+    }
+
+    /// Takes down the "Session not saved" alert, queued or shown, and leaves
+    /// `lastSaveFailed` set. For when someone has come back to wait on the
+    /// save: if it fails, the app says so with a pill.
+    func withdrawSaveFailureAlert() {
+        LocalAlert.withdraw(id: Self.saveFailureAlertId)
     }
 
     /// What resuming will do, rather than by what is "lost", because which of
     /// those is true depends on what happens next.
+    private static let saveFailureTitle = "Session not saved"
+
     private static let saveFailureBody =
         "tctiSH couldn't snapshot your Linux session. Resuming will take you back to "
         + "the last successful save."
@@ -716,12 +777,28 @@ public class QEMUInterface {
         return nil
     }
 
-    /// How long a snapshot may take before we stop waiting for it.
+    /// How long a snapshot may take before it counts as failed. It is still
+    /// waited for, `lateSaveWait` longer.
     ///
     /// Sized against what iOS gives a background task rather than against any
     /// measurement of `savevm`, which scales with how much RAM the guest was
-    /// given and can be several gigabytes of it.
+    /// given and can be several gigabytes of it. iOS gives a background task
+    /// about 30 s. The guest's preparation usually takes a few seconds of the
+    /// 12 it may have (`GuestPreparation.deadline`), and a trimmed guest saves
+    /// in under 8.
     private static let saveDeadline: TimeInterval = 20
+
+    /// How long the "Session not saved" alert from a background task's expiry
+    /// waits before it goes out: only a grace period, for a save just about to
+    /// finish, which then withdraws it.
+    private static let saveAlertGrace: TimeInterval = 20
+
+    /// How much longer a snapshot past `saveDeadline` is waited for. Long,
+    /// because nothing is lost by it: `savevm` holds the machine stopped and
+    /// the monitor busy for as long as it runs either way. The cost: while a
+    /// `savevm` that hangs holds the monitor, Recovery Boot is refused, for up
+    /// to this long. Only time the app runs counts; see `readUntilPrompt`.
+    private static let lateSaveWait: TimeInterval = 600
 
     /// How long to wait for a monitor command that only has to answer.
     private static let monitorReplyDeadline: TimeInterval = 5
@@ -741,11 +818,12 @@ public class QEMUInterface {
     /// Where queued commands run, in the order they were asked for.
     ///
     /// Serial, so that one command cannot overtake another, and off the main
-    /// thread, because the lock above may be held by a snapshot for twenty
-    /// seconds and nothing on the main thread may wait that long.
+    /// thread, because the lock above may be held by a snapshot for minutes,
+    /// and nothing on the main thread may wait that long.
     private let monitorQueue = DispatchQueue(label: "io.ara.tctish.monitor")
 
-    /// How long to wait for the monitor when something else is using it.
+    /// How long to wait for the monitor when something else is using it, and
+    /// for a recovery boot's replies.
     private static let monitorBusyDeadline: TimeInterval = 2
 
     /// How many replies the monitor still owes us.
@@ -766,7 +844,9 @@ public class QEMUInterface {
     /// reply.
     private func settleOutstandingPrompts() {
         while promptsOwed > 0 {
-            guard readUntilPrompt(timeout: Self.monitorReplyDeadline) != nil else {
+            // Counting each prompt, as one read can hold more than one reply.
+            var response = ""
+            guard readUntilPrompt(timeout: Self.monitorReplyDeadline, into: &response) else {
                 Log.qemu.warn("the monitor owes \(promptsOwed) replies and isn't giving them")
 
                 // The state of the connection is no longer known, so neither is the count. Whatever
@@ -777,8 +857,31 @@ public class QEMUInterface {
                 return
             }
 
-            promptsOwed -= 1
+            promptsOwed -= min(promptsOwed, Self.prompts(in: response))
         }
+    }
+
+    /// Waits up to `limit` in all, by the clock, for every reply still owed,
+    /// collecting them in `response`, and says whether they came. Counts each
+    /// prompt in what arrives, as one read can hold more than one reply; on a
+    /// timeout, the rest stay owed. Call with `monitorLock` held.
+    private func awaitOwedPrompts(within limit: TimeInterval, into response: inout String) -> Bool {
+        let owed = promptsOwed
+        let deadline = Date().addingTimeInterval(limit)
+        while Self.prompts(in: response) < owed {
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0, readUntilPrompt(timeout: remaining, into: &response) else {
+                promptsOwed = owed - min(owed, Self.prompts(in: response))
+                return false
+            }
+        }
+        promptsOwed = 0
+        return true
+    }
+
+    /// How many of the monitor's prompts are in `text`.
+    private static func prompts(in text: String) -> Int {
+        text.components(separatedBy: monitorPrompt).count - 1
     }
 
     /// Sends a command without waiting for it, in order behind any other.
@@ -795,9 +898,18 @@ public class QEMUInterface {
     /// Issues a monitor command and returns everything printed before the
     /// monitor came back to its prompt, or nil if it never did.
     ///
-    /// Blocks for up to `timeout`, so never call it from the main thread.
+    /// Blocks for up to `timeout`, and `lateWait` more if given, so never call
+    /// it from the main thread.
+    ///
+    /// With `lateWait`, a command that hasn't finished by `timeout` isn't given
+    /// up on: `whenLate` is called, and the reply is waited for `lateWait`
+    /// longer. That's for `savevm`, which often finishes after its deadline.
+    /// `whenLate` means nothing without `lateWait`.
     @discardableResult
-    private func runMonitorCommand(_ command: String, timeout: TimeInterval) -> String? {
+    private func runMonitorCommand(
+        _ command: String, timeout: TimeInterval,
+        lateWait: TimeInterval? = nil, whenLate: () -> Void = {}
+    ) -> String? {
         monitorLock.lock()
         defer { monitorLock.unlock() }
 
@@ -813,9 +925,25 @@ public class QEMUInterface {
 
         guard writeMonitorCommand(command) else { return nil }
 
-        guard let response = readUntilPrompt(timeout: timeout) else {
+        var response = ""
+        var answered = readUntilPrompt(timeout: timeout, into: &response)
+
+        // Still connected, so only slow: keep what has come so far, and keep waiting.
+        if !answered, let lateWait, monitorSocket != nil {
+            whenLate()
+            answered = readUntilPrompt(timeout: lateWait, into: &response)
+        }
+
+        guard answered else {
             Log.qemu.warn("monitor never came back to its prompt after '\(command)'")
-            promptsOwed = 0
+
+            // After a late wait, a command whose monitor is still connected is still running, and
+            // its prompt will come: it stays owed, so the next command waits for it rather than
+            // taking it as the reply to itself. Otherwise the state of the connection is no longer
+            // known.
+            if lateWait == nil || monitorSocket == nil {
+                promptsOwed = 0
+            }
             return nil
         }
 
@@ -873,36 +1001,64 @@ public class QEMUInterface {
         return nil
     }
 
-    /// Reads until the monitor's prompt comes round. Call with the lock held.
+    /// Reads until the monitor's prompt comes round, and returns what was read,
+    /// or nil if it never came. Call with the lock held.
     private func readUntilPrompt(timeout: TimeInterval) -> String? {
-        guard monitorSocket != nil else { return nil }
-
-        let deadline = Date().addingTimeInterval(timeout)
         var response = ""
+        return readUntilPrompt(timeout: timeout, into: &response) ? response : nil
+    }
+
+    /// Reads into `response` until the monitor's prompt comes round, and says
+    /// whether it did. What was read is kept either way, so that a caller can
+    /// keep waiting. Call with the lock held.
+    ///
+    /// `timeout` counts only time this process ran. QEMU runs in it, so while
+    /// iOS has the app suspended QEMU is stopped too, and a `savevm` it was in
+    /// the middle of goes on once both are back: a return after ten minutes
+    /// away hasn't used up any of the wait.
+    private func readUntilPrompt(timeout: TimeInterval, into response: inout String) -> Bool {
+        guard monitorSocket != nil else { return false }
+
+        var counted: TimeInterval = 0
+        var lastLook = ProcessInfo.processInfo.systemUptime
 
         while true {
-            let remaining = deadline.timeIntervalSinceNow
-            guard remaining > 0 else { return nil }
+            // At the end, one more look without waiting, for a reply that is there already.
+            let remaining = timeout - counted
+            let finalLook = remaining <= 0
 
             // Milliseconds, and sliced so that a long `savevm` still notices the deadline rather
             // than sitting in one enormous select.
-            let slice = UInt(max(min(remaining, 1) * 1000, 1))
+            let slice = finalLook ? 0 : UInt(max(min(remaining, 1) * 1000, 1))
+            let hasOutput = monitorHasOutput(within: slice)
 
-            guard monitorHasOutput(within: slice) else { continue }
+            // A look takes its slice and a moment more; any longer, and the process was frozen.
+            let now = ProcessInfo.processInfo.systemUptime
+            counted += min(now - lastLook, Double(slice) / 1000 + Self.monitorLookSlack)
+            lastLook = now
+
+            guard hasOutput else {
+                if finalLook { return false }
+                continue
+            }
 
             // Readable with nothing to give means the far end has gone.
             guard let chunk = readMonitorChunk() else {
                 Log.qemu.warn("the monitor connection closed")
-                return nil
+                return false
             }
 
             response += chunk
 
             if response.contains(Self.monitorPrompt) {
-                return response
+                return true
             }
         }
     }
+
+    /// The most a look at the monitor counts beyond its slice; see
+    /// `readUntilPrompt`.
+    private static let monitorLookSlack: TimeInterval = 1
 
     /// The monitor's output, one line at a time.
     ///
@@ -1311,25 +1467,37 @@ public class QEMUInterface {
     private var consoleSizes: [String: (cols: Int, rows: Int, redraw: Bool)] = [:]
     private let consoleSizesLock = NSLock()
 
-    /// Sets up the permissions for using a bookmarked folder. Used to restore
-    /// access to an iOS folder.
-    private func setupMountPermissions(bookmarkData: Data) -> URL? {
-        var isStale = false;
-
-        // Rehydrate our data back into a bookmark...
-        let hostPath = try? URL(resolvingBookmarkData: bookmarkData, bookmarkDataIsStale: &isStale)
-        guard (hostPath != nil) && !isStale else {
+    /// Resolves a saved bookmark and starts security-scoped access to its
+    /// folder, so that QEMU's 9p can follow a link to it. A stale bookmark is
+    /// replaced with one made while access is held, which comes back as
+    /// `bookmark`; if that can't be made, the old one, which still resolved,
+    /// comes back instead.
+    private func setupMountPermissions(bookmarkData: Data) -> (url: URL, bookmark: Data)? {
+        var isStale = false
+        guard
+            let hostPath = try? URL(
+                resolvingBookmarkData: bookmarkData, bookmarkDataIsStale: &isStale)
+        else {
             return nil
         }
+        _ = hostPath.startAccessingSecurityScopedResource()
 
-        // ... revive its security context ...
-        _ = hostPath?.startAccessingSecurityScopedResource()
-
-        return hostPath
+        guard isStale else { return (hostPath, bookmarkData) }
+        do {
+            return (hostPath, try hostPath.bookmarkData())
+        } catch {
+            Log.qemu.warn("mount: couldn't replace a stale bookmark: \(error)")
+            return (hostPath, bookmarkData)
+        }
     }
 
     /// Sets up a given host URL for mounting, and returns its name in the
     /// shared folder, or why it couldn't.
+    ///
+    /// With `persistent`, the folder is remembered for this disk, so that the
+    /// next launch gets access to it again. A name shared before keeps its
+    /// slot, with the new bookmark: picking a folder again is how one that can
+    /// no longer be reached comes back.
     func mount(
         bookmarkData: Data, interfaceId: String? = nil, predefinedTag: String? = nil,
         persistent: Bool = true
@@ -1337,87 +1505,27 @@ public class QEMUInterface {
         let tag = predefinedTag ?? generateMountTag(length: 6)
         let id = interfaceId ?? generateMountTag(length: 6)
 
-        guard let hostPath = setupMountPermissions(bookmarkData: bookmarkData) else {
+        guard let (hostPath, bookmark) = setupMountPermissions(bookmarkData: bookmarkData) else {
             return .failure(GuestRefusal("the folder can't be reached any more; pick it again"))
         }
 
-        // ... and, finally, mount the target URL, remembering it once, and only if that worked.
+        // Mount it, and remember it only if that worked.
         let mounted = mount(hostPath: hostPath, interfaceId: id, predefinedTag: tag)
-        if case .success = mounted, persistent,
-            !getPersistentMounts().contains(where: { $0.mount_tag == tag })
-        {
-            makeMountPersistent(bookmarkData: bookmarkData, interfaceId: id, tag: tag)
+        if case .success = mounted, persistent {
+            Self.imageStoreLock.lock()
+            defer { Self.imageStoreLock.unlock() }
+
+            var mounts = getPersistentMounts()
+            if mounts.contains(where: { $0.mount_tag == tag }) {
+                for index in mounts.indices where mounts[index].mount_tag == tag {
+                    mounts[index].bookmark = bookmark
+                }
+            } else {
+                mounts.append(DiskMountInfo(bookmark: bookmark, fsdev_tag: id, mount_tag: tag))
+            }
+            storeMountSlots(mounts)
         }
         return mounted
-    }
-
-    /// Saves mount data into our "VM" configuration, so we can automatically
-    /// remount it on startup.
-    private func makeMountPersistent(bookmarkData: Data, interfaceId: String, tag: String) {
-
-        // Get an encapsulation of our mount data...
-        let mountInfo = DiskMountInfo(
-            bookmark: bookmarkData, fsdev_tag: interfaceId, mount_tag: tag)
-        let serializedData = try! JSONEncoder().encode(mountInfo)
-        let serializedString = String(data: serializedData, encoding: .utf8)!
-
-        // ... and associate it with this image.
-        let slot = getNextMountSlotName()
-        setImageProperty(diskName: disk, property: slot, value: serializedString)
-    }
-
-    /// Returns the next ImageProperty name appropriate for storing a
-    private func getNextMountSlotName() -> String {
-        let existingSlots = getPersistentMounts().count
-        return "disk_mount_\(existingSlots)"
-    }
-
-    /// Returns all known disk-mount data, so persistent disks can be remounted.
-    private func getPersistentMounts() -> [DiskMountInfo] {
-        var slot = 0
-        var mounts: [DiskMountInfo] = []
-
-        while true {
-            let mount_info = getMountInfo(slotName: "disk_mount_\(slot)")
-            if let mount_info = mount_info {
-                mounts.append(mount_info)
-            } else {
-                return mounts
-            }
-
-            slot += 1
-        }
-    }
-
-    /// Returns any mount information associated with a given disk mount slot;
-    /// or nil if the slot wasn't present.
-    private func getMountInfo(slotName: String, disk: String? = nil) -> DiskMountInfo? {
-
-        // Fetch any data stored in the current mount slot.
-        let diskName = disk ?? self.disk
-        let serializedString = getImageProperty(
-            diskName: diskName, property: slotName, defaultValue: "")
-        let serializedData = Data(serializedString.utf8)
-
-        // If there wasn't any, early abort.
-        guard serializedString != "" else {
-            return nil
-        }
-
-        // Finally, parse the data back into mount-info.
-        return try? JSONDecoder().decode(DiskMountInfo.self, from: serializedData)
-    }
-
-    /// Re-creates a mount point on image startup.
-    private func recreatePersistentMount(mount_info: DiskMountInfo) {
-        _ = self.setupMountPermissions(bookmarkData: mount_info.bookmark)
-    }
-
-    /// Re-creates all mounts from the persistent mount pool.
-    private func recreatePersistentMounts() {
-        for mount in self.getPersistentMounts() {
-            self.recreatePersistentMount(mount_info: mount)
-        }
     }
 
     /// Sets up a given host URL for mounting.
@@ -1433,24 +1541,63 @@ public class QEMUInterface {
     /// because QEMU's 9p follows the link. Returns the name, or why it
     /// couldn't.
     ///
-    /// Never replaces anything. A link to the same folder is reused. A link to
-    /// another folder is refused, since its mounts would start showing the new
-    /// one, and so is a real file or folder by that name, which is the
-    /// person's.
+    /// Replaces nothing but a link to a folder that can't be reached, and only
+    /// when no other disk remembers a share by that name: that disk's folder
+    /// may only look unreachable because this launch has no access to it. A
+    /// link to the same folder is reused. A link to another folder is refused,
+    /// since its mounts would start showing the new one, and so is a real file
+    /// or folder by that name, which is the person's.
     func mount(
         hostPath: String, interfaceId: String? = nil, predefinedTag: String? = nil
     ) -> Result<String, GuestRefusal> {
         let tag = predefinedTag ?? generateMountTag(length: 6)
-        let link = getSharedFolder().appendingPathComponent(tag, isDirectory: false).path
+        let link = shareLink(tag)
         let files = FileManager.default
-        let target = URL(fileURLWithPath: hostPath).resolvingSymlinksInPath().path
 
-        // Not `fileExists`, which follows links: what matters is what's at the name itself.
-        if let existing = try? files.destinationOfSymbolicLink(atPath: link) {
-            guard URL(fileURLWithPath: existing).resolvingSymlinksInPath().path == target else {
+        // `destinationOfSymbolicLink` first, not `fileExists`, which follows links: what matters is
+        // what's at the name itself. A link to a folder that can't be reached any more shares
+        // nothing, so it's replaced; that's how a folder that moved, or lost its access, is picked
+        // again under the same name.
+        //
+        // Finding where the link leads, and whether its folder answers, both reach into a file
+        // provider, so they get `providerLimit`. A folder that doesn't answer by then counts as
+        // unreachable only for a name this disk remembers, which is how one on a provider gone for
+        // good is picked again; a link by any other name is left alone.
+        let before = try? files.destinationOfSymbolicLink(atPath: link)
+        if before != nil {
+            let found = Self.withinProviderLimit(key: "link \(tag)") { [self] in
+                (
+                    same: shareLinkTarget(tag) == Self.resolved(hostPath),
+                    answers: files.fileExists(atPath: link)
+                )
+            }
+            if found?.same == true {
+                return .success(tag)
+            }
+            guard found?.answers != true else {
                 return .failure(GuestRefusal("'\(tag)' already shares another folder"))
             }
-            return .success(tag)
+            guard found != nil || getPersistentMounts().contains(where: { $0.mount_tag == tag })
+            else {
+                return .failure(
+                    GuestRefusal(
+                        "'\(tag)' already shares a folder that isn't answering; try again, or use "
+                            + "another name"))
+            }
+            guard !isRememberedElsewhere(tag) else {
+                return .failure(GuestRefusal("another disk shares a folder as '\(tag)'"))
+            }
+        }
+
+        // The rest under the store's lock, which `relinkShare` holds as it changes a link, and only
+        // if the link is still what was looked at.
+        Self.imageStoreLock.lock()
+        defer { Self.imageStoreLock.unlock() }
+        guard (try? files.destinationOfSymbolicLink(atPath: link)) == before else {
+            return .failure(GuestRefusal("'\(tag)' changed meanwhile; try again"))
+        }
+        if before != nil {
+            try? files.removeItem(atPath: link)
         }
         if (try? files.attributesOfItem(atPath: link)) != nil {
             return .failure(GuestRefusal("/ios_host already has a file or folder called '\(tag)'"))
@@ -1469,6 +1616,389 @@ public class QEMUInterface {
     private func generateMountTag(length: Int = 12) -> String {
         let letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
         return "m" + String((0..<length).map { _ in letters.randomElement()! })
+    }
+
+    /// The path of the shared folder's entry `name`, which is a link for a
+    /// shared folder.
+    private func shareLink(_ name: String) -> String {
+        getSharedFolder().appendingPathComponent(name, isDirectory: false).path
+    }
+
+    /// Where the shared folder's link `name` leads, with links on the way
+    /// resolved, or nil if there's no link by that name.
+    private func shareLinkTarget(_ name: String) -> String? {
+        (try? FileManager.default.destinationOfSymbolicLink(atPath: shareLink(name)))
+            .map(Self.resolved)
+    }
+
+    /// `path` with its links resolved, to compare where two paths lead.
+    private static func resolved(_ path: String) -> String {
+        URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+    }
+
+    // MARK: File providers
+
+    /// How long anything that waits on a folder's file provider waits for it.
+    private static let providerLimit: TimeInterval = 2
+
+    /// Holds the result of a call into a file provider until
+    /// `withinProviderLimit` reads it, if the call finished in time.
+    private final class ProviderResult<T> {
+        var value: T?
+    }
+
+    /// Waits at most `providerLimit` for `work`, a call into a file provider,
+    /// and returns its result, or nil if it didn't finish in time. An offline
+    /// provider can keep such a call waiting for tens of seconds. The work
+    /// carries on, on another thread, and its result is dropped; until it ends,
+    /// another call with the same `key` returns nil at once, so that a folder
+    /// that never answers ties up one thread, not one per question.
+    private static func withinProviderLimit<T>(key: String, _ work: @escaping () -> T) -> T? {
+        guard providerCallsLock.withLock({ providerCalls.insert(key).inserted }) else {
+            return nil
+        }
+
+        let result = ProviderResult<T>()
+        let finished = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let value = work()
+            providerCallsLock.withLock {
+                result.value = value
+                providerCalls.remove(key)
+            }
+            finished.signal()
+        }
+
+        guard finished.wait(timeout: .now() + providerLimit) == .success else {
+            Log.qemu.warn(
+                "mount: no answer from a folder's provider (\(key)) within \(Int(providerLimit))s")
+            return nil
+        }
+        return providerCallsLock.withLock { result.value }
+    }
+
+    /// The calls into file providers still running, by key; see
+    /// `withinProviderLimit`. The lock also covers each `ProviderResult`'s
+    /// value, written on the worker's thread and read on the caller's.
+    private static var providerCalls: Set<String> = []
+    private static let providerCallsLock = NSLock()
+
+    // MARK: Mount slots
+
+    /// The image properties that hold a disk's mount data: `disk_mount_0`,
+    /// `disk_mount_1` and on.
+    private static let mountSlotPrefix = "disk_mount_"
+
+    /// The mount data saved for `disk`, or the running disk, in slot order, so
+    /// that its shared folders can be mounted again. Slots are filled from 0
+    /// with no gaps; a slot that can't be read is left out, and goes at the
+    /// next `storeMountSlots`.
+    private func getPersistentMounts(disk: String? = nil) -> [DiskMountInfo] {
+        let image = Self.imageStore()[disk ?? self.disk] ?? [:]
+        var mounts: [DiskMountInfo] = []
+        var slot = 0
+        while let serialized = image[Self.mountSlotPrefix + String(slot)] {
+            if let info = try? JSONDecoder().decode(DiskMountInfo.self, from: Data(serialized.utf8))
+            {
+                mounts.append(info)
+            }
+            slot += 1
+        }
+        return mounts
+    }
+
+    /// Stores `mounts` as this disk's slots, from 0, in one write, in place of
+    /// all of them, so that the app being killed partway can't leave one share
+    /// in two slots.
+    private func storeMountSlots(_ mounts: [DiskMountInfo]) {
+        Self.imageStoreLock.lock()
+        defer { Self.imageStoreLock.unlock() }
+
+        var images = Self.imageStore()
+        var image = (images[disk] ?? [:]).filter { !$0.key.hasPrefix(Self.mountSlotPrefix) }
+        for (slot, info) in mounts.enumerated() {
+            let serializedData = try! JSONEncoder().encode(info)
+            image[Self.mountSlotPrefix + String(slot)] = String(
+                decoding: serializedData, as: UTF8.self)
+        }
+        images[disk] = image
+        UserDefaults.standard.set(images, forKey: "images")
+    }
+
+    /// Whether a disk other than this one remembers a share called `name`.
+    private func isRememberedElsewhere(_ name: String) -> Bool {
+        Self.imageStore().keys.contains { other in
+            other != disk && getPersistentMounts(disk: other).contains { $0.mount_tag == name }
+        }
+    }
+
+    // MARK: Shares at launch
+
+    /// Gets access again to every folder this disk remembers, and points each
+    /// link in the shared folder at where its folder is now. Each runs on a
+    /// thread of the global queue, so that none waits on another and the launch
+    /// waits on none: a folder on an offline provider, such as a network share
+    /// whose server has gone, can keep these calls waiting for tens of seconds.
+    /// Until one is done, its link leads where it led at the last launch, which
+    /// at worst is nowhere.
+    private func recreatePersistentMounts() {
+        for mount in self.getPersistentMounts() {
+            launchAccess.enter()
+            DispatchQueue.global(qos: .utility).async { [self] in
+                defer { launchAccess.leave() }
+                let started = Date()
+                recreatePersistentMount(mount_info: mount)
+
+                // Slower than anything that waits on a provider would wait.
+                let took = -started.timeIntervalSinceNow
+                if took > Self.providerLimit {
+                    Log.qemu.warn(
+                        String(
+                            format: "mount: '%@' took %.1fs to reach", mount.mount_tag, took))
+                }
+            }
+        }
+    }
+
+    /// The launch's `recreatePersistentMounts`, until each folder is done.
+    private let launchAccess = DispatchGroup()
+
+    /// Waits a little, up to `providerLimit`, for the launch to get access to
+    /// the folders again: a guest that boots fast can ask about one before a
+    /// slow provider has let the app back in, and would find it unreachable.
+    private func waitForLaunchAccess() {
+        _ = launchAccess.wait(timeout: .now() + Self.providerLimit)
+    }
+
+    /// Re-creates a mount point on image startup: gets access to the folder
+    /// again, and points its link in the shared folder at where the folder is
+    /// now, which can move between launches. The guest mounts it again from
+    /// there at boot.
+    private func recreatePersistentMount(mount_info: DiskMountInfo) {
+        let tag = mount_info.mount_tag
+        guard let (hostPath, bookmark) = setupMountPermissions(bookmarkData: mount_info.bookmark)
+        else {
+            Log.qemu.warn("mount: '\(tag)' can't be reached; it must be picked again")
+            return
+        }
+        if bookmark != mount_info.bookmark {
+            replaceBookmark(ofShare: tag, mount_info.bookmark, with: bookmark)
+        }
+        relinkShare(tag: tag, to: hostPath.path)
+    }
+
+    /// Replaces the bookmark the share `tag` has in its slot, if it is still
+    /// `old`: by name rather than by slot number, which a forget changes.
+    private func replaceBookmark(ofShare tag: String, _ old: Data, with new: Data) {
+        Self.imageStoreLock.lock()
+        defer { Self.imageStoreLock.unlock() }
+
+        var mounts = getPersistentMounts()
+        for index in mounts.indices
+        where mounts[index].mount_tag == tag && mounts[index].bookmark == old {
+            mounts[index].bookmark = new
+        }
+        storeMountSlots(mounts)
+    }
+
+    /// Points the shared folder's link `tag` at `hostPath`, if it points
+    /// somewhere else. Only a link is replaced: a real file or folder by that
+    /// name is the person's. A missing link isn't made again: forgetting a
+    /// share removes its link and its slot together, so a slot with no link
+    /// means the link was deleted, or the slot is from an older build.
+    ///
+    /// Unlike `mount(hostPath:)`, which refuses to point a name at another
+    /// folder, this follows the same folder, saved in the slot, to where it is
+    /// now.
+    private func relinkShare(tag: String, to hostPath: String) {
+        // Comparing where the paths lead reaches into the folders' providers, and can take long.
+        let files = FileManager.default
+        let link = shareLink(tag)
+        guard let before = try? files.destinationOfSymbolicLink(atPath: link),
+            Self.resolved(before) != Self.resolved(hostPath)
+        else {
+            return
+        }
+
+        // A new link put in place by a rename, so that a failure leaves the old one rather than
+        // none, which would never be made again. Made in the app's temporary folder, on the same
+        // volume, so that it can't collide with anything in the shared folder.
+        let newLink = files.temporaryDirectory.appendingPathComponent("relink-\(UUID().uuidString)")
+            .path
+        defer { try? files.removeItem(atPath: newLink) }
+
+        // Under the store's lock, which `forgetShare` and `mount(hostPath:)` hold as they change
+        // links, and only if nothing has changed the link meanwhile: a forget removes it, and a
+        // folder picked again points it elsewhere, which this mustn't undo.
+        Self.imageStoreLock.lock()
+        defer { Self.imageStoreLock.unlock() }
+        guard getPersistentMounts().contains(where: { $0.mount_tag == tag }),
+            (try? files.destinationOfSymbolicLink(atPath: link)) == before
+        else {
+            Log.qemu.note("mount: '\(tag)' changed while it was being found; leaving it")
+            return
+        }
+        do {
+            try files.createSymbolicLink(atPath: newLink, withDestinationPath: hostPath)
+            guard rename(newLink, link) == 0 else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+        } catch {
+            Log.qemu.warn("mount: couldn't point '\(tag)' at its folder again: \(error)")
+        }
+    }
+
+    // MARK: Remembered shares
+
+    /// What this disk remembers of a folder shared under a name, for `tctictl`:
+    /// whether mounting it again can skip the picker.
+    enum ShareState: String {
+        /// This disk's share, and the guest can reach it: the link at the name
+        /// leads to the folder the slot holds, which is there and is a folder.
+        case reachable
+
+        /// This disk remembers the name, but the folder can't be reached, or
+        /// the link at the name no longer leads to it.
+        case unreachable
+
+        /// Not a name this disk remembers.
+        case unknown
+    }
+
+    /// What this disk remembers of the folder shared as `name`.
+    func shareState(_ name: String) -> ShareState {
+        waitForLaunchAccess()
+        guard let info = rememberedMounts().first(where: { $0.mount_tag == name }) else {
+            return .unknown
+        }
+        return isReachable(info) ? .reachable : .unreachable
+    }
+
+    /// A share this disk remembers, for `tctictl mounts`.
+    struct RememberedShare: Encodable {
+        let name: String
+        let mountpoints: [String]
+        let reachable: Bool
+    }
+
+    /// The shares this disk remembers, in the order they were first mounted.
+    func rememberedShares() -> [RememberedShare] {
+        waitForLaunchAccess()
+        return rememberedMounts().map {
+            RememberedShare(
+                name: $0.mount_tag, mountpoints: $0.mountpoints ?? [], reachable: isReachable($0))
+        }
+    }
+
+    /// Adds `mountpoint` to where the guest mounts the share `name`, so that
+    /// the next boot mounts it there again. Each mountpoint belongs to the
+    /// share mounted there last, so this also takes it off any other share this
+    /// disk remembers.
+    func recordMountpoint(_ mountpoint: String, forShare name: String) -> Result<
+        Void, GuestRefusal
+    > {
+        Self.imageStoreLock.lock()
+        defer { Self.imageStoreLock.unlock() }
+
+        var mounts = getPersistentMounts()
+        guard mounts.contains(where: { $0.mount_tag == name }) else {
+            return .failure(Self.notRemembered(name))
+        }
+        for index in mounts.indices {
+            let known = (mounts[index].mountpoints ?? []).filter { $0 != mountpoint }
+            mounts[index].mountpoints =
+                mounts[index].mount_tag == name ? known + [mountpoint] : known
+        }
+        storeMountSlots(mounts)
+        return .success(())
+    }
+
+    /// Forgets the share `name` on this disk: its slot, and its link in the
+    /// shared folder unless another disk remembers the name too.
+    func forgetShare(_ name: String) -> Result<Void, GuestRefusal> {
+        Self.imageStoreLock.lock()
+        defer { Self.imageStoreLock.unlock() }
+
+        let mounts = getPersistentMounts()
+        guard mounts.contains(where: { $0.mount_tag == name }) else {
+            return .failure(Self.notRemembered(name))
+        }
+
+        // Every slot by that name, as older builds could save one twice.
+        storeMountSlots(mounts.filter { $0.mount_tag != name })
+        removeShareLinkIfUnused(name)
+        return .success(())
+    }
+
+    /// Forgets every share this disk remembers, as for a disk just created from
+    /// the empty image: what was mounted where belonged to the disk it
+    /// replaces. The folders themselves are untouched, and can be picked again.
+    private func forgetAllShares() {
+        Self.imageStoreLock.lock()
+        defer { Self.imageStoreLock.unlock() }
+
+        let names = Set(getPersistentMounts().map(\.mount_tag))
+        guard !names.isEmpty else { return }
+        storeMountSlots([])
+        for name in names where ConfigServer.isShareName(name) {
+            removeShareLinkIfUnused(name)
+        }
+        Log.qemu.note("mount: a new disk, so its \(names.count) remembered folders are forgotten")
+    }
+
+    /// Removes the shared folder's link `name` unless another disk remembers a
+    /// share by that name, since all disks use the same shared folder. Only a
+    /// link: a real file or folder by that name is the person's.
+    private func removeShareLinkIfUnused(_ name: String) {
+        // A link, read without following it: the folder's provider may not be answering.
+        let link = shareLink(name)
+        guard !isRememberedElsewhere(name),
+            (try? FileManager.default.destinationOfSymbolicLink(atPath: link)) != nil
+        else { return }
+        try? FileManager.default.removeItem(atPath: link)
+    }
+
+    /// The slots this disk remembers that `tctictl` can name. Slots saved by
+    /// builds that named a share by its guest path (`/root/docs`) are left out:
+    /// no such name can be mounted or forgotten. `recordMountpoint` and
+    /// `forgetShare` need no filter, as the config server checks their names.
+    private func rememberedMounts() -> [DiskMountInfo] {
+        getPersistentMounts().filter { ConfigServer.isShareName($0.mount_tag) }
+    }
+
+    private static func notRemembered(_ name: String) -> GuestRefusal {
+        GuestRefusal("'\(name)' isn't a folder this disk remembers")
+    }
+
+    /// Whether the link at a remembered share's name leads to the folder its
+    /// bookmark names, and that is there and is a folder, found out within
+    /// `providerLimit`: one whose provider doesn't answer by then can't be
+    /// reached. On the config server's queue, which a provider that never
+    /// answers would otherwise hold up for every request.
+    private func isReachable(_ info: DiskMountInfo) -> Bool {
+        // By the bookmark as well as the name, so that a folder picked again under the name is
+        // asked about afresh while a question about the old one is still stuck.
+        Self.withinProviderLimit(key: "reach \(info.mount_tag) \(info.bookmark.hashValue)") {
+            [self] in
+            folderAnswers(info)
+        } ?? false
+    }
+
+    /// `isReachable`, however long the folder's provider takes.
+    private func folderAnswers(_ info: DiskMountInfo) -> Bool {
+        var isStale = false
+        guard
+            let folder = try? URL(
+                resolvingBookmarkData: info.bookmark, bookmarkDataIsStale: &isStale),
+            shareLinkTarget(info.mount_tag) == Self.resolved(folder.path)
+        else {
+            return false
+        }
+
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(
+            atPath: shareLink(info.mount_tag), isDirectory: &isDirectory)
+            && isDirectory.boolValue
     }
 
     /// Fetches the path to the QEMU framework appropriate for this environment.
@@ -1582,8 +2112,10 @@ public class QEMUInterface {
             let emptyDiskURL = Bundle.main.url(forResource: "empty", withExtension: "qcow")
             try! FileManager.default.copyItem(at: emptyDiskURL!, to: targetURL)
 
-            // Reset the startup to base instant-boot, since we now have a new disk.
+            // Reset the startup to base instant-boot, since we now have a new disk, and forget the
+            // folders the old disk mounted: a disk of the same name may have been deleted.
             setResumeImage(tag: "instantboot")
+            forgetAllShares()
         }
 
         Self.removeAbandonedCompactions(of: targetURL)
@@ -1651,15 +2183,16 @@ public class QEMUInterface {
         QEMUInterface.getDatastoreURL(name, fileExtension: fileExtension, create: create)
     }
 
+    /// The disk-image metadata store: each disk's properties, by its name.
+    private static func imageStore() -> [String: [String: String]] {
+        UserDefaults.standard.dictionary(forKey: "images") as? [String: [String: String]] ?? [:]
+    }
+
     /// Returns a property from the disk-image metadata store.
     private func getImageProperty(diskName: String, property: String, defaultValue: String)
         -> String
     {
-        let imageStore =
-            UserDefaults.standard.dictionary(forKey: "images") as? [String: [String: String]]
-        let images = imageStore ?? [:]
-        let image = images[diskName] ?? [:]
-        return image[property] ?? defaultValue
+        Self.imageStore()[diskName]?[property] ?? defaultValue
     }
 
     /// Sets a property from the disk-image metadata store.
@@ -1669,18 +2202,22 @@ public class QEMUInterface {
 
     /// Sets several properties in the disk-image metadata store at once.
     private func setImageProperties(diskName: String, _ properties: [String: String]) {
+        Self.imageStoreLock.lock()
+        defer { Self.imageStoreLock.unlock() }
 
-        // Get the current image-store...
-        let imageStore =
-            UserDefaults.standard.dictionary(forKey: "images") as? [String: [String: String]]
-        var images = imageStore ?? [:]
-
-        // ... update the relevant property values ...
+        var images = Self.imageStore()
         images[diskName, default: [:]].merge(properties) { _, new in new }
-
-        // ... and save it back to our configuration.
         UserDefaults.standard.set(images, forKey: "images")
     }
+
+    /// Held across every change to the disk-image metadata store. Each change
+    /// reads the whole store, edits it and writes it back, and they come from
+    /// more than one thread: a save points `resume_image` from the save's
+    /// thread, mounts change their slots on the config server's queue, and the
+    /// launch replaces stale bookmarks on the boot queue. Without it, two at
+    /// once would lose one. Recursive, because the callers that read the slots,
+    /// change them and write them back hold it across helpers that take it too.
+    private static let imageStoreLock = NSRecursiveLock()
 
     /// Returns true iff this is a first-boot of the VM.
     func isFirstBoot() -> Bool {
@@ -1811,14 +2348,30 @@ public class QEMUInterface {
     /// Linux is restarting without having been asked to, as after `reboot` in
     /// the terminal. Main thread.
     ///
-    /// The app learns of it from the guest agent, and treats it as it does its
-    /// own recovery boot: nothing is saved, and nothing is handed vCPUs, until
-    /// Linux is up again, and a crash before then is the boot's fault.
+    /// The app learns of it from the guest agent, and treats it much as a
+    /// recovery boot: nothing is saved, and nothing is handed vCPUs, until
+    /// Linux is up again, and a crash before then is the boot's fault. Unlike
+    /// after a recovery boot, the user TTYs keep what they show: Linux chose to
+    /// restart, and what they show is the record of why.
     func linuxRestartingItself() {
         UserDefaults.standard.set(true, forKey: "attempting_boot")
         forgetSession(because: "Linux restarted")
         Vcpus.guestRestarting(qemu: self)
         GuestAgent.shared.linuxRestarting()
+    }
+
+    /// How `requestRecoveryBoot` went.
+    enum RecoveryBoot {
+        /// The reset is on its way.
+        case started
+
+        /// Something else, such as a save, held the monitor. The session is
+        /// still there, and a relaunch resumes it.
+        case monitorBusy
+
+        /// The monitor didn't take the reset: QEMU itself is stuck, and a
+        /// relaunch boots afresh.
+        case stuck
     }
 
     /// Restarts the VM from scratch, without leaving the app.
@@ -1828,44 +2381,79 @@ public class QEMUInterface {
     /// on offer: it runs on a thread inside this process, and telling it to
     /// `quit` would take the app with it.
     ///
-    /// Returns whether the monitor took the command. It won't if QEMU is wedged
-    /// rather than the guest, and there is nothing to be done about that from
-    /// in here.
+    /// Empties the user TTYs too, once QEMU confirms the reset, as what they
+    /// show belongs to the session that's gone.
+    ///
+    /// Returns `.started` once the monitor has taken the reset, `.monitorBusy`
+    /// while something else, such as a save, holds the monitor, and `.stuck` if
+    /// QEMU is wedged rather than the guest, which nothing in here can fix.
     @discardableResult
-    func requestRecoveryBoot() -> Bool {
+    func requestRecoveryBoot() -> RecoveryBoot {
         Log.qemu.note("recovery boot requested; resetting the machine")
+
+        // `attempting_boot` is marked only once the monitor is ours. While a save holds it, the
+        // session is still there and the save may yet keep it, and a relaunch must resume that
+        // rather than throw it away.
+        guard monitorLock.lock(before: Date().addingTimeInterval(Self.monitorBusyDeadline)) else {
+            Log.qemu.fail("the monitor is busy, most likely with a save; not resetting")
+            return .monitorBusy
+        }
+        defer { monitorLock.unlock() }
 
         // Whatever happens next, the resumed session is gone -- so make sure a relaunch doesn't try
         // to pick it up again.
         UserDefaults.standard.set(true, forKey: "attempting_boot")
 
-        guard monitorLock.lock(before: Date().addingTimeInterval(Self.monitorBusyDeadline)) else {
-            Log.qemu.fail("the monitor is busy saving the session; not resetting")
-            return false
+        // Anything waiting that no command owes, such as a reply that came after its command gave
+        // up on it, so that it can't be taken for one of the replies counted below.
+        if promptsOwed == 0 {
+            drainMonitor()
         }
-        defer { monitorLock.unlock() }
+        let owedBefore = promptsOwed
 
         guard writeMonitorCommand("system_reset") else {
             Log.qemu.fail("the monitor didn't take system_reset; QEMU itself is stuck")
-            return false
+            return .stuck
+        }
+
+        // Then `c`: harmless if the machine is running, and necessary if it isn't. QEMU reads a
+        // command one byte per pass of its main loop, and carries out a reset between passes, so it
+        // reads the `c` only after the reset. The reply to the `c` therefore means the reset has
+        // happened: everything the old session wrote to its consoles is in their sockets, to be
+        // thrown away before the terminals are emptied. With no reply in time, the terminals are
+        // left alone rather than emptied too soon.
+        writeMonitorCommand("c")
+        var replies = ""
+        let reset = awaitOwedPrompts(within: Self.monitorBusyDeadline, into: &replies)
+        if !reset {
+            Log.qemu.warn(
+                "recovery boot: no reply to the reset in time; not emptying the terminals")
+        }
+
+        // The reply to `system_reset` is what came before its prompt, after any owed from before.
+        let parts = replies.components(separatedBy: Self.monitorPrompt)
+        if reset, parts.count > owedBefore, let failure = Self.monitorError(in: parts[owedBefore]) {
+            Log.qemu.fail("the monitor refused system_reset: \(failure)")
+            return .stuck
         }
 
         // Only now that the reset is on its way: a refused one leaves the session running. Linux
-        // restarting can't be handed vCPUs until it is up again.
+        // restarting can't be handed vCPUs until it is up again, and the user TTYs are emptied for
+        // it, if the reset is known to have happened.
         forgetSession(because: "Linux was reset")
         let restarting = {
             Vcpus.guestRestarting(qemu: self)
             GuestAgent.shared.linuxRestarting()
+            if reset {
+                TTYs.shared.resetUserTerminals()
+            }
         }
         if Thread.isMainThread {
             restarting()
         } else {
             DispatchQueue.main.async(execute: restarting)
         }
-
-        // Harmless if it's already running, and necessary if it isn't.
-        writeMonitorCommand("c")
-        return true
+        return .started
     }
 
     // MARK: Asked for from inside the guest
@@ -2034,7 +2622,15 @@ public class QEMUInterface {
             // reset, as for a recovery boot, starts Linux afresh on the reverted disk, and nothing
             // is saved until it is up.
             Log.qemu.warn("guest snapshot: 'loadvm \(tag)' failed: \(failure); starting afresh")
-            requestRecoveryBoot()
+
+            // Set here as well, because `requestRecoveryBoot` sets it only once it has the monitor.
+            // Whether or not the reset goes through, what's running can't be resumed, so a relaunch
+            // must start afresh.
+            UserDefaults.standard.set(true, forKey: "attempting_boot")
+            let reset = requestRecoveryBoot()
+            if reset != .started {
+                Log.qemu.warn("guest snapshot: the reset didn't go through (\(reset))")
+            }
             DispatchQueue.main.async {
                 NotificationCenter.default.post(name: Self.guestSnapshotLoadFailed, object: tag)
             }
@@ -2157,8 +2753,7 @@ extension QEMUInterface {
             (try? FileManager.default.contentsOfDirectory(atPath: documents.path))?
             .filter { $0.hasSuffix(".qcow") }
             .map { ($0 as NSString).deletingPathExtension } ?? []
-        let remembered =
-            UserDefaults.standard.dictionary(forKey: "images") as? [String: [String: String]] ?? [:]
+        let remembered = Self.imageStore()
 
         let others = Set(images).union(remembered.keys).subtracting([running]).sorted()
         let wanted = Self.wantedStamp

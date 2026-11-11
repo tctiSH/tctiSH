@@ -25,6 +25,11 @@
 #   reclaim <id> <MiB>    trims the page cache to that many MiB through the
 #                         kernel's LRU, which keeps the most used.
 #                         "done <id> <MiB before> <MiB after> <ms>"
+#   trim-idle <id> <MiB>  as reclaim, but only while the guest is idle, and
+#                         for about TRIM_MS at most, so that a request behind
+#                         it waits under 2 s. "done <id> busy" if the guest's
+#                         CPUs were more than IDLE_BUSY jiffies busy over
+#                         IDLE_SAMPLE seconds, which leaves the cache alone.
 #   hangup <id> <console>...
 #                         ends the programs on consoles (hvc3 hvc5), as a
 #                         hangup would: SIGHUP to every process whose
@@ -71,6 +76,19 @@ NAME="io.ara.tctish.agent"
 
 ZONEINFO="/usr/share/zoneinfo"
 
+# How long trim-idle trims for, in ms, and in pieces of how many MiB, so that
+# it stops near that time however fast reclaim is: much slower under TCTI than
+# under the JIT. With the CPU sample before it, that keeps a request queued
+# behind it, such as setting the clock, under 2 s.
+TRIM_MS=1000
+TRIM_STEP=32
+
+# How long trim-idle samples the CPUs for, in seconds, and how much CPU time,
+# in 10 ms jiffies summed over all CPUs, the guest can use in that time and
+# still count as idle: 10 in half a second is a fifth of one CPU.
+IDLE_SAMPLE=0.5
+IDLE_BUSY=10
+
 # Whether a TTY has shown each console this boot; see tctish-login.
 CONSOLES="/run/tctish/consoles"
 
@@ -107,6 +125,24 @@ file_cache_mib() {
 # Milliseconds since boot, to the kernel's tick.
 uptime_ms() {
   awk '{ print int($1 * 1000) }' /proc/uptime
+}
+
+# The CPU time all CPUs spent busy over the next IDLE_SAMPLE seconds, in
+# jiffies: user, nice, system, iowait, irq, softirq and steal from /proc/stat's
+# first line. Idle is left out, and so is guest, which user already includes.
+# iowait counts as busy, as a copy or a package install waiting on the disk is
+# still at work. Read with the shell's builtin read, so that no process started
+# inside the sample counts against it, but sleep's.
+busy_jiffies() {
+  read -r first </proc/stat
+  sleep "$IDLE_SAMPLE"
+  read -r second </proc/stat
+  # shellcheck disable=SC2086
+  set -- $first
+  start=$(($2 + $3 + $4 + $6 + $7 + $8 + $9))
+  # shellcheck disable=SC2086
+  set -- $second
+  echo $(($2 + $3 + $4 + $6 + $7 + $8 + $9 - start))
 }
 
 # time <id> <seconds.nanoseconds>
@@ -220,6 +256,43 @@ reclaim() {
   fi
 
   echo "done $id $before $(file_cache_mib) $(($(uptime_ms) - started))"
+}
+
+# trim-idle <id> <MiB>
+trim_idle() {
+  id="$1"
+  budget="${2:-}"
+  case "$budget" in
+    "" | *[!0-9]*)
+      echo "error $id trim-idle bad-budget"
+      return
+      ;;
+  esac
+
+  # Nothing over the budget is the usual answer, and needs no wait for the CPUs.
+  before="$(file_cache_mib)"
+  if [ "$before" -le "$budget" ]; then
+    echo "done $id $before $before 0"
+    return
+  fi
+
+  if [ "$(busy_jiffies)" -gt "$IDLE_BUSY" ]; then
+    echo "done $id busy"
+    return
+  fi
+
+  # A piece at a time until the budget or the time is reached. A write fails
+  # with EAGAIN when it reclaimed less than asked, which is as far as it goes.
+  started="$(uptime_ms)"
+  now="$before"
+  while [ "$now" -gt "$budget" ] && [ $(($(uptime_ms) - started)) -lt "$TRIM_MS" ]; do
+    step=$((now - budget))
+    [ "$step" -gt "$TRIM_STEP" ] && step="$TRIM_STEP"
+    echo "${step}M swappiness=0" >/sys/fs/cgroup/memory.reclaim 2>/dev/null || break
+    now="$(file_cache_mib)"
+  done
+
+  echo "done $id $before $now $(($(uptime_ms) - started))"
 }
 
 # The processes whose controlling tty is one of the devices numbered in $1, as
@@ -414,6 +487,7 @@ while :; do
       zone) set_zone "$id" "${1:-}" ;;
       sync) if sync; then echo "done $id"; else echo "error $id sync failed"; fi ;;
       reclaim) reclaim "$id" "${1:-}" ;;
+      trim-idle) trim_idle "$id" "${1:-}" ;;
       hangup) hang_up "$id" "$@" ;;
       shown) shown "$id" "${1:-}" ;;
       default-command) set_default_command "$id" "${1:-}" ;;
