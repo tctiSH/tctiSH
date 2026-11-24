@@ -1,8 +1,8 @@
 diff --git a/Sources/DDISession.swift b/Sources/DDISession.swift
-index fd88cf3..aba6d72 100644
+index 60a7c1c..756b4d6 100644
 --- a/Sources/DDISession.swift
 +++ b/Sources/DDISession.swift
-@@ -64,6 +64,117 @@ final class DDISession {
+@@ -82,6 +82,122 @@ final class DDISession {
          return deviceCount > 0
      }
  
@@ -11,27 +11,32 @@ index fd88cf3..aba6d72 100644
 +    /// Both kinds: the DDI cryptex, which stays installed and is grafted again
 +    /// at every boot, and whatever the image mounter has mounted, which lasts
 +    /// until the next reboot. The cryptex goes first, as its graft may be what
-+    /// the image mounter is reporting.
++    /// the image mounter is reporting. Where StikJIT mounts the personalized
++    /// image, below iOS 26.4, there is no cryptex to look for, as `isMounted`
++    /// also assumes.
 +    ///
 +    /// Only a tunnel that can't be made throws. Past that, every step is tried
 +    /// whatever became of the ones before it, and what failed is collected in
-+    /// `failures`: stopping at the first would hide what had already gone.
++    /// `failures`: stopping at the first would hide what had already gone. Each
++    /// failure is the step's error, which names the step.
 +    func removeAll() throws -> DDIRemoval {
 +        let tunnel = try makeTunnel()
 +        defer { tunnel.free() }
 +
 +        var removal = DDIRemoval()
 +
-+        do {
-+            removal.cryptexVersion = try uninstallCryptex(over: tunnel)
-+        } catch {
-+            removal.failures.append("uninstalling the DDI cryptex: \(error.localizedDescription)")
++        if DDIMountMethod.current == .cryptex {
++            do {
++                removal.cryptexVersion = try uninstallCryptex(over: tunnel)
++            } catch {
++                removal.failures.append(error.localizedDescription)
++            }
 +        }
 +
 +        do {
 +            try unmountImages(over: tunnel, into: &removal)
 +        } catch {
-+            removal.failures.append("querying the image mounter: \(error.localizedDescription)")
++            removal.failures.append(error.localizedDescription)
 +        }
 +
 +        return removal
@@ -112,17 +117,17 @@ index fd88cf3..aba6d72 100644
 +                }
 +                removal.unmountedPaths.append(path)
 +            } catch {
-+                removal.failures.append("unmounting \(path): \(error.localizedDescription)")
++                removal.failures.append(error.localizedDescription)
 +            }
 +        }
 +    }
 +
-     func mountDDI(from directoryPath: String, progress: @escaping (Double) -> Void) throws {
-         progress(0)
-         var assets: OpaquePointer?
+     func mountDDI(paths: DDIPaths, progress: @escaping (Double) -> Void) throws {
+         switch DDIMountMethod.current {
+         case .cryptex:
 diff --git a/Sources/StikJIT+DDIRemoval.swift b/Sources/StikJIT+DDIRemoval.swift
 new file mode 100644
-index 0000000..7c43841
+index 0000000..a353330
 --- /dev/null
 +++ b/Sources/StikJIT+DDIRemoval.swift
 @@ -0,0 +1,43 @@
@@ -166,6 +171,6 @@ index 0000000..7c43841
 +        pairingFile: URL,
 +        configuration: Configuration = .default
 +    ) throws -> DDIRemoval {
-+        try DDISession(pairingFilePath: pairingFile.path, configuration: configuration).removeAll()
++        try DDISession(pairingFilePath: pairingFile.path, configuration: configuration.resolved()).removeAll()
 +    }
 +}

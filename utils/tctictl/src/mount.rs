@@ -529,14 +529,11 @@ fn bind_shared_unless(tag: &str, guest_path: &str, abandoned: &AtomicBool) -> Re
     if let Some(err) = give_up() {
         return Err(err);
     }
-    Mount::new(
-        &shared,
-        guest_path,
-        FilesystemType::Manual("none"),
-        MountFlags::BIND,
-        None,
-    )
-    .with_context(|| format!("couldn't mount {} at {guest_path}", shared.display()))?;
+    Mount::builder()
+        .fstype(FilesystemType::Manual("none"))
+        .flags(MountFlags::BIND)
+        .mount(&shared, guest_path)
+        .with_context(|| format!("couldn't mount {} at {guest_path}", shared.display()))?;
     Ok(())
 }
 

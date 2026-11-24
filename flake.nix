@@ -99,10 +99,10 @@
       # `--disable-dbus-display` is the fix for that specific case; this is what
       # stops the next one being decided by `brew upgrade`.
       #
-      # Note this buys determinism, not version agreement: nixpkgs' glib is
-      # newer than the one we cross-compile, so anything that actually generated
-      # code here would still be generating it with the wrong glib. The answer
-      # then is to stop generating, as dbus-display did.
+      # Note this buys determinism, not version agreement: nixpkgs' glib moves
+      # with nixpkgs, not with the one we cross-compile, so anything that
+      # actually generated code here would still be generating it with the wrong
+      # glib. The answer then is to stop generating, as dbus-display did.
       #
       # Only binaries are exposed, and that is deliberate. Pulling glib and
       # gettext into the shell whole would put their headers and .pc files in

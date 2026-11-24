@@ -13,134 +13,135 @@ use clap::{Parser, Subcommand};
 //
 
 #[derive(Debug, Parser)]
-#[clap(name = "tctish")]
-#[clap(about = "configuration and control tool for tctiSH", long_about = None)]
+#[command(name = "tctish")]
+#[command(about = "configuration and control tool for tctiSH", long_about = None)]
 struct Cli {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     subcommand: Commands,
 }
 
 #[derive(Debug, Subcommand)]
 enum Commands {
     // Simple font configuration.
-    #[clap(arg_required_else_help = false)]
-    #[clap(about = "Configure the terminal's font")]
+    #[command(arg_required_else_help = false)]
+    #[command(about = "Configure the terminal's font")]
     Font {
-        #[clap(help = "The property to set")]
-        #[clap(possible_value = "name")]
-        #[clap(possible_value = "size")]
+        #[arg(help = "The property to set")]
+        #[arg(value_parser = ["name", "size"])]
         property: Option<String>,
 
-        #[clap(help = "The value to set the font-property to")]
+        #[arg(help = "The value to set the font-property to")]
         value: Option<String>,
     },
 
-    #[clap(
+    #[command(
         about = "Mount an iOS folder into tctiSH, picked on the device; --name with a folder \
                     picked before mounts it again"
     )]
     Mount {
-        #[clap(help = "The linux path where the folder should be mounted")]
+        #[arg(help = "The linux path where the folder should be mounted")]
         mountpoint: String,
 
-        #[clap(
+        #[arg(
             long,
             help = "What to call it under /ios_host; the mountpoint's name if not given"
         )]
         name: Option<String>,
     },
 
-    #[clap(about = "List the iOS folders this disk mounts again at boot")]
+    #[command(about = "List the iOS folders this disk mounts again at boot")]
     Mounts {},
 
-    #[clap(
+    #[command(
         about = "Forget an iOS folder from `mount -t ios`: unmount it, and don't mount it again"
     )]
     Forget {
-        #[clap(help = "Its name under /ios_host")]
+        #[arg(help = "Its name under /ios_host")]
         name: String,
     },
 
-    #[clap(about = "Save, load and list snapshots of the whole machine")]
+    #[command(about = "Save, load and list snapshots of the whole machine")]
     Snapshot {
-        #[clap(subcommand)]
+        #[command(subcommand)]
         subcommand: SnapshotCommands,
     },
 
-    #[clap(about = "Run commands on QEMU's monitor, or with none, read them from the input")]
+    #[command(about = "Run commands on QEMU's monitor, or with none, read them from the input")]
     Monitor {
-        #[clap(help = "The command, and its arguments")]
-        #[clap(allow_hyphen_values = true)]
+        #[arg(help = "The command, and its arguments")]
+        #[arg(allow_hyphen_values = true)]
         command: Vec<String>,
     },
 
     // Low-level commands not used by typical users.
-    #[clap(about = "Commands that directly poke the configuration server's internals")]
+    #[command(about = "Commands that directly poke the configuration server's internals")]
     Lowlevel {
-        #[clap(subcommand)]
+        #[command(subcommand)]
         subcommand: LowlevelCommands,
     },
 }
 
 #[derive(Debug, Subcommand)]
 enum SnapshotCommands {
-    #[clap(
+    #[command(
         about = "Save a snapshot of Linux and its disk. Each keeps Linux's memory, so delete old ones"
     )]
     Save { name: String },
 
-    #[clap(about = "Go back to a snapshot. Everything since is lost")]
+    #[command(about = "Go back to a snapshot. Everything since is lost")]
     Load { name: String },
 
-    #[clap(about = "Delete a snapshot")]
+    #[command(about = "Delete a snapshot")]
     Delete { name: String },
 
-    #[clap(about = "List the snapshots on this disk")]
+    #[command(about = "List the snapshots on this disk")]
     List {},
 }
 
 #[derive(Debug, Subcommand)]
 enum LowlevelCommands {
-    #[clap(arg_required_else_help = false)]
-    #[clap(about = "Issues a raw API command")]
+    #[command(arg_required_else_help = false)]
+    #[command(about = "Issues a raw API command")]
     Raw {
-        #[clap(help = "The command verb to be issued")]
+        #[arg(help = "The command verb to be issued")]
         command: String,
 
-        #[clap(help = "An optional key associated with the given command")]
+        #[arg(help = "An optional key associated with the given command")]
         key: Option<String>,
 
-        #[clap(help = "An optional value associated with the given command")]
+        #[arg(help = "An optional value associated with the given command")]
         value: Option<String>,
     },
 
-    #[clap(about = "Prepares a host directory to be mounted into tctiSH")]
+    #[command(about = "Prepares a host directory to be mounted into tctiSH")]
     PrepareMount { ios_path: String },
 
-    #[clap(about = "Directly map a host path into tctiSH")]
+    #[command(about = "Directly map a host path into tctiSH")]
     Mount { ios_path: String, linux_path: String },
 
-    #[clap(about = "Prints the 9p cache mode tctiSH wants shared folders mounted with")]
+    #[command(about = "Prints the 9p cache mode tctiSH wants shared folders mounted with")]
     ShareCache {},
 
-    #[clap(about = "Mount the remembered iOS folders again, without the picker")]
+    #[command(about = "Mount the remembered iOS folders again, without the picker")]
     RestoreMounts {
-        #[clap(
+        #[arg(
             long,
             help = "File descriptor of the restore lock to release when done (for mount_shared.sh)"
         )]
         release_lock_fd: Option<i32>,
     },
 
-    #[clap(about = "Prints the command tctiSH starts in new terminals, or nothing for the shell")]
+    #[command(
+        about = "Prints the command tctiSH starts in new terminals, or nothing for the shell"
+    )]
     DefaultCommand {},
 
-    #[clap(about = "Fetches the host's perspective on our CWD.")]
+    #[command(about = "Fetches the host's perspective on our CWD.")]
     GetCWD {},
 
-    #[clap(about = "Sets the clock to the host's, if it is far enough out (for tctish-agent)")]
+    #[command(about = "Sets the clock to the host's, if it is far enough out (for tctish-agent)")]
     SetClock {
-        #[clap(help = "The host's time, as <seconds>.<fraction> since the epoch")]
+        #[arg(help = "The host's time, as <seconds>.<fraction> since the epoch")]
         time: String,
     },
 }

@@ -1,7 +1,7 @@
-diff --git a/Resources/legacy.js b/Resources/legacy.js
+diff --git a/Scripts/legacy.js b/Scripts/legacy.js
 index 090544c..8da3753 100644
---- a/Resources/legacy.js
-+++ b/Resources/legacy.js
+--- a/Scripts/legacy.js
++++ b/Scripts/legacy.js
 @@ -3,22 +3,24 @@ function littleEndianHexStringToNumber(hexStr) {
      for (let i = 0; i < hexStr.length; i += 2) {
          bytes.push(parseInt(hexStr.substr(i, 2), 16));
@@ -32,11 +32,11 @@ index 090544c..8da3753 100644
      return bytes.map(b => b.toString(16).padStart(2, '0')).join('');
  }
  
-diff --git a/Resources/universal.js b/Resources/universal.js
+diff --git a/Scripts/universal.js b/Scripts/universal.js
 index 9bca8f6..43a2460 100644
---- a/Resources/universal.js
-+++ b/Resources/universal.js
-@@ -212,22 +212,24 @@
+--- a/Scripts/universal.js
++++ b/Scripts/universal.js
+@@ -212,22 +212,24 @@ function littleEndianHexStringToNumber(hexStr) {
      for (let i = 0; i < hexStr.length; i += 2) {
          bytes.push(parseInt(hexStr.substr(i, 2), 16));
      }

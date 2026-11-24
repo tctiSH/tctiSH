@@ -22,7 +22,7 @@ SDK entirely, so meson's answer for them is already the right one.
 
 --- a/meson.build
 +++ b/meson.build
-@@ -720,7 +720,6 @@
+@@ -748,7 +748,6 @@
    'memmem',
    'mmap',
    'newlocale',

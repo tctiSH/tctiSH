@@ -4,9 +4,9 @@
 #
 # StikJIT vendors a prebuilt `libidevice_ffi.a` in its submodule. We build
 # one and stage it over that copy as it is the last binary artifact in the
-# build, and StikJIT's is old enough to be missing the pairing API the on-device
-# pairing flow needs (`pairable_host_*`, added upstream in v0.1.64 and given an
-# FFI wrapper in v0.1.68).
+# build, and so that the pairing API the on-device pairing flow needs
+# (`pairable_host_*`, added upstream in v0.1.64 and given an FFI wrapper in
+# v0.1.68) comes from a version pinned here.
 #
 # Produces the two files StikJIT's idevice/ directory wants. The third,
 # module.modulemap, does not change and is left alone.

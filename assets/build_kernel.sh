@@ -43,8 +43,8 @@ REPO="$(cd "$ASSETS/.." && pwd)"
 # 6.18.x and change lines only deliberately.
 #
 # The hash is from https://cdn.kernel.org/pub/linux/kernel/v6.x/sha256sums.asc.
-KERNEL_VERSION="6.18.60"
-KERNEL_SHA256="3c2f44ef6acc021a7ad444d9a2e6ec1ef488ff09368793d0004a6080f69d621e"
+KERNEL_VERSION="6.18.65"
+KERNEL_SHA256="c92606f956f09dc50b5a0e2af9e86763fce27ada1647de97f8d1ac8cfc95801d"
 KERNEL_MIRROR="https://cdn.kernel.org/pub/linux/kernel/v6.x"
 
 # The image the build runs in, pinned by digest -- the same one `nixos/nix:latest`

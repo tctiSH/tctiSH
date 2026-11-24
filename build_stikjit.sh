@@ -5,8 +5,10 @@
 # StikJIT provides the debugger side of the iOS 26+ JIT protocol: it mounts the
 # developer disk image over the loopback VPN tunnel, attaches to a target
 # process, and answers the `brk #0xf00d` calls QEMU makes for its code buffer.
-# We build it rather than vendoring the framework so the only binary in the
-# tree is the one StikJIT itself vendors (a prebuilt Rust FFI library).
+# We build it rather than vendoring the framework, so the only binaries in the
+# tree are the prebuilt Rust FFI libraries StikJIT vendors, for iOS and tvOS.
+# build_idevice.sh builds the iOS one from source, and the tvOS one is never
+# linked.
 #
 # Requires xcodegen, which the flake provides:
 #
@@ -74,9 +76,9 @@ check_env() {
     exit 1
   }
 
-  # Falling back to StikJIT's vendored copy would build perfectly well and
-  # then be missing the pairing API, which surfaces as undefined symbols in
-  # Swift rather than as anything naming idevice.
+  # StikJIT's vendored copy would build too, but it is a prebuilt binary of
+  # whichever idevice StikJIT last took rather than the version
+  # build_idevice.sh pins, so a missing build here is an error, not a fallback.
   if [ ! -f "$IDEVICE_DIR/libidevice_ffi.a" ] || [ ! -f "$IDEVICE_DIR/idevice.h" ]; then
     echo -e "${RED}No idevice build at $IDEVICE_DIR.${NC}" >&2
     echo "Run './build_idevice.sh' first, or 'make idevice'." >&2
@@ -90,8 +92,8 @@ check_env
 #
 # `--delete` makes this a reset as well as a copy: whatever last build's patches
 # did is undone, so patches always apply to pristine source and never stack.
-# rsync skips what hasn't changed, which matters -- the vendored Rust library is
-# 92MB of the 94MB here.
+# rsync skips what hasn't changed, which matters -- the two vendored Rust
+# libraries are over 100MB of the 120MB here.
 stage_source() {
   mkdir -p "$WORK_DIR"
   rsync -a --delete --exclude '.git' "$SOURCE_DIR"/ "$WORK_DIR"/
@@ -168,11 +170,11 @@ echo -e "${GREEN}Generating the Xcode project...${NC}"
 # anything newer than tctiSH's target would stop the app launching at all --
 # not just stop JIT working, which would have been fine. Keep the two in step.
 #
-# GENERATE_INFOPLIST_FILE because StikJIT's project.yml specifies no `info:`, so
-# xcodegen produces a framework with no Info.plist at all. An app extension will
-# embed one of those quite happily; an *app* refuses, with "did not contain an
-# Info.plist". tctiSH embeds it in the app -- the extension links that copy -- so
-# it has to have one.
+# GENERATE_INFOPLIST_FILE because without it xcodegen produces a framework with
+# no Info.plist at all, as it did until StikJIT 2.0.1's project.yml began to set
+# it too. An app extension will embed one of those quite happily; an *app*
+# refuses, with "did not contain an Info.plist". tctiSH embeds it in the app --
+# the extension links that copy -- so it has to have one.
 echo -e "${GREEN}Archiving...${NC}"
 xcodebuild archive \
   -project "$WORK_DIR/StikJIT.xcodeproj" \

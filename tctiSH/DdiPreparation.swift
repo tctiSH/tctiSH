@@ -21,29 +21,55 @@ enum DdiPreparation {
         return DDIPaths.default(in: library.appendingPathComponent("StikJIT"))
     }
 
+    /// Whether StikJIT mounts the cryptex image here, from iOS 26.4, rather
+    /// than the personalized one.
+    ///
+    /// Duplicated from StikJIT's `DDIMountMethod.current`, which is internal,
+    /// for the same reason as `catalog`. The two have to agree: StikJIT mounts
+    /// whichever image this says, from the files this fetched.
+    private static var mountsCryptex: Bool {
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        return version.majorVersion > 26
+            || (version.majorVersion == 26 && version.minorVersion >= 4)
+    }
+
     /// Where the pieces of a developer disk image come from.
     ///
     /// Duplicated from StikJIT's `DDIDownloadCatalog`, which is internal to the
     /// framework and so can't be borrowed. If StikJIT ever moves these, this
     /// has to follow; a stale URL shows up as a download that 404s.
     ///
-    /// The cryptex image since StikJIT 1.6.0, which mounts through cryptexd;
-    /// the old image mounter can't mount DDIs on the iPhone 18 series of
-    /// devices.
-    private static let catalog = URL(
-        string: "https://github.com/doronz88/DeveloperDiskImage/raw/refs/heads/main"
-            + "/PersonalizedImages/Xcode_iOS_DDI_Cryptex")!
+    /// The cryptex image from iOS 26.4, which mounts through cryptexd; the old
+    /// image mounter can't mount DDIs on the iPhone 18 series of devices. Below
+    /// 26.4, the personalized image, which the image mounter mounts.
+    private static var catalog: URL {
+        URL(
+            string: "https://github.com/doronz88/DeveloperDiskImage/raw/refs/heads/main"
+                + "/PersonalizedImages/"
+                + (mountsCryptex ? "Xcode_iOS_DDI_Cryptex" : "Xcode_iOS_DDI_Personalized"))!
+    }
 
-    /// The two cryptex-only files come last as a cache from before 1.6.0 holds
-    /// the *personalized* image under the same three names, and it's the
-    /// absence of these two that marks it stale. Each download is moved into
-    /// place only once complete, so finding the last one means the rest are
-    /// current too.
+    /// The three files both images have, then the cryptex image's two more.
+    ///
+    /// Those two come last because a cache of the personalized image holds the
+    /// other three under the same names, and it's their absence that marks it
+    /// stale for the cryptex image. Each download is moved into place only once
+    /// complete, so finding the last one means the rest are current too.
     private static func downloads(for paths: DDIPaths) -> [(name: String, destination: String)] {
-        [
+        let both = [
             ("BuildManifest.plist", paths.manifestPath),
             ("Image.dmg", paths.imagePath),
             ("Image.dmg.trustcache", paths.trustcachePath),
+        ]
+        guard mountsCryptex else { return both }
+        return both + cryptexOnly(paths)
+    }
+
+    /// The files only the cryptex image has. Their presence marks a cache as
+    /// the cryptex image's, so the personalized image is only cached without
+    /// them.
+    private static func cryptexOnly(_ paths: DDIPaths) -> [(name: String, destination: String)] {
+        [
             ("Image.dmg.cryptex_info", paths.cryptexInfoPath),
             ("Image.dmg.root_hash", paths.rootHashPath),
         ]
@@ -84,7 +110,7 @@ enum DdiPreparation {
             // Asked every launch rather than remembered. An image-mounter DDI is gone after a
             // reboot, but a cryptex DDI stays installed and cryptexd grafts it again at boot once
             // the device is first unlocked, so it's often there before we've done anything.
-            if try StikJIT.isDDIMounted(pairingFile: pairingFile) {
+            if try StikJIT.isDDIMounted(pairingFile: pairingFile, configuration: .loopbackVPN) {
                 Log.network.note("ddi: already mounted; nothing to do")
                 return .ready
             }
@@ -101,7 +127,9 @@ enum DdiPreparation {
             var lastLogged = -1.0
             var lastDrawn = -1.0
 
-            try StikJIT.mountDDI(pairingFile: pairingFile, paths: paths) { fraction in
+            try StikJIT.mountDDI(
+                pairingFile: pairingFile, configuration: .loopbackVPN, paths: paths
+            ) { fraction in
                 if fraction - lastLogged >= 0.2 || fraction >= 1 {
                     lastLogged = fraction
                     Log.network.note(String(format: "ddi:   mounting %.0f%%", fraction * 100))
@@ -114,7 +142,8 @@ enum DdiPreparation {
 
             Log.network.note("ddi: mounted")
 
-            guard try StikJIT.isDDIMounted(pairingFile: pairingFile) else {
+            guard try StikJIT.isDDIMounted(pairingFile: pairingFile, configuration: .loopbackVPN)
+            else {
                 return .failed("the image mounted but the device doesn't see it")
             }
 
@@ -152,7 +181,7 @@ enum DdiPreparation {
         let removal: DDIRemoval
 
         do {
-            removal = try StikJIT.removeDDIs(pairingFile: pairingFile)
+            removal = try StikJIT.removeDDIs(pairingFile: pairingFile, configuration: .loopbackVPN)
         } catch {
             // Only thrown when the device couldn't be reached, so nothing was removed.
             Log.network.note("ddi: removing failed -- \(error.localizedDescription)")
@@ -166,7 +195,7 @@ enum DdiPreparation {
             "ddi: removed cryptex \(removal.cryptexVersion ?? "none"), "
                 + "unmounted \(unmounted.isEmpty ? "nothing" : unmounted)")
         for failure in failures {
-            Log.network.note("ddi:   failed while \(failure)")
+            Log.network.note("ddi:   \(failure)")
         }
 
         // Whatever became of the device's copy. Ours is stale either way, and the point is a next
@@ -179,7 +208,7 @@ enum DdiPreparation {
             try StikJIT.resetCachedDDI(at: paths)
             Log.network.note("ddi: \(wasCached ? "deleted the cache" : "nothing cached")")
         } catch {
-            failures.append("deleting the downloaded copy: \(error.localizedDescription)")
+            failures.append("failed to delete the downloaded copy: \(error.localizedDescription)")
         }
 
         var said: [String] = []
@@ -202,11 +231,19 @@ enum DdiPreparation {
         // Partial success is still a failure, but it says what did go, as the next step depends on
         // it: an uninstalled cryptex won't come back at boot even if an unmount didn't take.
         guard failures.isEmpty else {
-            said += failures.map { "Failed while \($0)" }
+            said += failures.map(sentence)
             return .failed(said.joined(separator: " "))
         }
 
         return .removed(said.joined(separator: " "))
+    }
+
+    /// A failure as a sentence: capitalized, and ending in a period. StikJIT's
+    /// errors end in one already, but begin in lower case ("failed to unmount
+    /// …").
+    private static func sentence(_ failure: String) -> String {
+        let text = failure.prefix(1).uppercased() + failure.dropFirst()
+        return text.hasSuffix(".") ? text : text + "."
     }
 
     /// Whether the device has a DDI mounted, for Debug Tools. Blocking.
@@ -214,7 +251,7 @@ enum DdiPreparation {
         let pairingFile = try stage(pairingData, as: "ddi-status-pairing")
         defer { try? FileManager.default.removeItem(at: pairingFile) }
 
-        return try StikJIT.isDDIMounted(pairingFile: pairingFile)
+        return try StikJIT.isDDIMounted(pairingFile: pairingFile, configuration: .loopbackVPN)
     }
 
     /// How much of the DDI is downloaded.
@@ -248,11 +285,18 @@ enum DdiPreparation {
         return pairingFile
     }
 
-    /// Whether every piece is already on disk and worth using.
+    /// Whether every piece is already on disk and worth using, and, for the
+    /// personalized image, none of the cryptex image's extra files is there.
     ///
     /// StikJIT has `DDIPaths.allFilesUsable` for this, but it's internal.
     private static func cached(_ paths: DDIPaths) -> Bool {
         let manager = FileManager.default
+
+        if !mountsCryptex,
+            cryptexOnly(paths).contains(where: { manager.fileExists(atPath: $0.destination) })
+        {
+            return false
+        }
 
         return downloads(for: paths).allSatisfy { file in
             let path = file.destination
@@ -309,6 +353,13 @@ enum DdiPreparation {
             }
 
             Log.network.note("ddi:   \(name) done")
+        }
+
+        // What's left of a cryptex image would make the personalized one look stale; see `cached`.
+        guard !mountsCryptex else { return }
+        for file in cryptexOnly(paths)
+        where FileManager.default.fileExists(atPath: file.destination) {
+            try FileManager.default.removeItem(atPath: file.destination)
         }
     }
 }

@@ -4,10 +4,10 @@
 PKG_CONFIG_SRC="https://pkgconfig.freedesktop.org/releases/pkg-config-0.29.2.tar.gz"
 
 # Source files for qemu
-FFI_SRC="https://github.com/libffi/libffi/releases/download/v3.5.0/libffi-3.5.0.tar.gz"
-ICONV_SRC="https://ftp.gnu.org/gnu/libiconv/libiconv-1.16.tar.gz"
-GETTEXT_SRC="https://ftp.gnu.org/gnu/gettext/gettext-0.22.5.tar.gz"
-GLIB_SRC="https://download.gnome.org/sources/glib/2.83/glib-2.83.0.tar.xz"
+FFI_SRC="https://github.com/libffi/libffi/releases/download/v3.8.1/libffi-3.8.1.tar.gz"
+ICONV_SRC="https://ftp.gnu.org/gnu/libiconv/libiconv-1.19.1.tar.gz"
+GETTEXT_SRC="https://ftp.gnu.org/gnu/gettext/gettext-1.0.tar.gz"
+GLIB_SRC="https://download.gnome.org/sources/glib/2.90/glib-2.90.1.tar.xz"
 
 # glib builds PCRE2 as a meson subproject, because there is no system one to find
 # on iOS. These are the two files its subprojects/pcre2.wrap names, mirrored on the
@@ -15,6 +15,6 @@ GLIB_SRC="https://download.gnome.org/sources/glib/2.83/glib-2.83.0.tar.xz"
 # hashes, and build_dependencies.sh seeds them into meson's packagecache rather
 # than letting meson fetch them itself. Bump them together with glib, taking the
 # versions and the release tag straight out of the new subprojects/pcre2.wrap.
-PCRE2_SRC="https://github.com/mesonbuild/wrapdb/releases/download/pcre2_10.44-2/pcre2-10.44.tar.bz2"
-PCRE2_PATCH_SRC="https://github.com/mesonbuild/wrapdb/releases/download/pcre2_10.44-2/pcre2_10.44-2_patch.zip"
-PIXMAN_SRC="https://www.cairographics.org/releases/pixman-0.38.0.tar.gz"
+PCRE2_SRC="https://github.com/mesonbuild/wrapdb/releases/download/pcre2_10.46-1/pcre2-10.46.tar.bz2"
+PCRE2_PATCH_SRC="https://github.com/mesonbuild/wrapdb/releases/download/pcre2_10.46-1/pcre2_10.46-1_patch.zip"
+PIXMAN_SRC="https://www.cairographics.org/releases/pixman-0.46.4.tar.gz"

@@ -229,7 +229,7 @@ index 0000000..e4d99be
 +        forceScript: Bool = false,
 +        progress: @escaping (String) -> Void = { _ in }
 +    ) throws {
-+        let session = JITSession(pairingFilePath: pairingFile.path, configuration: configuration)
++        let session = JITSession(pairingFilePath: pairingFile.path, configuration: configuration.resolved())
 +
 +        try session.enableJIT(
 +            targetPID: targetPID,

@@ -133,7 +133,8 @@ class JITHelperService: NSObject, NSExtensionRequestHandling {
                 // Ask before attaching. `enableJIT` would happily prepare the device for us, but
                 // preparing means downloading and mounting a developer disk image: minutes of work,
                 // finishing long after the host stopped waiting and booted without JIT.
-                let mounted = try StikJIT.isDDIMounted(pairingFile: pairingFile)
+                let mounted = try StikJIT.isDDIMounted(
+                    pairingFile: pairingFile, configuration: .loopbackVPN)
                 reply.ddiMounted = mounted
 
                 guard mounted else {
@@ -146,6 +147,7 @@ class JITHelperService: NSObject, NSExtensionRequestHandling {
                 try StikJIT.enableJITOnPreparedDevice(
                     targetPID: targetPID,
                     pairingFile: pairingFile,
+                    configuration: .loopbackVPN,
                     script: .universal,
                     // Left to itself StikJIT only runs the script under TXM, and without TXM it
                     // attaches and detaches at once. On iOS 26 that is not enough: QEMU's code

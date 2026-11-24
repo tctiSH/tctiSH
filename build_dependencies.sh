@@ -420,16 +420,19 @@ build_qemu_dependencies() {
   build $ICONV_SRC
 
   # strchrnul (iOS 18.4) and pipe2 (iOS 27) are both past our 18.0 deployment
-  # target, so the linker weak-links them and the call lands on NULL. gnulib
-  # probes by declaring `char pipe2 ();` itself rather than including the
-  # header, so the availability attribute never reaches the compiler and
-  # -Werror=unguarded-availability-new cannot correct the answer -- it only
-  # fires later, on gnulib's use of the function it was told exists.
-  # `future` is how gnulib spells "the OS will have it one day, use your
-  # replacement"; it is what these two variables exist for.
+  # target, so a build told they exist has the linker weak-link them, and the
+  # call lands on NULL. gnulib probes by declaring `char pipe2 ();` itself
+  # rather than including the header, so the availability attribute never
+  # reaches the compiler and -Werror=unguarded-availability-new cannot correct
+  # the answer -- it only fires later, on gnulib's use of the function it was
+  # told exists. `future` is how gnulib spells "the OS will have it one day,
+  # use your replacement"; it is what these two variables exist for.
   #
-  # Checked against the whole of gettext's ac_cv_func_*=yes set: these are the
-  # only two the iOS 27 SDK puts beyond 18.0. strchrnul is copied from UTM,
+  # Only gettext-tools probes for either. Neither the gettext-runtime
+  # configured below nor libiconv mentions them, and nothing either one finds
+  # is past 18.0 (checked for gettext 1.0 and libiconv 1.19.1), so the two
+  # change nothing in this build. They are set for the whole-tree configure
+  # suggested below, which does probe both. strchrnul is copied from UTM,
   # which hit it first; pipe2 is ours, and is the same SDK change that the
   # glib patch works around.
   #
@@ -462,7 +465,10 @@ build_qemu_dependencies() {
   # is pointless, not because anything breaks without it.
   meson_build $GLIB_SRC -Dtests=false -Ddtrace=disabled -Dsysprof=disabled
 
-  build $PIXMAN_SRC
+  # pixman builds only with meson since 0.43, the first stable release being
+  # 0.44. The demos and tests are left out, as the patch for its autotools
+  # build did. QEMU wants only the library.
+  meson_build $PIXMAN_SRC -Dtests=disabled -Ddemos=disabled
 }
 
 fixup() {
@@ -585,7 +591,7 @@ CFLAGS_MINVER="-miphoneos-version-min=$SDKMINVER"
 #
 # It does not reach meson, whose has_function writes a declaration itself rather than using the
 # header, so the availability attribute never gets near the compiler. glib is the one thing
-# here built that way, and its pipe2 is dropped in third-party/dependencies/glib-2.83.0.patch.
+# here built that way, and its pipe2 is dropped in third-party/dependencies/glib-2.90.1.patch.
 CFLAGS_AVAILABILITY="-Werror=unguarded-availability-new"
 PLATFORM_FAMILY_PREFIX="iOS"
 CFLAGS_TARGET=

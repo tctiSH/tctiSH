@@ -94,7 +94,11 @@ $(QEMU_STAMP): qemu-source-changed
 	 } 2>/dev/null | shasum > $@.new
 	@if cmp -s $@.new $@; then rm $@.new; else mv $@.new $@; fi
 
-$(QEMU_LIBRARY): build_dependencies.sh qemu_source.sh third-party/dependencies/sources $(QEMU_STAMP)
+# The patches too, as build_dependencies.sh applies each one by its tarball's name: a change to one
+# alone changes the build. make only sees patches that exist, so deleting one alone needs a
+# `make clean-deps`.
+$(QEMU_LIBRARY): build_dependencies.sh qemu_source.sh third-party/dependencies/sources \
+                 $(wildcard third-party/dependencies/*.patch) $(QEMU_STAMP)
 	$(SHELL_WRAPPER) ./build_dependencies.sh
 
 # The same checkout and the same stamp, built for this Mac instead. ninja decides what actually
