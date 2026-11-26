@@ -42,7 +42,7 @@ final class MonitorGate {
     var recoveryBoot: (() -> Void)?
 
     private let deliver: (ArraySlice<UInt8>) -> Void
-    private let screen: () -> Terminal?
+    private let screen: (TerminalContentRegion) -> TerminalContentSnapshot?
 
     /// Sends waiting their turn, split so that each holds at most one Return,
     /// at its end.
@@ -57,8 +57,12 @@ final class MonitorGate {
     private var echoTimer: Timer?
     private var asking = false
 
-    /// `screen` is the terminal showing the monitor, and `deliver` sends to it.
-    init(screen: @escaping () -> Terminal?, deliver: @escaping (ArraySlice<UInt8>) -> Void) {
+    /// `screen` copies the rows in a region of the terminal showing the
+    /// monitor, and `deliver` sends to the monitor.
+    init(
+        screen: @escaping (TerminalContentRegion) -> TerminalContentSnapshot?,
+        deliver: @escaping (ArraySlice<UInt8>) -> Void
+    ) {
         self.screen = screen
         self.deliver = deliver
     }
@@ -100,7 +104,8 @@ final class MonitorGate {
                     return
                 }
                 if let confirm,
-                    let risk = MonitorGuard.risk(submitting: next, in: screen(), after: typed)
+                    let risk = MonitorGuard.risk(
+                        submitting: next, in: screen(MonitorGuard.screenRegion), after: typed)
                 {
                     asking = true
                     confirm(risk) { [weak self] submit in
@@ -204,16 +209,18 @@ enum MonitorGuard {
     }
 
     /// The risk of the line `piece` submits, if any: `piece` is one of
-    /// `lines(in:)`, `terminal` shows the monitor, and `typed` is what was sent
-    /// since the last Return.
+    /// `lines(in:)`, `screen` is a copy of the rows in `screenRegion`, from the
+    /// terminal showing the monitor, and `typed` is what was sent since the
+    /// last Return.
     static func risk(
-        submitting piece: ArraySlice<UInt8>, in terminal: Terminal?, after typed: [UInt8]
+        submitting piece: ArraySlice<UInt8>, in screen: TerminalContentSnapshot?,
+        after typed: [UInt8]
     ) -> Risk? {
         guard submits(piece) else { return nil }
         let body = Array(piece.dropLast())
 
         // The line on screen, with what comes before the Return typed onto its end.
-        if let terminal, let risk = risk(of: edited(Array(onScreen(in: terminal).utf8) + body)) {
+        if let screen, let risk = risk(of: edited(Array(onScreen(in: screen).utf8) + body)) {
             return risk
         }
 
@@ -273,42 +280,32 @@ enum MonitorGuard {
     /// The command on the cursor's line, after the monitor's prompt, or nothing
     /// if the line has no prompt.
     ///
-    /// SwiftTerm scrolls to the cursor before it sends what is typed, so the
-    /// cursor's row is on screen; read later, as after waiting for an echo, it
-    /// still is unless the terminal was scrolled meanwhile. A line too long for
-    /// the screen goes on in the rows below it, which SwiftTerm marks as
-    /// wrapped, and can start above the screen. Such a line is a best guess:
-    /// the monitor redraws a line as it is edited by moving the cursor left,
-    /// which stops at the screen's edge, so past the first row it draws the
-    /// line again rather than over itself. The command, the first word after
-    /// the prompt, is still read right.
-    private static func onScreen(in terminal: Terminal) -> String {
-        // Rows by their place in the whole buffer, scrollback included.
-        let top = terminal.buffer.totalLinesTrimmed + terminal.getTopVisibleRow()
-        let cursor = top + terminal.getCursorLocation().y
-        guard var line = terminal.getScrollInvariantLine(row: cursor) else { return "" }
+    /// The cursor is on the live screen, wherever the terminal is scrolled to.
+    /// A line too long for the screen goes on in the rows below it, which
+    /// SwiftTerm marks as wrapped, and can start above the screen, in the
+    /// scrollback. Such a line is a best guess: the monitor redraws a line as
+    /// it is edited by moving the cursor left, which stops at the screen's
+    /// edge, so past the first row it draws the line again rather than over
+    /// itself. The command, the first word after the prompt, is still read
+    /// right.
+    private static func onScreen(in screen: TerminalContentSnapshot) -> String {
+        let rows = screen.rows
+        guard let first = rows.first else { return "" }
+        let cursor = screen.cursorRow - first.absoluteRow
+        guard rows.indices.contains(cursor) else { return "" }
 
         // The rows above that the cursor's continues, then the ones below that continue it, as the
         // cursor can have been moved back into the middle of the line. Within reason.
-        var text = line.translateToString()
-        var row = cursor
-        while line.isWrapped, cursor - row < maxRows,
-            let above = terminal.getScrollInvariantLine(row: row - 1)
-        {
-            text = above.translateToString() + text
-            line = above
-            row -= 1
+        var top = cursor
+        while rows[top].isWrapped, cursor - top < maxRows, top > rows.startIndex {
+            top -= 1
         }
-        row = cursor + 1
-        while row - cursor < maxRows, let below = terminal.getScrollInvariantLine(row: row),
-            below.isWrapped
-        {
-            text += below.translateToString()
-            row += 1
+        var bottom = cursor + 1
+        while bottom < rows.endIndex, bottom - cursor < maxRows, rows[bottom].isWrapped {
+            bottom += 1
         }
 
-        // Cells nothing was written to read as NUL.
-        text = String(text.map { $0 == "\0" ? " " : $0 })
+        var text = rows[top..<bottom].map(\.fullText).joined()
         text = String(text.reversed().drop(while: \.isWhitespace).reversed())
 
         guard let start = text.range(of: prompt, options: .backwards) else { return "" }
@@ -317,6 +314,11 @@ enum MonitorGuard {
 
     /// The most rows of one line looked at either side of the cursor's.
     private static let maxRows = 64
+
+    /// The rows `risk(submitting:in:after:)` reads: the live screen, which the
+    /// cursor is on, and up to `maxRows` rows of scrollback above it, where a
+    /// wrapped line can start.
+    static let screenRegion = TerminalContentRegion.history(maximumScrollbackRows: maxRows)
 
     /// The risk of submitting `line`, if it is one of the commands asked about.
     static func risk(of line: String) -> Risk? {

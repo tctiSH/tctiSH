@@ -109,14 +109,14 @@ final class ConsoleTransport: TerminalTransport {
     /// Also tells the guest agent that a TTY shows the console, which starts
     /// the console's login if it is waiting for a TTY: see `tctish-login`.
     func redraw() {
-        guard let t = terminal?.getTerminal() else { return }
+        guard let size = terminal?.terminalDimensions else { return }
         if GuestAgent.shared.isUp {
             GuestAgent.shared.request("shown", device) { [device] answer in
                 guard case .failed(let reason) = answer else { return }
                 Log.ui.warn("\(device): couldn't say it is shown: \(reason)")
             }
         }
-        resize(cols: t.cols, rows: t.rows, redrawing: true)
+        resize(cols: size.cols, rows: size.rows, redrawing: true)
     }
 
     private func resize(cols: Int, rows: Int, redrawing: Bool) {
@@ -192,7 +192,9 @@ final class ChardevTransport: TerminalTransport {
 
         tail?.onReceive = { [unowned self] bytes in terminal?.receive(bytes) }
         if !logged {
-            let gate = MonitorGate(screen: { [unowned self] in terminal?.getTerminal() }) {
+            let gate = MonitorGate(screen: { [unowned self] region in
+                terminal?.terminalContentSnapshot(region: region)
+            }) {
                 [unowned self] bytes in socket.send(bytes)
             }
             socket.onReceive = { [unowned self, unowned gate] bytes in

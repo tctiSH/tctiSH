@@ -993,7 +993,7 @@
 			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm";
 			requirement = {
 				kind = exactVersion;
-				version = 1.20.0;
+				version = 1.99.4;
 			};
 		};
 		8D2AC18C28C7EF2D005DB7D4 /* XCRemoteSwiftPackageReference "swift-atomics" */ = {

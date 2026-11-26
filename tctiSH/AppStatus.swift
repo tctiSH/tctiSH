@@ -1321,7 +1321,7 @@ final class AppStatus: NSObject {
         // These messages are about Linux starting, so they go on `hvc0`'s TTY while it's open, and
         // on the active window's selected TTY otherwise.
         guard let tv = TTYs.shared.hvc0?.view ?? ViewController.active?.terminal else { return }
-        let width = max(20, tv.getTerminal().cols)
+        let width = max(20, tv.terminalDimensions.cols)
 
         for paragraph in paragraphs {
             var line = ""

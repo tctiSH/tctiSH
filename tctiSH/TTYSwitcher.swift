@@ -1295,12 +1295,7 @@ struct ScrollbackMatch {
         let count = view.searchMatchSummary(term).total
         guard count > 0 else { return .none }
 
-        // Cells skipped by a tab, and the second half of a wide character, read as NUL, so they are
-        // replaced with spaces.
-        let text = String(
-            decoding: view.getTerminal().getBufferAsData(kind: .active), as: UTF8.self
-        )
-        .replacingOccurrences(of: "\u{0}", with: " ")
+        let text = String(decoding: view.getBufferAsData(kind: .active), as: UTF8.self)
         let last = text.split(separator: "\n", omittingEmptySubsequences: true).reversed()
             .lazy.compactMap { line in
                 line.range(of: term, options: [.caseInsensitive, .backwards]).map { (line, $0) }

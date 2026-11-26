@@ -721,7 +721,7 @@ extension ViewController {
     /// away otherwise.
     private func updateSerialSize() {
         guard Self.serialSizeShown, ttyWindow.selected.kind == .kernelLog,
-            let t = Self.kernelLog?.view?.getTerminal()
+            let size = Self.kernelLog?.view?.terminalDimensions
         else {
             status?.dismiss(key: Self.serialSizeStatusKey)
             return
@@ -729,7 +729,7 @@ extension ViewController {
         status?.present(
             .init(
                 key: Self.serialSizeStatusKey,
-                message: "Size ttyS0 by hand: stty rows \(t.rows) cols \(t.cols)",
+                message: "Size ttyS0 by hand: stty rows \(size.rows) cols \(size.cols)",
                 state: .symbol("ruler"),
                 duration: nil,
                 animated: false,
@@ -1216,7 +1216,7 @@ extension ViewController {
         case #selector(useDefaultFontSize(_:)):
             return free && tty.fontSize != nil
         case #selector(scrollToTop(_:)), #selector(scrollToBottom(_:)):
-            return free && switcher == nil && !terminal.getTerminal().isCurrentBufferAlternate
+            return free && switcher == nil && !terminal.isOnAlternateScreen
         case #selector(showKernelLog(_:)):
             return free && TTYs.isShown(.kernelLog)
         case #selector(showVMManagement(_:)):
@@ -1278,7 +1278,7 @@ extension ViewController {
     /// Edit > Find > Use Selection for Find, or ⌘E: opens the find bar on the
     /// selected text.
     @objc override func useSelectionForFind(_ sender: Any?) {
-        let text = terminal.selection.getSelectedText()
+        let text = terminal.getSelection() ?? ""
         guard switcher == nil, presentedViewController == nil, !text.isEmpty else { return }
         openFindBar(term: text)
     }

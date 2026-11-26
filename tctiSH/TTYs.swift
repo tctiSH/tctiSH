@@ -869,9 +869,9 @@ final class TTYs {
         for tty in closed {
             tty.view?.transport = nil
             tty.view?.removeFromSuperview()
-            // SwiftTerm's display link retains the view, so the view isn't freed until
-            // `updateUiClosed()` invalidates the link.
-            tty.view?.updateUiClosed()
+            // SwiftTerm must be told when a view is gone for good, so that it stops its frame
+            // driver and frees what it draws with. TTYs are closed on the main thread.
+            MainActor.assumeIsolated { _ = tty.view?.updateUiClosed() }
         }
     }
 
