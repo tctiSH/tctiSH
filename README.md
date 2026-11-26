@@ -66,7 +66,9 @@ To build the app onto your device, you can follow these steps:
    it, as it has to fetch all the devshell dependencies and build our QEMU fork.
 3. Open `tctiSH.xcodeproj` in Xcode. Open the tctiSH project settings and select the tctiSH target
    before changing the team to your team and setting a bundle identifier you can build with. Then
-   select the JITHelper target and do the same.
+   select the JITHelper target and do the same. A free personal team can't sign the iCloud entries
+   or `com.apple.developer.user-fonts` in `tctiSH/tctiSH.entitlements`, so remove those first.
+   Without the latter, fonts installed by a configuration profile won't be listed in Settings.
 4. In Xcode's build menu select tctiSH as the scheme and your device as the build target (we do not
    currently support simulator devices). Then run the build. The first build in Xcode asks you to
    trust SwiftTerm's `SwiftTermBuildInfoPlugin`, which records SwiftTerm's version; choose Trust &

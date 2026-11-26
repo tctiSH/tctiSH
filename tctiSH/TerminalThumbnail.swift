@@ -16,9 +16,10 @@ import UIKit
 /// is laid out at the smaller size, so it stays sharp, and the terminal is
 /// unaffected: its rows and columns don't change, and nothing reflows.
 ///
-/// Only text, bold and colors are drawn, in the colors SwiftTerm picks with its
-/// default settings. Underlines, italics, dimming, the cursor and the selection
-/// don't show at this size, and images aren't in the copy of the screen.
+/// Only text, icons, bold and colors are drawn, in the colors SwiftTerm picks
+/// with its default settings. Underlines, italics, dimming, the cursor and the
+/// selection don't show at this size, and images aren't in the copy of the
+/// screen.
 enum TerminalThumbnail {
 
     /// Draws `terminal` scaled to `width` points wide, at `scale` pixels per
@@ -41,13 +42,10 @@ enum TerminalThumbnail {
             width: grid.width / CGFloat(screen.dimensions.cols),
             height: grid.height / CGFloat(screen.dimensions.rows))
         let colors = Colors(screen: screen, terminal: terminal)
+        let icons = Icons(terminal: terminal, cell: cell)
         let regular = Font(terminal.font, cellWidth: cell.width)
         let bold = Font(
-            UIFont(
-                descriptor: terminal.font.fontDescriptor.withSymbolicTraits(.traitBold)
-                    ?? terminal.font.fontDescriptor,
-                size: terminal.font.pointSize),
-            cellWidth: cell.width)
+            TerminalFont.faces(size: terminal.font.pointSize).bold, cellWidth: cell.width)
 
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale
@@ -61,7 +59,7 @@ enum TerminalThumbnail {
 
             for (index, row) in screen.rows.enumerated() {
                 let top = CGFloat(index) * cell.height
-                for run in runs(of: row) {
+                for run in runs(of: row, icons: icons) {
                     let style = run.attribute.style
                     let colored = colors.colors(of: run.attribute)
 
@@ -75,6 +73,12 @@ enum TerminalThumbnail {
                     }
                     guard !style.contains(.invisible), run.text.contains(where: { $0 != " " })
                     else { continue }
+                    if case .icon(let placement) = run.kind {
+                        icons?.draw(
+                            run.text, placement: placement, color: colored.foreground,
+                            at: CGPoint(x: left, y: top), in: cg)
+                        continue
+                    }
                     let font = style.contains(.bold) ? bold : regular
                     NSAttributedString(
                         string: run.text,
@@ -104,30 +108,124 @@ enum TerminalThumbnail {
     /// Neighboring characters of a row with the same attribute: the columns
     /// they take, and their text.
     private struct Run {
+        enum Kind: Equatable {
+            case text
+            case wide
+
+            /// A Nerd Font icon the terminal's font lacks, and how it's placed.
+            case icon(TerminalGlyphPlacementPolicy.Placement)
+        }
+
         var attribute: Attribute
         var columns: Range<Int>
         var text: String
-        var isWide: Bool
+        var kind: Kind
     }
 
     /// The runs of characters in `row` with the same attribute. Each wide
     /// character is a separate run, drawn at its column: its glyph comes from
-    /// another font, whose characters aren't two cells wide.
-    private static func runs(of row: TerminalContentRowSnapshot) -> [Run] {
+    /// another font, whose characters aren't two cells wide. So is each Nerd
+    /// Font icon the terminal's font lacks, which is fitted to its cell.
+    private static func runs(of row: TerminalContentRowSnapshot, icons: Icons?) -> [Run] {
         var runs: [Run] = []
         for (column, text, cell) in row.characters {
-            let isWide = cell.width == 2
-            if !isWide, let last = runs.last, !last.isWide, last.attribute == cell.attribute {
+            let kind: Run.Kind =
+                if cell.width == 2 {
+                    .wide
+                } else if let placement = icons?.placement(of: text) {
+                    .icon(placement)
+                } else {
+                    .text
+                }
+            if kind == .text, let last = runs.last, last.kind == .text,
+                last.attribute == cell.attribute
+            {
                 runs[runs.count - 1].columns = last.columns.lowerBound..<column + 1
                 runs[runs.count - 1].text += text
             } else {
                 runs.append(
                     Run(
-                        attribute: cell.attribute, columns: column..<column + (isWide ? 2 : 1),
-                        text: text, isWide: isWide))
+                        attribute: cell.attribute,
+                        columns: column..<column + (kind == .wide ? 2 : 1), text: text, kind: kind
+                    ))
             }
         }
         return runs
+    }
+
+    /// Draws the Nerd Font icons that the terminal's font lacks, placed in
+    /// their cells the same way SwiftTerm places them. An icon is centered and
+    /// scaled down to fit, no taller than the font's ascent. A Powerline shape
+    /// is stretched to fill the cell, so that neighboring shapes join up.
+    private struct Icons {
+        let fallback: NerdFontFallback
+        let terminalFont: UIFont
+        let font: CTFont
+        let cell: CGSize
+
+        init?(terminal: TerminalView, cell: CGSize) {
+            guard let fallback = NerdFontFallback.shared,
+                let font = fallback.fallbackFont(forPointSize: terminal.font.pointSize)
+            else { return nil }
+            self.fallback = fallback
+            terminalFont = terminal.font
+            self.font = font
+            self.cell = cell
+        }
+
+        /// How `character` is placed, or nil if it isn't a Nerd Font icon the
+        /// terminal's font lacks.
+        func placement(of character: String) -> TerminalGlyphPlacementPolicy.Placement? {
+            guard let scalar = Self.baseScalar(of: character),
+                let policy = fallback.placementPolicy(for: scalar)
+            else { return nil }
+            var units = Array(String(scalar).utf16)
+            var glyphs = [CGGlyph](repeating: 0, count: units.count)
+            let lacks = !CTFontGetGlyphsForCharacters(
+                terminalFont as CTFont, &units, &glyphs, units.count)
+            return lacks ? policy.placement : nil
+        }
+
+        /// The scalar SwiftTerm asks about: the character's only one, or its
+        /// first when the other is a variation selector.
+        private static func baseScalar(of character: String) -> Unicode.Scalar? {
+            let scalars = Array(character.unicodeScalars)
+            switch scalars.count {
+            case 1: return scalars[0]
+            case 2 where scalars[1].properties.isVariationSelector: return scalars[0]
+            default: return nil
+            }
+        }
+
+        func draw(
+            _ character: String, placement: TerminalGlyphPlacementPolicy.Placement,
+            color: UIColor, at origin: CGPoint, in cg: CGContext
+        ) {
+            guard let scalar = Self.baseScalar(of: character) else { return }
+            var units = Array(String(scalar).utf16)
+            var glyphs = [CGGlyph](repeating: 0, count: units.count)
+            guard CTFontGetGlyphsForCharacters(font, &units, &glyphs, units.count) else { return }
+            let ink = CTFontGetBoundingRectsForGlyphs(font, .horizontal, glyphs, nil, 1)
+            guard ink.width > 0, ink.height > 0 else { return }
+
+            var scaleX = cell.width / ink.width
+            var scaleY = cell.height / ink.height
+            if placement != .stretch {
+                let height = min(cell.height, terminalFont.ascender)
+                scaleX = min(scaleX, height / ink.height, 1)
+                scaleY = scaleX
+            }
+
+            // Glyphs are drawn with y going up, and the image's y goes down.
+            cg.saveGState()
+            cg.translateBy(x: origin.x + cell.width / 2, y: origin.y + cell.height / 2)
+            cg.scaleBy(x: scaleX, y: -scaleY)
+            cg.translateBy(x: -ink.midX, y: -ink.midY)
+            cg.textMatrix = .identity
+            cg.setFillColor(color.cgColor)
+            CTFontDrawGlyphs(font, glyphs, [.zero], 1, cg)
+            cg.restoreGState()
+        }
     }
 
     /// The colors the terminal draws cells in.

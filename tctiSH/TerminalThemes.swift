@@ -17,6 +17,22 @@ extension ThemeColor {
     }
 }
 
+extension TerminalView {
+    /// Draws in `theme`'s colors.
+    func useColors(of theme: TerminalTheme) {
+        installColors(theme.ansi.map(\.terminalColor))
+
+        // These set the terminal's default colors too.
+        nativeForegroundColor = theme.foreground.uiColor
+        nativeBackgroundColor = theme.background.uiColor
+        // Not the view's `backgroundColor`. SwiftTerm draws in `draw(_:)`, and for a view that
+        // does, UIKit paints the background color into the drawing instead of the layer, and marks
+        // the layer opaque. SwiftTerm leaves cells in the default background clear for the layer's
+        // color to show through, and on an opaque layer they come out black.
+        layer.backgroundColor = theme.background.uiColor.cgColor
+    }
+}
+
 // MARK: - Which themes there are, and which is in use
 
 /// The themes on offer by default, and which of them the terminals use in dark

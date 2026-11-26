@@ -13,11 +13,17 @@ import UniformTypeIdentifiers
 /// What the accessory on the right of a row says about it.
 private enum RowAccessory {
 
-    /// Nothing; the row is inert.
+    /// Nothing. If the row does something when tapped, its title is tinted to
+    /// mark it as an action.
     case none
 
     /// This is the chosen one of a set of options.
     case checkmark
+
+    /// This is one of a set of options, but not the chosen one. It shows
+    /// nothing and leaves the title untinted, so the row doesn't read as an
+    /// action.
+    case unchecked
 
     /// Tapping pushes another screen.
     case disclosure
@@ -28,6 +34,11 @@ private enum RowAccessory {
     /// you are actually using can only be worked out by going into each in turn
     /// and looking.
     case selectedDisclosure
+
+    /// For one of a set of options: checked if it's the chosen one.
+    static func option(chosen: Bool) -> RowAccessory {
+        chosen ? .checkmark : .unchecked
+    }
 }
 
 /// A value the user types rather than picks.
@@ -59,6 +70,10 @@ private struct SettingsRow {
 
     /// A picture in place of the symbol, drawn untinted.
     var image: UIImage?
+
+    /// The typeface for the title, at the size the list gives it, or nil for
+    /// the list's.
+    var titleFont: UIFont?
 
     var accessory: RowAccessory = .none
 
@@ -334,6 +349,23 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
     /// preview of what the rows below change. None unless overridden.
     fileprivate func makePinnedHeader() -> UIView? { nil }
 
+    /// `view` as a pinned header, inset to line up with the list's rows.
+    fileprivate func insetPinnedHeader(_ view: UIView) -> UIView {
+        let container = UIView()
+        container.backgroundColor = .systemGroupedBackground
+        container.preservesSuperviewLayoutMargins = true
+
+        view.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
+            view.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -4),
+            view.leadingAnchor.constraint(equalTo: container.layoutMarginsGuide.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: container.layoutMarginsGuide.trailingAnchor),
+        ])
+        return container
+    }
+
     // MARK: Setup
 
     override func viewDidLoad() {
@@ -445,6 +477,7 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
 
                     let accessory = self.slider(for: id, slider)
                     accessory.configure(slider)
+
                     // Its width, kept: left to the standard width an accessory is given, it was
                     // centered in that and ran off the end of the row.
                     cell.accessories = [
@@ -466,9 +499,15 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
             var content = UIListContentConfiguration.valueCell()
             content.text = row.title
             content.secondaryText = row.detail
+
+            if let font = row.titleFont {
+                content.textProperties.font = font.withSize(content.textProperties.font.pointSize)
+            }
+
             let color: UIColor? = row.isDestructive ? .systemRed : nil
             content.image = row.symbol.flatMap { UIImage(systemName: $0) }
             content.imageProperties.tintColor = color ?? .tintColor
+
             if let picture = row.image {
                 // A symbol's room, kept clear for the picture.
                 content.image = UIImage(systemName: "square")
@@ -535,7 +574,7 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
             }
 
             switch row.accessory {
-            case .none: cell.accessories = []
+            case .none, .unchecked: cell.accessories = []
             case .checkmark: cell.accessories = [.checkmark()]
             case .disclosure: cell.accessories = [.disclosureIndicator()]
             case .selectedDisclosure:
@@ -692,6 +731,7 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
 
     fileprivate func reload() {
         builtWide = isWide
+        let previous = sections
         sections = buildSections()
 
         rowsById = [:]
@@ -711,12 +751,24 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
         // catches up: a checkmark that moved, a value chosen on the screen above. A row being typed
         // into is skipped, because reconfiguring rebuilds its accessories and that would take the
         // keyboard away mid-word.
+        //
+        // Headers and footers aren't reconfigured with the rows, so a section whose header or
+        // footer has changed is reloaded instead, rows and all.
+        let changed = sections.indices.filter { index in
+            guard let before = previous[safe: index] else { return false }
+            return before.header != sections[index].header
+                || before.footer != sections[index].footer
+        }
+        let reloaded = Set(changed.flatMap { snapshot.itemIdentifiers(inSection: $0) })
         let existing = Set(dataSource.snapshot().itemIdentifiers)
         let refresh = snapshot.itemIdentifiers.filter {
-            existing.contains($0) && fields[$0]?.isFirstResponder != true
+            existing.contains($0) && !reloaded.contains($0) && fields[$0]?.isFirstResponder != true
         }
         if !refresh.isEmpty {
             snapshot.reconfigureItems(refresh)
+        }
+        if !changed.isEmpty {
+            snapshot.reloadSections(changed)
         }
 
         dataSource.apply(snapshot, animatingDifferences: false)
@@ -1097,7 +1149,7 @@ private final class OptionListViewController<Value: Equatable>: SettingsListView
                     SettingsRow(
                         id: "option-\(index)",
                         title: option.title,
-                        accessory: option.value == current ? .checkmark : .none,
+                        accessory: .option(chosen: option.value == current),
                         select: { [weak self] in
                             self?.choose(option.value)
                             self?.popToPage()
@@ -2062,14 +2114,12 @@ private final class KeyboardSettingsViewController: SettingsListViewController {
 
 // MARK: - Appearance
 
-/// How the terminal looks: the accent, the font size, and the themes.
+/// How the terminal looks: the accent, the font, and the themes.
 private final class AppearanceSettingsViewController: SettingsListViewController,
     UIDocumentPickerDelegate
 {
 
     fileprivate override var isPage: Bool { true }
-
-    private static let fontSizes = [8, 10, 12, 14, 16, 18, 20, 22, 24, 28, 30]
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -2147,16 +2197,16 @@ private final class AppearanceSettingsViewController: SettingsListViewController
 
             SettingsSection(
                 header: "Terminal",
-                footer:
-                    "Font Size is the default for every terminal. A terminal's menu in the switcher allows overriding it. The terminal theme choice (dark or light) matches the OS.",
+                footer: "The terminal theme choice (dark or light) matches the OS.",
                 rows: [
                     SettingsRow(
-                        id: "font-size",
-                        title: "Font Size",
-                        detail: "\(AppSetting.fontSize.integer)",
-                        symbol: "textformat.size",
+                        id: "font",
+                        title: "Font",
+                        detail:
+                            "\(TerminalFont.missingName ?? TerminalFont.familyName), \(AppSetting.fontSize.integer)",
+                        symbol: "textformat",
                         accessory: .disclosure,
-                        select: { [weak self] in self?.pushFontSize() })
+                        select: { [weak self] in self?.push(FontSettingsViewController()) })
                 ] + themes),
 
             SettingsSection(
@@ -2184,16 +2234,6 @@ private final class AppearanceSettingsViewController: SettingsListViewController
                         select: { [weak self] in self?.importTheme() }),
                 ]),
         ]
-    }
-
-    private func pushFontSize() {
-        push(
-            OptionListViewController(
-                title: "Font Size",
-                footer: "Applies straight away.",
-                options: Self.fontSizes.map { SettingsOption(title: "\($0)", value: $0) },
-                selected: { AppSetting.fontSize.integer },
-                choose: { AppSetting.fontSize.set($0) }))
     }
 
     // MARK: Custom themes
@@ -2227,6 +2267,142 @@ private final class AppearanceSettingsViewController: SettingsListViewController
         if let theme = importTheme(from: file) {
             push(ThemeEditorViewController(theme: theme))
         }
+    }
+}
+
+/// The terminal font, its ligatures and the default size, with a preview above
+/// the list.
+private final class FontSettingsViewController: SettingsListViewController {
+
+    fileprivate override var isPage: Bool { true }
+
+    private static let fontSizes = [8, 10, 12, 14, 16, 18, 20, 22, 24, 28, 30]
+
+    private let preview = FontPreview()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        title = "Font"
+        navigationItem.largeTitleDisplayMode = .never
+    }
+
+    fileprivate override func makePinnedHeader() -> UIView? {
+        insetPinnedHeader(preview)
+    }
+
+    fileprivate override func buildSections() -> [SettingsSection] {
+        var font = [
+            SettingsRow(
+                id: "font",
+                title: "Font",
+                detail: TerminalFont.missingName ?? TerminalFont.familyName,
+                symbol: "textformat",
+                accessory: .disclosure,
+                select: { [weak self] in self?.push(FontListViewController()) })
+        ]
+        if TerminalFont.chosenName != nil {
+            font.append(
+                SettingsRow(
+                    id: "default-font",
+                    title: "Use Default Font",
+                    symbol: "arrow.uturn.backward",
+                    select: { [weak self] in
+                        TerminalFont.choose(nil)
+                        self?.reload()
+                    }))
+        }
+
+        var footer =
+            "Only monospaced fonts are listed. Any font will have nerd front icons provided, even if it does not provide its own. The default font is \(TerminalFont.defaultFamilyName)."
+        if let missing = TerminalFont.missingName {
+            footer +=
+                " \(missing) isn't installed, so terminals use \(TerminalFont.defaultFamilyName)."
+        }
+
+        var ligatures =
+            "Ligatures join character sequences into single symbols, where available."
+        if !TerminalFont.hasLigatures {
+            ligatures += " The font in use has none."
+        }
+
+        return [
+            SettingsSection(header: nil, footer: footer, rows: font),
+            SettingsSection(
+                header: nil,
+                footer: ligatures,
+                rows: [
+                    SettingsRow(
+                        id: "ligatures",
+                        title: "Ligatures",
+                        symbol: "textformat.abc",
+                        toggle: ToggleValue(
+                            isOn: AppSetting.terminalLigatures.bool,
+                            isEnabled: TerminalFont.hasLigatures,
+                            commit: { AppSetting.terminalLigatures.set($0) }))
+                ]),
+            SettingsSection(
+                header: nil,
+                footer:
+                    "Font Size is the default for every terminal. It can be changed per-terminal in the switcher menu.",
+                rows: [
+                    SettingsRow(
+                        id: "font-size",
+                        title: "Font Size",
+                        detail: "\(AppSetting.fontSize.integer)",
+                        symbol: "textformat.size",
+                        accessory: .disclosure,
+                        select: { [weak self] in self?.pushFontSize() })
+                ]),
+        ]
+    }
+
+    private func pushFontSize() {
+        push(
+            OptionListViewController(
+                title: "Font Size",
+                footer: "Applies straight away.",
+                options: Self.fontSizes.map { SettingsOption(title: "\($0)", value: $0) },
+                selected: { AppSetting.fontSize.integer },
+                choose: { AppSetting.fontSize.set($0) }))
+    }
+}
+
+/// The monospaced fonts on the device, each named in its typeface.
+private final class FontListViewController: SettingsListViewController {
+
+    /// Found once, when the list opens.
+    private let fonts = TerminalFont.monospaced
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        title = "Font"
+        navigationItem.largeTitleDisplayMode = .never
+    }
+
+    fileprivate override func buildSections() -> [SettingsSection] {
+        // The font in use, so the default is checked while the chosen font is missing.
+        let current = TerminalFont.familyName
+        let menlo = TerminalFont.defaultFamilyName
+
+        return [
+            SettingsSection(
+                header: nil,
+                footer: nil,
+                rows: fonts.map { font in
+                    SettingsRow(
+                        id: "font-\(font.familyName)",
+                        title: font.familyName,
+                        detail: font.familyName == menlo ? "Default" : nil,
+                        titleFont: font,
+                        accessory: .option(chosen: font.familyName == current),
+                        select: { [weak self] in
+                            TerminalFont.choose(font)
+                            self?.popToPage()
+                        })
+                })
+        ]
     }
 }
 
@@ -2292,7 +2468,7 @@ private final class ThemePickerViewController: SettingsListViewController {
         let accessory: RowAccessory =
             switch purpose {
             case .use(let appearance):
-                TerminalThemes.selected(for: appearance).id == theme.id ? .checkmark : .none
+                .option(chosen: TerminalThemes.selected(for: appearance).id == theme.id)
             case .base:
                 .disclosure
             }
@@ -2399,22 +2575,8 @@ private final class ThemeEditorViewController: SettingsListViewController {
             animated: navigation.topViewController === self)
     }
 
-    /// The preview, inset as the list's rows are.
     fileprivate override func makePinnedHeader() -> UIView? {
-        let container = UIView()
-        container.backgroundColor = .systemGroupedBackground
-        container.preservesSuperviewLayoutMargins = true
-
-        preview.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(preview)
-        NSLayoutConstraint.activate([
-            preview.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
-            preview.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -4),
-            preview.leadingAnchor.constraint(equalTo: container.layoutMarginsGuide.leadingAnchor),
-            preview.trailingAnchor.constraint(
-                equalTo: container.layoutMarginsGuide.trailingAnchor),
-        ])
-        return container
+        insetPinnedHeader(preview)
     }
 
     fileprivate override func buildSections() -> [SettingsSection] {
@@ -3641,7 +3803,7 @@ private final class VcpuCountViewController: SettingsListViewController {
                     SettingsRow(
                         id: "vcpus-\(count)",
                         title: count == 1 ? "1 vCPU" : "\(count) vCPUs",
-                        accessory: count == Vcpus.foreground ? .checkmark : .none,
+                        accessory: .option(chosen: count == Vcpus.foreground),
                         select: { [weak self] in
                             Vcpus.foreground = count
                             self?.popToPage()
@@ -3695,7 +3857,7 @@ private final class VmMemoryViewController: SettingsListViewController {
                     SettingsRow(
                         id: "size-\(size)",
                         title: Mebibytes.describe(size),
-                        accessory: size == VmMemory.selected ? .checkmark : .none,
+                        accessory: .option(chosen: size == VmMemory.selected),
                         select: { [weak self] in
                             VmMemory.selected = size
                             self?.popToPage()
@@ -3754,7 +3916,7 @@ private final class VmMemoryOverflowViewController: SettingsListViewController {
                     SettingsRow(
                         id: "size-\(size)",
                         title: Mebibytes.describe(size),
-                        accessory: size == VmMemory.selected ? .checkmark : .none,
+                        accessory: .option(chosen: size == VmMemory.selected),
                         select: { [weak self] in
                             VmMemory.selected = size
                             self?.popToPage()
@@ -3886,7 +4048,7 @@ private final class CodeCacheSizeViewController: SettingsListViewController {
                 id: "auto",
                 title: "Auto",
                 detail: Mebibytes.describe(CodeCache.autoSize),
-                accessory: isCurrent && chosen == nil ? .checkmark : .none,
+                accessory: .option(chosen: isCurrent && chosen == nil),
                 select: { [weak self] in self?.choose(nil) })
         ]
 
@@ -3894,7 +4056,7 @@ private final class CodeCacheSizeViewController: SettingsListViewController {
             SettingsRow(
                 id: "size-\(size)",
                 title: Mebibytes.describe(size),
-                accessory: isCurrent && chosen == size ? .checkmark : .none,
+                accessory: .option(chosen: isCurrent && chosen == size),
                 select: { [weak self] in self?.choose(size) })
         }
 

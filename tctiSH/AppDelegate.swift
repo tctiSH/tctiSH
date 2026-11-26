@@ -118,6 +118,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             "boot_snapshot": "",
             "disk_name": "disk",
             "font_size": 14,
+            "terminal_ligatures": true,
             "dark_terminal_theme": TerminalThemes.Appearance.dark.defaultID,
             "light_terminal_theme": TerminalThemes.Appearance.light.defaultID,
             "attempting_boot": false,

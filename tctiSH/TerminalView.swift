@@ -158,9 +158,10 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     }
 
     public override init(frame: CGRect) {
-        super.init(frame: frame, font: UIFont(name: "Menlo-Regular", size: 14))
+        super.init(frame: frame, font: UIFont(name: TerminalFont.defaultName, size: 14))
         isMade = true
         self.terminalDelegate = self
+        glyphFallbackProvider = NerdFontFallback.shared
 
         // Handle settings changes.
         NotificationCenter.default.addObserver(
@@ -624,13 +625,17 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
             return
         }
 
-        // Font size: this TTY's override, or else the default from Settings.
+        // The font and ligatures from Settings, at this TTY's size override or else the default
+        // size.
         var new_size = CGFloat(fontSizeOverride ?? AppSetting.fontSize.integer)
         if new_size == 0 {
             new_size = self.font.pointSize
         }
-        if new_size != self.font.pointSize {
-            self.font = UIFont(name: self.font.fontName, size: new_size) ?? self.font
+        let faces = TerminalFont.faces(size: new_size)
+        if !TerminalFont.isSame(faces.regular, self.font) {
+            setFonts(
+                normal: faces.regular, bold: faces.bold, italic: faces.italic,
+                boldItalic: faces.boldItalic)
         }
         measureRow()
 
@@ -918,19 +923,10 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         guard theme.colors != appliedColors else { return }
         appliedColors = theme.colors
 
-        installColors(theme.ansi.map(\.terminalColor))
-
-        // These set the terminal's default colors too.
+        useColors(of: theme)
         let background = theme.background.uiColor
-        nativeForegroundColor = theme.foreground.uiColor
-        nativeBackgroundColor = background
-        layer.backgroundColor = background.cgColor
-        layer.borderColor = layer.backgroundColor
-        layer.shadowColor = layer.backgroundColor
-        // Not the view's `backgroundColor`. SwiftTerm draws in `draw(_:)`, and for a view that
-        // does, UIKit paints the background color into the drawing instead of the layer, and marks
-        // the layer opaque. SwiftTerm leaves cells in the default background clear for the layer's
-        // color to show through, and on an opaque layer they come out black.
+        layer.borderColor = background.cgColor
+        layer.shadowColor = background.cgColor
 
         // At once, as the background changes, rather than as Core Animation would fade them.
         let clear = background.withAlphaComponent(0)

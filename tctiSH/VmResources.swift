@@ -615,6 +615,8 @@ enum AppSetting: String {
     case flushJitBuffers = "flush_jit_buffers"
     case rcg = "rcg"
     case fontSize = "font_size"
+    case terminalFont = "terminal_font"
+    case terminalLigatures = "terminal_ligatures"
     case codeCacheNotifications = "code_cache_notifications"
     case parkInBackground = "park_in_background"
     case releaseCodeCacheInBackground = "release_code_cache_in_background"
