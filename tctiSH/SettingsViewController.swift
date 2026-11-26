@@ -71,8 +71,8 @@ private struct SettingsRow {
     /// A picture in place of the symbol, drawn untinted.
     var image: UIImage?
 
-    /// The typeface for the title, at the size the list gives it, or nil for
-    /// the list's.
+    /// The typeface for the title, at the list's text size and following the
+    /// system text size, or nil for the list's.
     var titleFont: UIFont?
 
     var accessory: RowAccessory = .none
@@ -501,7 +501,12 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
             content.secondaryText = row.detail
 
             if let font = row.titleFont {
-                content.textProperties.font = font.withSize(content.textProperties.font.pointSize)
+                // Sized from body text at the default system text size, 17 points, then scaled. The
+                // list's font is already scaled for the current size, and scaling that again would
+                // count it twice.
+                content.textProperties.font = UIFontMetrics(forTextStyle: .body).scaledFont(
+                    for: font.withSize(17))
+                content.textProperties.adjustsFontForContentSizeCategory = true
             }
 
             let color: UIColor? = row.isDestructive ? .systemRed : nil
@@ -798,6 +803,33 @@ class SettingsListViewController: UIViewController, UICollectionViewDelegate {
             NotificationCenter.default.addObserver(
                 forName: TerminalThemes.didChange, object: nil, queue: .main
             ) { [weak self] _ in
+                guard let self, viewIfLoaded?.window != nil else { return }
+                reload()
+            })
+    }
+
+    /// Reloads the list when the terminal font, its default size or its
+    /// ligatures change, as in another window. Only while on screen, since it
+    /// reloads anyway when it reappears. Other settings are ignored: they
+    /// change often.
+    fileprivate func reloadOnFontChanges() {
+        /// The terminal font settings at one moment, compared with a later
+        /// reading to tell when they change.
+        struct FontSettings: Equatable {
+            let name = AppSetting.terminalFont.string
+            let defaultSize = AppSetting.fontSize.integer
+            let ligatures = AppSetting.terminalLigatures.bool
+        }
+
+        var shown = FontSettings()
+        observers.append(
+            NotificationCenter.default.addObserver(
+                forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                let now = FontSettings()
+                guard now != shown else { return }
+                // Kept current while hidden too, since reappearing reloads anyway.
+                shown = now
                 guard let self, viewIfLoaded?.window != nil else { return }
                 reload()
             })
@@ -2128,6 +2160,7 @@ private final class AppearanceSettingsViewController: SettingsListViewController
         navigationItem.largeTitleDisplayMode = .never
 
         reloadOnThemeChanges()
+        reloadOnFontChanges()
     }
 
     fileprivate override func buildSections() -> [SettingsSection] {
@@ -2285,6 +2318,8 @@ private final class FontSettingsViewController: SettingsListViewController {
 
         title = "Font"
         navigationItem.largeTitleDisplayMode = .never
+
+        reloadOnFontChanges()
     }
 
     fileprivate override func makePinnedHeader() -> UIView? {
@@ -2307,10 +2342,7 @@ private final class FontSettingsViewController: SettingsListViewController {
                     id: "default-font",
                     title: "Use Default Font",
                     symbol: "arrow.uturn.backward",
-                    select: { [weak self] in
-                        TerminalFont.choose(nil)
-                        self?.reload()
-                    }))
+                    select: { TerminalFont.choose(nil) }))
         }
 
         var footer =
@@ -2358,13 +2390,14 @@ private final class FontSettingsViewController: SettingsListViewController {
     }
 
     private func pushFontSize() {
-        push(
-            OptionListViewController(
-                title: "Font Size",
-                footer: "Applies straight away.",
-                options: Self.fontSizes.map { SettingsOption(title: "\($0)", value: $0) },
-                selected: { AppSetting.fontSize.integer },
-                choose: { AppSetting.fontSize.set($0) }))
+        let sizes = OptionListViewController(
+            title: "Font Size",
+            footer: "Applies straight away.",
+            options: Self.fontSizes.map { SettingsOption(title: "\($0)", value: $0) },
+            selected: { AppSetting.fontSize.integer },
+            choose: { AppSetting.fontSize.set($0) })
+        sizes.reloadOnFontChanges()
+        push(sizes)
     }
 }
 
@@ -2379,6 +2412,8 @@ private final class FontListViewController: SettingsListViewController {
 
         title = "Font"
         navigationItem.largeTitleDisplayMode = .never
+
+        reloadOnFontChanges()
     }
 
     fileprivate override func buildSections() -> [SettingsSection] {
