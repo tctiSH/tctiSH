@@ -163,8 +163,7 @@ final class TTYWindow {
         didSet {
             guard terminalFrame != oldValue else { return }
             for tty in ordered {
-                fit(tty.view, to: terminalFrame)
-                tty.outputCount &+= 1
+                fit(tty, to: terminalFrame)
             }
         }
     }
@@ -253,12 +252,27 @@ private func fit(_ view: TctiTermView?, to frame: CGRect) {
     // A window's frame is empty until its view controller sets it, and a terminal made that small
     // would rewrap its scrollback to fit.
     guard let view, !frame.isEmpty else { return }
-    // Set by bounds and center rather than frame, because a terminal sliding in or out during a
-    // switch has a translation transform, and a view's frame is undefined under a transform.
-    view.bounds.size = frame.size
-    view.center = CGPoint(x: frame.midX, y: frame.midY)
+    // Not by `frame`: a terminal sliding in or out during a switch has a translation transform.
+    view.place(in: frame)
     if view.window == nil {
         view.layoutIfNeeded()
+    }
+}
+
+/// Fits a TTY's terminal to `frame`, and counts the change toward its
+/// `outputCount`, so that its card redraws the thumbnail.
+private func fit(_ tty: TTY, to frame: CGRect) {
+    fit(tty.view, to: frame)
+    tty.outputCount &+= 1
+}
+
+extension UIView {
+    /// Gives the view `frame`'s size and center, through `bounds` and `center`,
+    /// which stay right under a transform. Setting `frame` while a view has a
+    /// transform is undefined.
+    func place(in frame: CGRect) {
+        bounds.size = frame.size
+        center = CGPoint(x: frame.midX, y: frame.midY)
     }
 }
 
@@ -654,8 +668,7 @@ final class TTYs {
             section.insert(tty, at: min(max(index ?? section.count, 0), section.count))
             window.users = tty.isPinned ? section + window.cards : window.pinned + section
         }
-        fit(tty.view, to: window.terminalFrame)
-        tty.outputCount &+= 1
+        fit(tty, to: window.terminalFrame)
     }
 
     // MARK: Terminals
@@ -665,17 +678,19 @@ final class TTYs {
     /// gone. Kernel Log and VM Management keep theirs, as the record of what
     /// led up to the boot.
     ///
-    /// What the old session wrote and the app hasn't read yet is thrown away
-    /// first, so none of it lands in an emptied terminal. Unseen-output and
-    /// bell statuses are cleared, and the switcher redraws the thumbnails.
+    /// Unseen-output and bell statuses are cleared, and the switcher redraws
+    /// the thumbnails.
     func resetUserTerminals() {
         for tty in users {
-            if let number = tty.number {
-                ConsoleTransport.consoles[number].discardPending()
-            }
             tty.view?.resetForNewSession()
             tty.outputCount &+= 1
-            clearStatus(of: tty)
+        }
+        // Queued behind any bell or output notice the old sessions already posted to the main
+        // queue, so that none of them sets a status again afterward.
+        DispatchQueue.main.async { [self] in
+            for tty in users {
+                clearStatus(of: tty)
+            }
         }
     }
 
@@ -985,8 +1000,7 @@ final class TTYs {
             window.system = system.filter { kept in
                 kept === tty || window.system.contains { $0 === kept }
             }
-            fit(tty.view, to: window.terminalFrame)
-            tty.outputCount &+= 1
+            fit(tty, to: window.terminalFrame)
         } else if !shown, let window = self.window(of: tty) {
             window.system.removeAll { $0 === tty }
             if window.ordered.isEmpty, windows.count > 1 {

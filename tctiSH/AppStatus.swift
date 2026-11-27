@@ -1323,17 +1323,21 @@ final class AppStatus: NSObject {
         guard let tv = TTYs.shared.hvc0?.view ?? ViewController.active?.terminal else { return }
         let width = max(20, tv.terminalDimensions.cols)
 
+        // Fed in one call, so that guest output parsed on the read queue can't land between the
+        // lines.
+        var text = ""
         for paragraph in paragraphs {
             var line = ""
             for word in paragraph.split(separator: " ") {
                 if !line.isEmpty, line.count + 1 + word.count > width {
-                    tv.feed(text: line + "\r\n")
+                    text += line + "\r\n"
                     line = ""
                 }
                 line += line.isEmpty ? String(word) : " " + word
             }
-            tv.feed(text: line + "\r\n\r\n")
+            text += line + "\r\n\r\n"
         }
+        tv.feed(text: text)
     }
 
     // MARK: - VM Management

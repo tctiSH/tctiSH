@@ -35,12 +35,7 @@ enum TerminalThumbnail {
         let factor = width / bounds.width
         let size = CGSize(width: width, height: (bounds.height * factor).rounded())
 
-        // SwiftTerm doesn't make its cell size public, but the frame that fits the terminal exactly
-        // is that size times the columns and rows.
-        let grid = terminal.getOptimalFrameSize().size
-        let cell = CGSize(
-            width: grid.width / CGFloat(screen.dimensions.cols),
-            height: grid.height / CGFloat(screen.dimensions.rows))
+        let cell = terminal.cellSize
         let colors = Colors(screen: screen, terminal: terminal)
         let icons = Icons(terminal: terminal, cell: cell)
         let regular = Font(terminal.font, cellWidth: cell.width)

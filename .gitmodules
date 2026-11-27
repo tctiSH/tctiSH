@@ -1,6 +1,10 @@
 [submodule "third-party/StikJIT"]
 	path = third-party/StikJIT
 	url = https://github.com/StikDebug/StikJIT.git
+[submodule "third-party/SwiftTerm"]
+	path = third-party/SwiftTerm
+	url = https://github.com/tctiSH/SwiftTerm.git
+	branch = tctish-edition
 [submodule "third-party/qemu"]
 	path = third-party/qemu
 	url = https://github.com/tctiSH/qemu.git

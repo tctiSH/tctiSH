@@ -125,7 +125,7 @@ final class FontPreview: UIView {
                 rows + max(1, (line.columns + size.cols - 1) / size.cols)
             }
         }
-        let rowHeight = terminal.getOptimalFrameSize().height / CGFloat(size.rows)
+        let rowHeight = terminal.cellSize.height
         let fits = windowHeight == 0 ? Int.max : Int(windowHeight / 3 / rowHeight)
 
         // The terminal is made exactly as tall as what's written: with more lines than rows, it

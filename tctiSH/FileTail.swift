@@ -7,8 +7,8 @@
 
 import Foundation
 
-/// Follows a file that something else appends to, as `tail -f` does, and
-/// delivers what is added on the main queue.
+/// Follows a file that something else appends to, as `tail -f` does, and feeds
+/// what is added to a terminal's output.
 ///
 /// Made for QEMU's copy of what a character device sent (its `logfile`), which
 /// QEMU keeps whether or not the app is connected. Reading the device's output
@@ -22,11 +22,12 @@ import Foundation
 /// read and the cut is lost, which takes a write landing in the same moment,
 /// once every few megabytes.
 ///
-/// Use it from the main thread.
+/// It reads on the output's queue; see `TerminalOutput`. Start it from any
+/// thread.
 final class FileTail {
 
     /// How often to look for the file, until it exists.
-    private static let retryInterval: TimeInterval = 0.1
+    private static let retryInterval: DispatchTimeInterval = .milliseconds(100)
 
     /// How much to read at a time.
     private static let readSize = 64 * 1024
@@ -39,41 +40,50 @@ final class FileTail {
     /// The name it goes by in the log.
     let name: String
 
-    /// Called with each run of bytes added to the file.
-    var onReceive: ((ArraySlice<UInt8>) -> Void)?
+    /// Where what is added goes.
+    private let output: TerminalOutput
+
+    /// The output's queue. The file is read there, and the properties below are
+    /// only used there.
+    private let queue: DispatchQueue
 
     private var descriptor: Int32 = -1
     private var source: DispatchSourceFileSystemObject?
-    private var retryTimer: Timer?
+    private var retryTimer: DispatchSourceTimer?
 
     /// Set once a trim has failed, so it isn't tried, and logged, on every
     /// read.
     private var trimFailed = false
 
-    init(path: String, name: String) {
+    init(path: String, name: String, output: TerminalOutput) {
         self.path = path
         self.name = name
+        self.output = output
+        queue = output.queue
     }
 
     /// Starts following the file, from its start, once it exists. Does nothing
     /// if already following or waiting.
     func start() {
+        queue.async { [self] in startFollowing() }
+    }
+
+    private func startFollowing() {
         guard descriptor < 0, retryTimer == nil else { return }
 
         if open() {
             return
         }
-        let timer = Timer(timeInterval: Self.retryInterval, repeats: true) { [weak self] timer in
-            guard let self else {
-                timer.invalidate()
-                return
-            }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + Self.retryInterval, repeating: Self.retryInterval)
+        timer.setEventHandler { [weak self, weak timer] in
+            guard let self, let timer else { return }
             if open() {
-                timer.invalidate()
+                timer.cancel()
                 retryTimer = nil
             }
         }
-        RunLoop.main.add(timer, forMode: .common)
+        timer.resume()
         retryTimer = timer
     }
 
@@ -85,7 +95,7 @@ final class FileTail {
         descriptor = fd
 
         let source = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: fd, eventMask: [.extend, .write, .delete, .rename], queue: .main)
+            fileDescriptor: fd, eventMask: [.extend, .write, .delete, .rename], queue: queue)
         source.setEventHandler { [weak self, weak source] in
             guard let self, let source else { return }
             if source.data.contains(.delete) || source.data.contains(.rename) {
@@ -93,7 +103,7 @@ final class FileTail {
                 readAvailable()
                 Log.fs.note("\(name): \(path) was replaced; following the new one")
                 stop()
-                start()
+                startFollowing()
                 return
             }
             readAvailable()
@@ -122,7 +132,7 @@ final class FileTail {
                 read(descriptor, $0.baseAddress, $0.count)
             }
             guard count > 0 else { break }
-            onReceive?(buffer[..<count])
+            output.deliver(buffer[..<count])
         }
 
         // Everything written so far has been read. Cut it, if there is enough to be worth it.

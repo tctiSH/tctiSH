@@ -753,12 +753,8 @@ extension ViewController {
 
         let sliding = incoming.superview === view
 
-        // Set by bounds and center rather than frame: the incoming terminal may still carry the
-        // translation of an earlier slide, and setting the frame of a transformed view would fold
-        // the translation in.
-        let frame = ttyWindow.terminalFrame
-        incoming.bounds.size = frame.size
-        incoming.center = CGPoint(x: frame.midX, y: frame.midY)
+        // The incoming terminal may still carry the translation of an earlier slide.
+        incoming.place(in: ttyWindow.terminalFrame)
         if let outgoing, outgoing.superview === view {
             view.insertSubview(incoming, aboveSubview: outgoing)
         } else {
@@ -774,6 +770,8 @@ extension ViewController {
 
         guard let outgoing else { return }
         outgoing.inputAccessoryView = nil
+        // Its edit menu would otherwise stay where it is as the terminal slides away.
+        outgoing.dismissEditMenu()
 
         // After a step, the terminals slide across as pages do, the next coming in from the right.
         // Otherwise, or with Reduce Motion on, the outgoing terminal is swapped out at once.
@@ -989,15 +987,9 @@ extension ViewController {
     /// one terminal to another takes the key bar off screen and puts it back
     /// within one turn, which would otherwise flash the floating button.
     private func scheduleFloatingSwitcherUpdate() {
-        // Set by bounds and center rather than frame: while hidden it keeps a 0.6 scale transform,
-        // and setting a frame on a transformed view resizes it to compensate.
-        let frame = floatingSwitcherFrame()
-        floatingSwitcher.bounds.size = frame.size
-        floatingSwitcher.center = CGPoint(x: frame.midX, y: frame.midY)
-
-        let follow = followButtonFrame()
-        followButton.bounds.size = follow.size
-        followButton.center = CGPoint(x: follow.midX, y: follow.midY)
+        // While hidden, they keep a 0.6 scale transform.
+        floatingSwitcher.place(in: floatingSwitcherFrame())
+        followButton.place(in: followButtonFrame())
 
         guard !floatingSwitcherPending else { return }
         floatingSwitcherPending = true

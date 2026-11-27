@@ -127,7 +127,6 @@
 		8D4939E328C33B0300F57421 /* empty.qcow */ = {isa = PBXFileReference; lastKnownFileType = file; name = empty.qcow; path = assets/empty.qcow; sourceTree = "<group>"; };
 		8DE8208F28C180770035686B /* initrd.img */ = {isa = PBXFileReference; lastKnownFileType = file; name = initrd.img; path = assets/initrd.img; sourceTree = "<group>"; };
 		8DE8209128C1808F0035686B /* bzImage */ = {isa = PBXFileReference; lastKnownFileType = file; name = bzImage; path = assets/bzImage; sourceTree = "<group>"; };
-		8DEC8CE828C139B60017AC30 /* third-party */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "third-party"; sourceTree = "<group>"; };
 		8DF5F02828C1BCC800FB1F1C /* qemu-x86_64-softmmu.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "qemu-x86_64-softmmu.framework"; path = "sysroot-iOS-arm64/Frameworks/qemu-x86_64-softmmu.framework"; sourceTree = "<group>"; };
 		8DF5F02D28C1BCEA00FB1F1C /* gmodule-2.0.0.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "gmodule-2.0.0.framework"; path = "sysroot-iOS-arm64/Frameworks/gmodule-2.0.0.framework"; sourceTree = "<group>"; };
 		8DF5F02E28C1BCEA00FB1F1C /* glib-2.0.0.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = "glib-2.0.0.framework"; path = "sysroot-iOS-arm64/Frameworks/glib-2.0.0.framework"; sourceTree = "<group>"; };
@@ -266,7 +265,6 @@
 				8DF5F04B28C1C07D00FB1F1C /* bios-256k.bin */,
 				8DE8209128C1808F0035686B /* bzImage */,
 				8DE8208F28C180770035686B /* initrd.img */,
-				8DEC8CE728C139B50017AC30 /* Packages */,
 				49BD1A5C224207B5005A2252 /* tctiSH */,
 				DCF690C4305583AC0091B7D0 /* JITHelper */,
 				AD7C1A2000000020005A2252 /* JITHelperProtocol */,
@@ -289,14 +287,6 @@
 				7E7A000300000000C0DE0003 /* ThemeThumbnail.appex */,
 			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		8DEC8CE728C139B50017AC30 /* Packages */ = {
-			isa = PBXGroup;
-			children = (
-				8DEC8CE828C139B60017AC30 /* third-party */,
-			);
-			name = Packages;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -434,7 +424,7 @@
 			mainGroup = 49BD1A51224207B4005A2252;
 			packageReferences = (
 				8D2AC18C28C7EF2D005DB7D4 /* XCRemoteSwiftPackageReference "swift-atomics" */,
-				16263731CAA602FE586240C9 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+				16263731CAA602FE586240C9 /* XCLocalSwiftPackageReference "third-party/SwiftTerm" */,
 			);
 			productRefGroup = 49BD1A5B224207B5005A2252 /* Products */;
 			projectDirPath = "";
@@ -987,15 +977,14 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		16263731CAA602FE586240C9 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm";
-			requirement = {
-				kind = exactVersion;
-				version = 1.99.4;
-			};
+/* Begin XCLocalSwiftPackageReference section */
+		16263731CAA602FE586240C9 /* XCLocalSwiftPackageReference "third-party/SwiftTerm" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "third-party/SwiftTerm";
 		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
 		8D2AC18C28C7EF2D005DB7D4 /* XCRemoteSwiftPackageReference "swift-atomics" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/apple/swift-atomics.git";
@@ -1009,7 +998,7 @@
 /* Begin XCSwiftPackageProductDependency section */
 		4959FFDA2447F971001F42C0 /* SwiftTerm */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 16263731CAA602FE586240C9 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			package = 16263731CAA602FE586240C9 /* XCLocalSwiftPackageReference "third-party/SwiftTerm" */;
 			productName = SwiftTerm;
 		};
 		8D2AC18D28C7EF2D005DB7D4 /* Atomics */ = {

@@ -26,6 +26,11 @@ protocol TerminalTransport: AnyObject {
 
     /// Tells the far end the terminal's size, in columns and rows.
     func resize(cols: Int, rows: Int)
+
+    /// Throws away output that has arrived but not been parsed, then calls
+    /// `then`, with nothing parsed in between. For a terminal emptied for a new
+    /// session.
+    func discardPending(then: () -> Void)
 }
 
 // MARK: - Console
@@ -45,10 +50,12 @@ final class ConsoleTransport: TerminalTransport {
     /// The console's name in Linux, and its device's ID in QEMU.
     let device: String
 
-    weak var terminal: TctiTermView? {
-        didSet {
-            guard terminal !== oldValue else { return }
-            guard terminal != nil else {
+    var terminal: TctiTermView? {
+        get { output.terminal }
+        set {
+            guard newValue !== output.terminal else { return }
+            output.terminal = newValue
+            guard newValue != nil else {
                 socket.stop()
                 return
             }
@@ -65,12 +72,18 @@ final class ConsoleTransport: TerminalTransport {
         }
     }
 
+    /// Parses what arrives into `terminal`, which it holds weakly.
+    private let output: TerminalOutput
+
     private let socket: ChardevSocket
 
     private init(device: String) {
         self.device = device
-        socket = ChardevSocket(path: QEMUInterface.consoleSocketPath(device), name: device)
-        socket.onReceive = { [unowned self] bytes in terminal?.receive(bytes) }
+        let output = TerminalOutput(name: device)
+        self.output = output
+        socket = ChardevSocket(
+            path: QEMUInterface.consoleSocketPath(device), name: device,
+            delivery: .terminal(output))
 
         NotificationCenter.default.addObserver(
             forName: AppDelegate.qemuDidStart, object: nil, queue: .main
@@ -94,10 +107,10 @@ final class ConsoleTransport: TerminalTransport {
         socket.send(data)
     }
 
-    /// Throws away what the guest has written to the console and the app hasn't
-    /// read yet: for a recovery boot, after which it belongs to no session.
-    func discardPending() {
-        socket.discardPending()
+    /// For a recovery boot, after which what the guest wrote to the console
+    /// belongs to no session.
+    func discardPending(then: () -> Void) {
+        socket.discardPending(then: then)
     }
 
     func resize(cols: Int, rows: Int) {
@@ -169,13 +182,21 @@ final class ChardevTransport: TerminalTransport {
     /// Called with the terminal's size whenever it changes.
     var onResize: ((Int, Int) -> Void)?
 
-    weak var terminal: TctiTermView? {
-        didSet {
-            guard let terminal, !notes.isEmpty else { return }
-            notes.forEach(terminal.feed(text:))
-            notes.removeAll()
+    var terminal: TctiTermView? {
+        get { output.terminal }
+        set {
+            // The notes go in before the terminal takes output from the read queue, so that none
+            // lands before or among them.
+            if let newValue, !notes.isEmpty {
+                newValue.feed(text: notes.joined())
+                notes.removeAll()
+            }
+            output.terminal = newValue
         }
     }
+
+    /// Parses what arrives into `terminal`, which it holds weakly.
+    private let output: TerminalOutput
 
     private let socket: ChardevSocket
     private let tail: FileTail?
@@ -187,20 +208,19 @@ final class ChardevTransport: TerminalTransport {
     private init(name: String, logged: Bool) {
         socketPath = QEMUInterface.socketPath(name)
         logPath = logged ? QEMUInterface.logPath(name) : nil
-        socket = ChardevSocket(path: socketPath, name: name, discardingOutput: logged)
-        tail = logPath.map { FileTail(path: $0, name: name) }
+        let output = TerminalOutput(name: name)
+        self.output = output
+        socket = ChardevSocket(
+            path: socketPath, name: name, delivery: logged ? .discarded : .terminal(output))
+        tail = logPath.map { FileTail(path: $0, name: name, output: output) }
 
-        tail?.onReceive = { [unowned self] bytes in terminal?.receive(bytes) }
         if !logged {
             let gate = MonitorGate(screen: { [unowned self] region in
                 terminal?.terminalContentSnapshot(region: region)
             }) {
                 [unowned self] bytes in socket.send(bytes)
             }
-            socket.onReceive = { [unowned self, unowned gate] bytes in
-                terminal?.receive(bytes)
-                gate.received()
-            }
+            output.onReceived = { [unowned gate] in gate.received() }
             socket.onConnect = { [unowned gate] in gate.connected() }
             self.gate = gate
         }
@@ -238,5 +258,10 @@ final class ChardevTransport: TerminalTransport {
 
     func resize(cols: Int, rows: Int) {
         onResize?(cols, rows)
+    }
+
+    /// Only consoles start new sessions, so there is nothing to throw away.
+    func discardPending(then: () -> Void) {
+        then()
     }
 }

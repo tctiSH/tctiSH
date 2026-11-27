@@ -7,10 +7,9 @@
 
 import Foundation
 import UIKit
-import AVKit
 import SwiftTerm
 
-/// Termainal view that behaves like an Xterm into our linux environment.
+/// Terminal view that behaves like an Xterm into our linux environment.
 public class TctiTermView: TerminalView, TerminalViewDelegate {
 
     // MARK: Holding the keyboard
@@ -29,7 +28,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     static let modifiersDidChange = Notification.Name("io.ara.tctish.terminalModifiersDidChange")
 
     /// Shift from the key bar, for the next keystroke.
-    var shiftModifier = false {
+    private var shiftModifier = false {
         didSet {
             guard shiftModifier != oldValue else { return }
             NotificationCenter.default.post(name: TctiTermView.modifiersDidChange, object: self)
@@ -38,31 +37,45 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
 
     /// Meta, or Windows, from the key bar, for the next keystroke: the key
     /// Kitty and xterm call super.
-    var superModifier = false {
+    private var superModifier = false {
         didSet {
             guard superModifier != oldValue else { return }
             NotificationCenter.default.post(name: TctiTermView.modifiersDidChange, object: self)
         }
     }
 
+    /// All four key bar modifiers, for the next keystroke. Shift and Meta are
+    /// kept here; Ctrl and Alt are SwiftTerm's `controlModifier` and
+    /// `metaModifier`.
+    var barModifiers: KeyModifiers {
+        get {
+            var modifiers: KeyModifiers = []
+            if shiftModifier { modifiers.insert(.shift) }
+            if metaModifier { modifiers.insert(.alt) }
+            if controlModifier { modifiers.insert(.ctrl) }
+            if superModifier { modifiers.insert(.superKey) }
+            return modifiers
+        }
+        set {
+            shiftModifier = newValue.contains(.shift)
+            metaModifier = newValue.contains(.alt)
+            controlModifier = newValue.contains(.ctrl)
+            superModifier = newValue.contains(.superKey)
+        }
+    }
+
     /// Every modifier the next keystroke will have.
     var pendingModifiers: KeyModifiers {
-        var modifiers: KeyModifiers = []
-        if shiftModifier || (SoftKeyboard.isShifted && !SoftKeyboard.isShiftLocked) {
+        var modifiers = barModifiers
+        if SoftKeyboard.isShifted && !SoftKeyboard.isShiftLocked {
             modifiers.insert(.shift)
         }
-        if metaModifier { modifiers.insert(.alt) }
-        if controlModifier { modifiers.insert(.ctrl) }
-        if superModifier { modifiers.insert(.superKey) }
         return modifiers
     }
 
     /// Lets go of every modifier, once a keystroke has used them.
     func clearModifiers() {
-        controlModifier = false
-        metaModifier = false
-        shiftModifier = false
-        superModifier = false
+        barModifiers = []
         SoftKeyboard.releaseShift()
     }
 
@@ -86,16 +99,12 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     /// Applies the key bar's Shift and Meta, and Ctrl and Alt together, to a
     /// typed character.
     public override func insertText(_ text: String) {
-        var modifiers: KeyModifiers = []
-        if shiftModifier { modifiers.insert(.shift) }
-        if metaModifier { modifiers.insert(.alt) }
-        if controlModifier { modifiers.insert(.ctrl) }
-        if superModifier { modifiers.insert(.superKey) }
-
-        let ours = shiftModifier || superModifier || (controlModifier && metaModifier)
+        let modifiers = barModifiers
+        let ours =
+            !modifiers.isDisjoint(with: [.shift, .superKey])
+            || modifiers.isSuperset(of: [.ctrl, .alt])
         guard ours, markedTextRange == nil, text.count == 1, let character = text.first else {
-            shiftModifier = false
-            superModifier = false
+            barModifiers.subtract([.shift, .superKey])
             super.insertText(text)
             return
         }
@@ -106,8 +115,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
 
     /// Applies the key bar's modifiers to a hardware keyboard's key.
     public override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        guard controlModifier || metaModifier || shiftModifier || superModifier,
-            presses.count == 1, let key = presses.first?.key,
+        guard !barModifiers.isEmpty, presses.count == 1, let key = presses.first?.key,
             !key.modifierFlags.contains(.command), let bytes = barSequence(for: key)
         else {
             super.pressesBegan(presses, with: event)
@@ -121,11 +129,11 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     /// What a hardware key sends with the bar's modifiers, or nil if it's one
     /// to leave to SwiftTerm: Return, Backspace and the like.
     private func barSequence(for key: UIKey) -> [UInt8]? {
-        var modifiers: KeyModifiers = []
-        if shiftModifier || key.modifierFlags.contains(.shift) { modifiers.insert(.shift) }
-        if metaModifier || key.modifierFlags.contains(.alternate) { modifiers.insert(.alt) }
-        if controlModifier || key.modifierFlags.contains(.control) { modifiers.insert(.ctrl) }
-        if superModifier || key.modifierFlags.contains(.command) { modifiers.insert(.superKey) }
+        var modifiers = barModifiers
+        if key.modifierFlags.contains(.shift) { modifiers.insert(.shift) }
+        if key.modifierFlags.contains(.alternate) { modifiers.insert(.alt) }
+        if key.modifierFlags.contains(.control) { modifiers.insert(.ctrl) }
+        if key.modifierFlags.contains(.command) { modifiers.insert(.superKey) }
 
         if let barKey = BarKey(hardware: key.keyCode) {
             return barKey.sequence(with: modifiers, mode: keyEncodingMode)
@@ -147,15 +155,8 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
             character, modifiers, mode: keyEncodingMode, key: base.count == 1 ? base.first : nil)
     }
 
-    var pipController: AVPictureInPictureController?
-
     /// The current working directory, if one is known/available.
-    private var _cwd: String?
-    public var cwd: String? {
-        get {
-            return _cwd
-        }
-    }
+    private(set) var cwd: String?
 
     public override init(frame: CGRect) {
         super.init(frame: frame, font: UIFont(name: TerminalFont.defaultName, size: 14))
@@ -172,15 +173,13 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         // Make sure the terminal looks the way it should before anything's displayed.
         applyTheme()
 
-        // SwiftTerm draws its selection handles in a fixed blue rather than the tint, so they're
-        // given the accent.
+        // SwiftTerm draws its selection handles in a fixed blue, not the tint, so they're given the
+        // accent.
         selectionHandleColor = Accent.color
 
-        setUpPointer()
-
-        // Observe by selector rather than with a block: NotificationCenter removes a selector
-        // observer when the observer is freed, but keeps a block observer until it is removed
-        // explicitly, and a terminal is freed when its TTY is closed.
+        // Observed by selector, not with a block: NotificationCenter removes a selector observer
+        // when the observer is freed, but keeps a block observer until it is removed explicitly,
+        // and a terminal is freed when its TTY is closed.
         NotificationCenter.default.addObserver(
             self, selector: #selector(accentChanged), name: Accent.didChange, object: nil)
         NotificationCenter.default.addObserver(
@@ -220,8 +219,8 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         }
     }
 
-    /// Called when bytes arrive from the far end, unless they are all BEL
-    /// characters.
+    /// Called on the main thread when output other than bells has been parsed.
+    /// Several chunks can share one call.
     var onOutput: (() -> Void)?
 
     /// Called when the far end rings the bell.
@@ -232,36 +231,14 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     /// about where the cursor is.
     var onTyping: (() -> Void)?
 
-    /// Feeds bytes from the transport into the terminal.
-    ///
-    /// The bytes are fed in 1 KB chunks, so that a large burst is parsed a
-    /// piece at a time rather than all at once before anything is drawn.
-    func receive(_ bytes: ArraySlice<UInt8>) {
-        // Bytes that are all BEL only ring the bell, so they don't count as output: a TTY's status
-        // shows a bell differently from output.
-        if bytes.contains(where: { $0 != 0x07 }) {
+    /// Called on the main thread after output has been parsed; several chunks
+    /// can share one call. `hadOutput` is false when it was only bells.
+    func outputParsed(hadOutput: Bool) {
+        if hadOutput {
             onOutput?()
         }
-
-        // Output moves the view, so a snap to a row in progress goes there at once.
-        finishSnap()
-        let anchor = scrolledTo()
-
-        // SwiftTerm scrolls the view as it takes the output in, which is not the user scrolling.
-        moving = true
-        let blocksize = 1024
-        var next = bytes.startIndex
-        while next < bytes.endIndex {
-            let end = min(next + blocksize, bytes.endIndex)
-            feed(byteArray: bytes[next..<end])
-            next = end
-        }
-        moving = false
-
-        if let anchor {
-            hold(at: anchor)
-        }
-        // The output may have cleared the screen or the scrollback, leaving nothing to hold on to.
+        // Output can change whether SwiftTerm follows: it may clear the scrollback, or switch to or
+        // from the alternate screen.
         isFollowing = swiftTermFollows
     }
 
@@ -271,15 +248,9 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     /// terminal as the object.
     static let followingDidChange = Notification.Name("io.ara.tctish.terminalFollowingDidChange")
 
-    /// Whether new output scrolls the terminal to show it. Cleared when the
-    /// user scrolls up from the bottom, and set again when they scroll back
-    /// down to it, type, or `follow()` is called. Kept in step with SwiftTerm
-    /// when something else moves the view, such as the find bar.
-    ///
-    /// SwiftTerm stops following only when a finger drags the view, not when a
-    /// trackpad or a mouse wheel scrolls it. So once such a scroll comes to
-    /// rest, SwiftTerm is told where it ended, and while this is clear the
-    /// terminal is put back where it was after each piece of output.
+    /// Whether new output scrolls the terminal to show it. A copy of
+    /// SwiftTerm's state, updated as the view moves and as output arrives, and
+    /// set directly by `follow()` and `scrollToTop()`.
     private(set) var isFollowing = true {
         didSet {
             guard isFollowing != oldValue else { return }
@@ -288,92 +259,39 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         }
     }
 
-    /// Set while output or this class moves the view, so that it isn't taken
-    /// for the user scrolling.
-    private var moving = false
-
     /// Whether SwiftTerm's initializer has finished. Until then there is no
     /// terminal to ask for rows, yet UIKit can already move the view, from
     /// `UIScrollView.init(frame:)`, which that initializer calls.
     private var isMade = false
 
-    /// Tells SwiftTerm where a scroll it didn't follow came to rest; see
-    /// `settle()`.
-    private var settling: DispatchWorkItem?
-
     /// SwiftTerm moves the view while it holds the terminal's lock, which isn't
     /// recursive, so nothing that runs from here may ask the terminal anything:
-    /// see `rowHeight` and `followSwiftTermSoon()`.
+    /// see `followSwiftTermSoon()`.
     public override var contentOffset: CGPoint {
         didSet {
-            if !moving, contentOffset.y != oldValue.y {
-                scrollingDown = contentOffset.y > oldValue.y
-            }
-            noteScroll()
+            followSwiftTermSoon()
             placeEdgeFades()
         }
     }
-
-    /// Whether the view last moved down, toward newer output, rather than up;
-    /// the way a scroll that comes to rest between rows snaps.
-    private var scrollingDown = false
 
     /// Scrolls to the oldest line kept, and stops following new output, as
     /// scrolling there by hand would. A program on the alternate screen has no
     /// scrollback to scroll through.
     func scrollToTop() {
         guard !isOnAlternateScreen, canScroll else { return }
-        settling?.cancel()
-        settling = nil
-        cancelSnap()
         isFollowing = false
-
-        moving = true
         scrollTo(row: 0)
-        moving = false
     }
 
     /// Scrolls to the bottom, and follows new output from there.
     func follow() {
-        settling?.cancel()
-        settling = nil
-        cancelSnap()
         isFollowing = true
-
-        moving = true
         scrollTo(row: Int.max)
-        moving = false
-    }
-
-    /// The height of a row, as of when the font was last set or the view last
-    /// laid out.
-    ///
-    /// Stored, not asked for as the view moves: SwiftTerm can move the view
-    /// while it holds the terminal's lock; see `contentOffset`.
-    private var rowHeight: CGFloat = 0
-
-    /// Sets `rowHeight` from the frame that fits the terminal exactly.
-    private func measureRow() {
-        guard isMade else { return }
-        let rows = terminalDimensions.rows
-        rowHeight = rows > 0 ? getOptimalFrameSize().height / CGFloat(rows) : 0
-    }
-
-    /// The row at the top of the screen, rounded as SwiftTerm rounds it: a
-    /// pixel up, so that floating-point error can't make it the row above.
-    /// While the view is pulled down past the top, in a bounce, this is row 0.
-    private var topRow: Int {
-        max(0, Int(((contentOffset.y + pixel) / rowHeight).rounded(.down)))
     }
 
     /// A pixel, in points.
     private var pixel: CGFloat {
         1 / max(traitCollection.displayScale, 1)
-    }
-
-    private var isAtBottom: Bool {
-        let bottom = max(0, contentSize.height - bounds.height + adjustedContentInset.bottom)
-        return contentOffset.y >= bottom - rowHeight / 2
     }
 
     /// Whether SwiftTerm is following new output: the screen can't scroll, or
@@ -388,151 +306,28 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         terminalInputStateSnapshot()?.isAlternateBuffer ?? false
     }
 
-    private var userIsScrolling: Bool {
-        let state = panGestureRecognizer.state
-        return state == .began || state == .changed || isDecelerating
-    }
-
-    /// Follows or stops following as the view moves. The user scrolls with the
-    /// pan gesture (a finger, a trackpad or a mouse wheel) or a flick's
-    /// momentum. Anything else goes through SwiftTerm: the find bar, a
-    /// selection dragged past the edge, or SwiftTerm itself. SwiftTerm can hold
-    /// the terminal's lock while it moves the view, so for those moves the
-    /// check is left to the main queue.
-    private func noteScroll() {
-        guard isMade, !moving, rowHeight > 0 else { return }
-        // Whoever moved the view, a snap to a row no longer has the last word on where it goes.
-        cancelSnap()
-        guard userIsScrolling else {
-            followSwiftTermSoon()
-            return
-        }
-
-        isFollowing = isAtBottom
-        if !isFollowing, !isTracking {
-            settleSoon()
-        }
-    }
-
     /// Whether `followSwiftTermSoon()` has a check waiting on the main queue.
     private var checkingFollow = false
 
-    /// Matches `isFollowing` to SwiftTerm on the main queue, unless the user is
-    /// scrolling or a scroll is settling by the time it runs.
+    /// Updates `isFollowing` from SwiftTerm on the next turn of the main queue,
+    /// when SwiftTerm no longer holds the terminal's lock. Called as the view
+    /// moves: SwiftTerm stops following when the user scrolls up from the
+    /// bottom, and follows again once back there.
     private func followSwiftTermSoon() {
-        guard !checkingFollow else { return }
+        guard isMade, !checkingFollow else { return }
         checkingFollow = true
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             checkingFollow = false
-            guard settling == nil, !userIsScrolling else { return }
             isFollowing = swiftTermFollows
         }
-    }
-
-    private func settleSoon() {
-        settling?.cancel()
-        let settling = DispatchWorkItem { [weak self] in self?.settle() }
-        self.settling = settling
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: settling)
-    }
-
-    /// Once a scroll that SwiftTerm didn't follow has come to rest, tells it
-    /// the row now at the top, so that it stays there. SwiftTerm keeps to whole
-    /// rows, so the view first glides on to the next whole row the way it was
-    /// going; see `snap`.
-    private func settle() {
-        settling = nil
-        guard !userIsScrolling else {
-            settleSoon()
-            return
-        }
-        guard !isFollowing, rowHeight > 0 else { return }
-
-        let height = rowHeight
-        let rows = contentOffset.y / height
-        let row = Int(
-            scrollingDown
-                ? (rows - pixel / height).rounded(.up) : (rows + pixel / height).rounded(.down))
-        let bottom = max(0, contentSize.height - bounds.height + adjustedContentInset.bottom)
-        let target = min(CGFloat(row) * height, bottom)
-
-        guard abs(target - contentOffset.y) >= pixel else {
-            rest(at: row)
-            return
-        }
-        cancelSnap()
-        snap = Snap(
-            row: row, from: contentOffset.y, to: target, start: CACurrentMediaTime(),
-            link: CADisplayLink(target: self, selector: #selector(stepSnap)))
-        snap?.link.add(to: .main, forMode: .common)
-    }
-
-    /// A glide to a whole row, at the end of a scroll that came to rest between
-    /// two. The view moves a frame at a time, as it does under a finger, since
-    /// SwiftTerm draws what's on screen afresh as the view moves.
-    private struct Snap {
-        var row: Int
-        var from: CGFloat
-        var to: CGFloat
-        var start: CFTimeInterval
-        var link: CADisplayLink
-    }
-
-    private var snap: Snap?
-
-    /// How long a snap to a row takes.
-    private static let snapDuration: CFTimeInterval = 0.2
-
-    @objc private func stepSnap() {
-        guard let snap else { return }
-        // A finger on the screen takes the view where it is. If it only taps, the view settles
-        // again from there.
-        guard !isTracking else {
-            cancelSnap()
-            settleSoon()
-            return
-        }
-        let progress = min((CACurrentMediaTime() - snap.start) / Self.snapDuration, 1)
-        // Easing out, as a scroll slows to a stop.
-        let eased = 1 - pow(1 - progress, 3)
-
-        moving = true
-        contentOffset.y = snap.from + (snap.to - snap.from) * eased
-        moving = false
-
-        if progress >= 1 {
-            finishSnap()
-        }
-    }
-
-    /// Ends a snap in progress where it was going.
-    private func finishSnap() {
-        guard let snap else { return }
-        cancelSnap()
-        rest(at: snap.row)
-    }
-
-    /// Stops a snap in progress where it is, for something else moving the
-    /// view.
-    private func cancelSnap() {
-        snap?.link.invalidate()
-        snap = nil
-    }
-
-    /// Tells SwiftTerm `row` is at the top, which puts the view there.
-    private func rest(at row: Int) {
-        moving = true
-        scrollTo(row: row, notifyAccessibility: false)
-        moving = false
-        isFollowing = swiftTermFollows
     }
 
     // MARK: Fading the edges
 
     /// Gradients at the top and bottom edges, a row high, that rows run under
-    /// as they leave the screen, so that they fade into the background rather
-    /// than being cut off. The screen is rarely a whole number of rows high, so
+    /// as they leave the screen, so that they fade into the background instead
+    /// of being cut off. The screen is rarely a whole number of rows high, so
     /// one row or the other is usually only partly on it.
     ///
     /// The bottom one shows while the terminal isn't following new output, and
@@ -551,7 +346,6 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
 
     public override func layoutSubviews() {
         super.layoutSubviews()
-        measureRow()
         placeEdgeFades()
     }
 
@@ -565,7 +359,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
             layer.addSublayer(bottomFade)
         }
 
-        let height = rowHeight
+        let height = cellSize.height
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -575,40 +369,6 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         topFade.opacity = bounds.minY > pixel ? 1 : 0
         bottomFade.opacity = isFollowing ? 0 : 1
         CATransaction.commit()
-    }
-
-    /// The row at the top of the screen, counted from the first line ever
-    /// written so that it stays put as scrollback is trimmed, or nil if the
-    /// terminal is following. A program using the alternate screen, as a
-    /// full-screen one does, has no scrollback, so the terminal follows it.
-    private func scrolledTo() -> Int? {
-        if isOnAlternateScreen {
-            isFollowing = true
-        }
-        guard !isFollowing, rowHeight > 0, let trimmed = trimmedLines() else { return nil }
-        return topRow + trimmed
-    }
-
-    /// Puts the terminal back with `anchor`, from `scrolledTo()`, at the top of
-    /// the screen, if output moved it.
-    private func hold(at anchor: Int) {
-        guard !isOnAlternateScreen, rowHeight > 0, let trimmed = trimmedLines() else { return }
-        let row = max(0, anchor - trimmed)
-        guard terminalStateSnapshot().viewportRow != row || topRow != row else { return }
-
-        moving = true
-        scrollTo(row: row, notifyAccessibility: false)
-        moving = false
-    }
-
-    /// The number of lines trimmed from the scrollback so far, which is the
-    /// number of the oldest line kept.
-    ///
-    /// The content snapshot numbers rows from the first line ever written.
-    /// Asked for no rows, it copies nothing, but its range still starts at the
-    /// oldest line kept.
-    private func trimmedLines() -> Int? {
-        terminalContentSnapshot(region: .rows(0..<0))?.capturedRange.lowerBound
     }
 
     /// Callback notified each time a setting is changed.
@@ -637,7 +397,6 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
                 normal: faces.regular, bold: faces.bold, italic: faces.italic,
                 boldItalic: faces.boldItalic)
         }
-        measureRow()
 
         applyScrollback()
     }
@@ -659,8 +418,8 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         }
     }
 
-    /// The scrollback last given to SwiftTerm, in rows of the terminal's width
-    /// rather than standard lines.
+    /// The scrollback last given to SwiftTerm, in rows of the terminal's width,
+    /// not standard lines.
     private var appliedScrollback: Int?
 
     /// Sets SwiftTerm's scrollback from the setting, which is in standard
@@ -685,229 +444,39 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     /// The width, in columns, of a standard line of scrollback.
     static let standardColumns = 80
 
-    // MARK: Trackpad and mouse
-
-    /// Handles the trackpad and mouse gestures' questions and the right-click
-    /// menu's.
-    private let pointer = PointerSupport()
-
-    /// The menu a right-click brings up.
-    private var editMenu: UIEditMenuInteraction?
-
-    /// Adds what SwiftTerm leaves out for a trackpad or mouse: selecting by
-    /// dragging, and a right-click for the Copy and Paste menu.
-    private func setUpPointer() {
-        let drag = UIPanGestureRecognizer(target: self, action: #selector(pointerDragged(_:)))
-        drag.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)]
-        drag.allowedScrollTypesMask = []
-        pointer.terminal = self
-        drag.delegate = pointer
-        addGestureRecognizer(drag)
-        pointerDrag = drag
-
-        panGestureRecognizer.allowedTouchTypes = [
-            NSNumber(value: UITouch.TouchType.direct.rawValue),
-            NSNumber(value: UITouch.TouchType.pencil.rawValue),
-        ]
-
-        let secondary = UITapGestureRecognizer(
-            target: self, action: #selector(secondaryClicked(_:)))
-        secondary.buttonMaskRequired = .secondary
-        secondary.allowedTouchTypes = [
-            NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)
-        ]
-        addGestureRecognizer(secondary)
-
-        let menu = UIEditMenuInteraction(delegate: pointer)
-        addInteraction(menu)
-        editMenu = menu
-    }
-
-    /// The gesture that selects with a pointer drag. SwiftTerm's drag gestures
-    /// wait for it to fail.
-    private weak var pointerDrag: UIPanGestureRecognizer?
-
-    /// Where a pointer drag that selects began, in buffer coordinates.
-    private var dragStart = Position(col: 0, row: 0)
-
-    /// Whether SwiftTerm's current drag is the pointer's.
-    private var swiftTermHasPointerDrag = false
-
-    @objc private func pointerDragged(_ drag: UIPanGestureRecognizer) {
-        let position = bufferPosition(at: drag.location(in: self))
-
-        switch drag.state {
-        case .began:
-            _ = becomeFirstResponder()
-            dragStart = position
-            setSelectionRange(start: position, end: position)
-        case .changed:
-            setSelectionRange(start: dragStart, end: position)
-        case .ended, .cancelled:
-            // A press that barely moved leaves a selection of nothing, which Copy would then put on
-            // the clipboard in place of whatever was there.
-            if (getSelection() ?? "").isEmpty {
-                clearSelection()
-            } else {
-                // SwiftTerm makes a selection's handles draggable only for selections it makes,
-                // such as with Select All. So the drag selects all, then puts back the range it
-                // selected.
-                selectAll(nil)
-                setSelectionRange(start: dragStart, end: position)
-            }
-        default:
-            break
-        }
-    }
-
-    /// Whether `recognizer` is one of SwiftTerm's drag gestures that accept the
-    /// pointer.
-    fileprivate func isSwiftTermPointerDrag(_ recognizer: UIGestureRecognizer) -> Bool {
-        let pointerTouch = NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)
-        return recognizer !== pointerDrag && recognizer.view === self
-            && recognizer is UIPanGestureRecognizer
-            && recognizer.allowedTouchTypes.contains(pointerTouch)
-    }
-
-    /// Makes SwiftTerm's drag gestures call `swiftTermDragged(_:)` too. While
-    /// there is a selection, pointer drags go to them.
-    fileprivate func watchSwiftTermDrags() {
-        for drag in gestureRecognizers ?? [] where isSwiftTermPointerDrag(drag) {
-            // UIKit adds a target and action only once, however often it is asked to.
-            drag.addTarget(self, action: #selector(swiftTermDragged(_:)))
-        }
-    }
-
-    /// When a drag of a selection's handle ends, SwiftTerm shows the bar of
-    /// buttons that a long press brings up. That suits a finger, but the
-    /// pointer brings up its menu with a right-click, so after a pointer drag
-    /// the bar is hidden again.
-    @objc private func swiftTermDragged(_ drag: UIPanGestureRecognizer) {
-        switch drag.state {
-        case .began:
-            // SwiftTerm gets a pointer drag only after `pointerDrag` has failed, and a finger's
-            // drag never reaches `pointerDrag`.
-            swiftTermHasPointerDrag = pointerDrag?.state == .failed
-        case .ended where swiftTermHasPointerDrag:
-            // SwiftTerm may handle the end of the drag after this does, so the bar is hidden on the
-            // main queue, after SwiftTerm has shown it.
-            DispatchQueue.main.async { UIMenuController.shared.hideMenu() }
-        default:
-            break
-        }
-    }
-
-    /// Copy while there's a selection, Paste, and Select All, as the pointer's
-    /// context menu rather than the bar of buttons a long press gives.
-    ///
-    /// Through `UIEditMenuInteraction`, which shows itself as a context menu
-    /// when a secondary click brings it up. SwiftTerm's menu is still the older
-    /// `UIMenuController`, which only ever draws the touch bar.
-    @objc private func secondaryClicked(_ click: UITapGestureRecognizer) {
-        _ = becomeFirstResponder()
-        editMenu?.presentEditMenu(
-            with: UIEditMenuConfiguration(identifier: nil, sourcePoint: click.location(in: self)))
-    }
-
     /// Copies the selection without the spaces at the ends of its lines.
     public override func copy(_ sender: Any?) {
+        // Decided by the text alone. Output parsed off the main thread can clear the selection at
+        // any moment, so a separate check for a selection could disagree with the text.
         let text = getSelection() ?? ""
-        guard hasActiveSelection, !text.isEmpty else {
+        guard !text.isEmpty else {
             clearSelection()
             return
         }
         super.copy(sender)
 
         UIPasteboard.general.string = text.components(separatedBy: "\n")
-            .map { line in
-                var line = Substring(line)
-                while let last = line.last, last == " " || last == "\t" {
-                    line.removeLast()
-                }
-                return String(line)
-            }
-            .joined(separator: "\n")
+            .map(Self.trimmingEnd).joined(separator: "\n")
+    }
+
+    /// `line` without the spaces and tabs at its end.
+    private static func trimmingEnd(_ line: String) -> String {
+        var line = Substring(line)
+        while let last = line.last, last == " " || last == "\t" {
+            line.removeLast()
+        }
+        return String(line)
     }
 
     /// All of the terminal's text, from the oldest line kept: each line as it
     /// was written, however many rows it wrapped onto, without the blanks at
     /// its end or the empty rows after the last.
     var transcript: String {
-        // Copied 1,000 rows at a time: a copy holds every cell's text and attributes, which for a
-        // long scrollback is a lot of memory at once. Output is also fed on the main thread, so the
-        // rows don't move between chunks.
-        var lines: [String] = []
-        var next = trimmedLines() ?? 0
-        while let chunk = terminalContentSnapshot(region: .rows(next..<next + 1000)),
-            !chunk.rows.isEmpty
-        {
-            for row in chunk.rows {
-                let text = row.fullText
-                if row.isWrapped, !lines.isEmpty {
-                    lines[lines.count - 1] += text
-                } else {
-                    lines.append(text)
-                }
-            }
-            next = chunk.capturedRange.upperBound
+        var lines = lines().map(Self.trimmingEnd)
+        while lines.last?.isEmpty == true {
+            lines.removeLast()
         }
-
-        var trimmed = lines.map { line in
-            var line = Substring(line)
-            while let last = line.last, last == " " || last == "\t" {
-                line.removeLast()
-            }
-            return String(line)
-        }
-        while trimmed.last?.isEmpty == true {
-            trimmed.removeLast()
-        }
-        return trimmed.map { $0 + "\n" }.joined()
-    }
-
-    /// What the right-click menu offers.
-    fileprivate func editMenuActions() -> [UIMenuElement] {
-        var actions: [UIMenuElement] = []
-        if hasActiveSelection {
-            actions.append(
-                UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) {
-                    [weak self] _ in self?.copy(nil)
-                })
-        }
-        actions.append(
-            UIAction(title: "Paste", image: UIImage(systemName: "doc.on.clipboard")) {
-                [weak self] _ in self?.paste(nil)
-            })
-        actions.append(
-            UIAction(title: "Select All", image: UIImage(systemName: "selection.pin.in.out")) {
-                [weak self] _ in self?.selectAll(nil)
-            })
-        return actions
-    }
-
-    /// The cell under a point in the view, in buffer coordinates.
-    ///
-    /// The view scrolls, so a point in it is already a point in the whole
-    /// buffer. SwiftTerm keeps its cell size to itself, but gives it away as
-    /// the frame that would fit the terminal exactly.
-    private func bufferPosition(at point: CGPoint) -> Position {
-        let size = terminalDimensions
-        let fit = getOptimalFrameSize()
-        let width = fit.width / CGFloat(max(size.cols, 1))
-        let height = fit.height / CGFloat(max(size.rows, 1))
-        guard width > 0, height > 0 else { return Position(col: 0, row: 0) }
-
-        return Position(
-            col: min(max(0, Int(point.x / width)), size.cols - 1),
-            row: max(0, Int(point.y / height)))
-    }
-
-    func clear() {
-
-        /// Sequence used to clear our terminal.
-        let terminalClearSequence: ArraySlice<UInt8> = [27, 91, 72, 27, 91, 74]
-        self.feed(byteArray: terminalClearSequence)
-
+        return lines.map { $0 + "\n" }.joined()
     }
 
     // MARK: Theme
@@ -928,7 +497,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         layer.borderColor = background.cgColor
         layer.shadowColor = background.cgColor
 
-        // At once, as the background changes, rather than as Core Animation would fade them.
+        // At once, as the background changes, without Core Animation's fade.
         let clear = background.withAlphaComponent(0)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -957,10 +526,9 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         fatalError("init(coder:) has not been implemented")
     }
 
-    /// Callback that occurs when the terminal is scrolled. Can be used to save
-    /// the scrollback, if desired.
+    /// Callback that occurs when output scrolls the screen.
     public func scrolled(source: TerminalView, position: Double) {
-        // Nothing to do here, yet.
+        // `isFollowing` is updated from `contentOffset` and `outputParsed(hadOutput:)`.
     }
 
     /// Callback that occurs when a range of rows has been redrawn.
@@ -987,6 +555,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     /// Sends what was typed to the far end, through the transport.
     public func send(source: TerminalView, data: ArraySlice<UInt8>) {
         onTyping?()
+        dismissEditMenu()
         // Typing goes back to the bottom, to show what is typed and what it answers.
         if !isFollowing {
             follow()
@@ -1010,34 +579,30 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
         }
     }
 
-    /// Whether the program in the terminal has asked for Shift with the mouse
-    /// as well, with XTSHIFTESCAPE, rather than leaving Shift to select.
-    private(set) var programTakesShift = false
-
-    /// SwiftTerm calls this when a program changes how it uses the mouse,
-    /// XTSHIFTESCAPE included, as it parses the output and while it holds the
-    /// terminal's lock. So the setting is read from `source` here, and stored
-    /// on the main queue.
-    public nonisolated override func mouseModeChanged(source: Terminal) {
-        super.mouseModeChanged(source: source)
-        let takesShift = source.mouseShiftCapture
-        DispatchQueue.main.async { [weak self] in
-            self?.programTakesShift = takesShift
-        }
-    }
-
     /// Empties the terminal's screen and scrollback for a new session, forgets
     /// its working directory, and goes back to following new output. Fed as
     /// output, so the view redraws and drops its selection and search, but not
-    /// through `receive`, so it doesn't count as unseen output.
+    /// as output from the far end, so it doesn't count as unseen output.
+    ///
+    /// On a console, what the old session wrote and the app hasn't parsed yet
+    /// is thrown away first, so none of it lands in the emptied terminal.
     func resetForNewSession() {
         // CAN abandons an OSC or APC the old session left unfinished, where ESC would end it and
         // act on it; any other unfinished sequence ends at the ESC that follows, and only a DCS's
         // data is still acted on. Then leave the alternate screen, which a full reset (ESC c)
         // doesn't clear; then the full reset; then show the cursor, which SwiftTerm keeps hidden
         // across a reset.
-        feed(text: "\u{18}\u{1b}[?1049l\u{1b}c\u{1b}[?25h")
-        _cwd = nil
+        let reset = "\u{18}\u{1b}[?1049l\u{1b}c\u{1b}[?25h"
+        let feeder = feedSender
+        let feedReset = { feeder.feed(text: reset) }
+        if let transport {
+            transport.discardPending(then: feedReset)
+        } else {
+            feedReset()
+        }
+        // Queued behind any directory update (OSC 7) the old session already posted to the main
+        // queue, so that it can't bring the old directory back.
+        DispatchQueue.main.async { [weak self] in self?.cwd = nil }
         follow()
     }
 
@@ -1045,7 +610,7 @@ public class TctiTermView: TerminalView, TerminalViewDelegate {
     /// working directory. The default tctiSH setup's shell integration
     /// generates OSC-7 each time the prompt is issue.
     public func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
-        _cwd = directory
+        cwd = directory
     }
 
     /// Callback that occurs when the guest copies with OSC 52, as tmux, vim and
@@ -1116,50 +681,5 @@ extension TerminalContentRowSnapshot {
     /// row.
     var fullText: String {
         characters.map(\.text).joined()
-    }
-}
-
-/// The terminal's trackpad and mouse handling, as delegate: kept apart from the
-/// view so as not to collide with what SwiftTerm already answers there.
-///
-/// A pointer drag is left to the program in the terminal when it has asked for
-/// the mouse, as htop and vim with `mouse=a` do, unless Shift is held: the
-/// usual way past a program's mouse handling, and SwiftTerm's. A program can
-/// ask for Shift as well, with XTSHIFTESCAPE, and then Shift is the program's
-/// too. While there is a selection, a pointer drag is SwiftTerm's, which moves
-/// one of its handles; a click clears it, so that a drag can start another.
-private final class PointerSupport: NSObject, UIGestureRecognizerDelegate,
-    UIEditMenuInteractionDelegate
-{
-    weak var terminal: TctiTermView?
-
-    func editMenuInteraction(
-        _ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration,
-        suggestedActions: [UIMenuElement]
-    ) -> UIMenu? {
-        terminal.map { UIMenu(children: $0.editMenuActions()) }
-    }
-
-    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        guard let terminal else { return true }
-        if terminal.hasActiveSelection {
-            terminal.watchSwiftTermDrags()
-            return false
-        }
-        guard terminal.allowMouseReporting,
-            let modes = terminal.terminalInputStateSnapshot(), modes.mouseMode != .off
-        else { return true }
-        return gestureRecognizer.modifierFlags.contains(.shift) && !terminal.programTakesShift
-    }
-
-    /// SwiftTerm's drags wait to see whether the pointer drag starts. While a
-    /// program has asked for the mouse, or has the alternate screen up,
-    /// SwiftTerm takes a drag as soon as it moves, to scroll the program, so it
-    /// would otherwise take the drags meant to select.
-    func gestureRecognizer(
-        _ gestureRecognizer: UIGestureRecognizer,
-        shouldBeRequiredToFailBy other: UIGestureRecognizer
-    ) -> Bool {
-        terminal?.isSwiftTermPointerDrag(other) == true
     }
 }

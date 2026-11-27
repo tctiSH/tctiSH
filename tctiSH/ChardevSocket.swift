@@ -11,14 +11,25 @@ import Foundation
 /// devices: a console, serial port, the user's monitor, or guest agent's port.
 ///
 /// QEMU runs in this process on a separate thread, and listens only once it has
-/// been started. Use it from the main thread, which is also where what arrives
-/// is delivered. Writes go out in order on a separate queue, because one can
+/// been started. Use it from the main thread. What arrives goes where
+/// `Delivery` says. Writes go out in order on a separate queue, because one can
 /// wait for a while when the guest isn't reading.
-///
-/// A connection can also throw away what arrives, reading it on a separate
-/// queue, for a device whose output the app takes from elsewhere. Reading it
-/// all the same matters: a device QEMU can't write to holds the guest up.
 final class ChardevSocket {
+
+    /// Where what arrives goes.
+    enum Delivery {
+        /// To `onReceive`, on the main queue.
+        case main
+
+        /// To a terminal, read and parsed on its output's queue; see
+        /// `TerminalOutput`.
+        case terminal(TerminalOutput)
+
+        /// Nowhere: it's read on a separate queue and thrown away, for a device
+        /// whose output the app takes from elsewhere. Reading it all the same
+        /// matters: a device QEMU can't write to holds the guest up.
+        case discarded
+    }
 
     /// How often to try connecting, until a connection succeeds.
     private static let retryInterval: TimeInterval = 0.25
@@ -35,7 +46,7 @@ final class ChardevSocket {
     /// The name the connection goes by in the log.
     let name: String
 
-    /// Called with each run of bytes that arrives.
+    /// Called with each run of bytes that arrives, for `Delivery.main`.
     var onReceive: ((ArraySlice<UInt8>) -> Void)?
 
     /// Called each time a connection is made.
@@ -53,22 +64,27 @@ final class ChardevSocket {
     private var failedAttempts = 0
     private let writeQueue: DispatchQueue
 
-    /// Whether what arrives is thrown away rather than delivered.
-    private let discardsOutput: Bool
+    private let delivery: Delivery
 
-    /// Where what arrives is read: the main queue, or a separate queue when it
-    /// is thrown away, so that the main thread being busy never holds the guest
-    /// up.
+    /// The queue reads happen on: the main queue for `.main`, the output's
+    /// queue for `.terminal`, and a separate one for `.discarded`. Nothing on a
+    /// queue other than main ever waits for the main thread, so the main thread
+    /// can wait for those: `discardPending(then:)` relies on it.
     private let readQueue: DispatchQueue
 
-    init(path: String, name: String, discardingOutput: Bool = false) {
+    init(path: String, name: String, delivery: Delivery = .main) {
         self.path = path
         self.name = name
-        discardsOutput = discardingOutput
+        self.delivery = delivery
         writeQueue = DispatchQueue(label: "io.ara.tctish.chardev.\(name)", qos: .userInteractive)
-        readQueue =
-            discardingOutput
-            ? DispatchQueue(label: "io.ara.tctish.chardev.\(name).read", qos: .utility) : .main
+        switch delivery {
+        case .main:
+            readQueue = .main
+        case .terminal(let output):
+            readQueue = output.queue
+        case .discarded:
+            readQueue = DispatchQueue(label: "io.ara.tctish.chardev.\(name).read", qos: .utility)
+        }
     }
 
     /// Starts trying to connect, unless already connected or trying. The first
@@ -123,21 +139,28 @@ final class ChardevSocket {
         }
     }
 
-    /// Throws away what has arrived and not been read yet, for a console whose
-    /// old output no longer belongs on screen. Call it on the main queue, where
-    /// what arrives is delivered, so that none is delivered in the middle of
-    /// this. A connection that throws away what arrives has nothing pending,
-    /// and nothing is done for it. The socket doesn't block, so this stops once
-    /// nothing is left.
-    func discardPending() {
-        guard !discardsOutput else { return }
-        dispatchPrecondition(condition: .onQueue(readQueue))
-        guard let connection else { return }
-        var buffer = [UInt8](repeating: 0, count: Self.readSize)
-        var count: Int
-        repeat {
-            count = buffer.withUnsafeMutableBytes { read(connection.fd, $0.baseAddress, $0.count) }
-        } while count > 0 || (count < 0 && errno == EINTR)
+    /// Throws away everything that has arrived but not been read, then calls
+    /// `then`, both on `readQueue` so that nothing is read in between, and
+    /// returns once both are done. For a console whose old output no longer
+    /// belongs on screen.
+    func discardPending(then: () -> Void) {
+        // A sync onto `readQueue` from `readQueue` itself never returns. For `.main` delivery that
+        // is the main queue.
+        dispatchPrecondition(condition: .notOnQueue(readQueue))
+        let connection = connection
+        func discard() {
+            if let connection {
+                var buffer = [UInt8](repeating: 0, count: Self.readSize)
+                var count: Int
+                repeat {
+                    count = buffer.withUnsafeMutableBytes {
+                        read(connection.fd, $0.baseAddress, $0.count)
+                    }
+                } while count > 0 || (count < 0 && errno == EINTR)
+            }
+            then()
+        }
+        readQueue.sync(execute: discard)
     }
 
     /// Makes one attempt to connect, and says whether it succeeded.
@@ -175,7 +198,8 @@ final class ChardevSocket {
     }
 
     /// Reads what has arrived on `connection`. Runs on `readQueue`, and so
-    /// touches nothing but its arguments unless that is the main queue.
+    /// touches nothing but its arguments and constants unless that is the main
+    /// queue.
     private func readAvailable(
         from connection: SocketConnection, watchedBy source: DispatchSourceRead
     ) {
@@ -184,8 +208,13 @@ final class ChardevSocket {
         let error = errno
 
         if count > 0 {
-            if !discardsOutput {
+            switch delivery {
+            case .main:
                 onReceive?(buffer[..<count])
+            case .terminal(let output):
+                output.deliver(buffer[..<count])
+            case .discarded:
+                break
             }
             return
         }
@@ -261,7 +290,8 @@ final class SocketConnection {
         }
         guard connected == 0 else { return .failed(errno) }
 
-        // Reads come from the main thread, which must never wait on the guest.
+        // Reads happen on the main thread or on a queue the main thread can wait for, so neither
+        // may block waiting for the guest.
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
         return .connected(connection)
     }

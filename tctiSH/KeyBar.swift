@@ -1335,28 +1335,13 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
     }
 
     private func toggle(_ modifier: KeyModifiers) {
-        guard let terminal else { return }
-
-        switch modifier {
-        case .shift: terminal.shiftModifier.toggle()
-        case .alt: terminal.metaModifier.toggle()
-        case .ctrl: terminal.controlModifier.toggle()
-        case .superKey: terminal.superModifier.toggle()
-        default: break
-        }
+        terminal?.barModifiers.formSymmetricDifference(modifier)
         refreshModifiers()
     }
 
     private func isOn(_ key: BarKey) -> Bool {
-        guard let terminal else { return false }
-
-        switch key {
-        case .shift: return terminal.shiftModifier
-        case .alt: return terminal.metaModifier
-        case .ctrl: return terminal.controlModifier
-        case .superKey: return terminal.superModifier
-        default: return false
-        }
+        guard let terminal, let modifier = key.modifier else { return false }
+        return terminal.barModifiers.contains(modifier)
     }
 
     /// Brings the modifier buttons, Tab, and More's ticks into line with the
@@ -1524,14 +1509,7 @@ final class KeyBar: UIView, UIInputViewAudioFeedback {
 
     /// Turns off one of the bar's modifiers, if it's on.
     private func disarm(_ modifier: KeyModifiers) {
-        guard let terminal else { return }
-
-        switch modifier {
-        case .shift: terminal.shiftModifier = false
-        case .alt: terminal.metaModifier = false
-        case .ctrl: terminal.controlModifier = false
-        default: terminal.superModifier = false
-        }
+        terminal?.barModifiers.remove(modifier)
     }
 
     /// Puts the bar on the terminal, or takes it off while a hardware keyboard
